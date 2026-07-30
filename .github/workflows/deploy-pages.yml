@@ -1,0 +1,89 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+# Cho phép job này publish lên Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Chỉ chạy một lượt deploy tại một thời điểm; huỷ lượt cũ nếu có commit mới
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Bắt lỗi cú pháp trước khi publish, để không đẩy lên một trang bị vỡ
+      - name: Kiểm tra cú pháp mọi file JS
+        run: |
+          set -e
+          find src web bin -name '*.js' -print0 | xargs -0 -n1 node --check
+          echo "OK: toàn bộ file JS parse được"
+
+      - name: Kiểm tra JSON cấu hình và model
+        run: |
+          set -e
+          for f in config/strategy.json models/index.json; do
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8')); console.log('OK $f')"
+          done
+
+      # models/index.json phải khớp với các file model thực có, nếu không
+      # browser sẽ xin một model không tồn tại (hoặc bỏ sót model đã commit).
+      - name: Kiểm tra models/index.json còn khớp
+        run: |
+          set -e
+          node bin/build-model-index.js
+          if ! git diff --quiet -- models/index.json; then
+            echo "::error::models/index.json không khớp với thư mục models/."
+            echo "Chạy 'npm run models:index' rồi commit lại."
+            git diff -- models/index.json
+            exit 1
+          fi
+          echo "OK: models/index.json khớp"
+
+      - name: Kiểm tra các module lõi không phụ thuộc Node
+        run: |
+          set -e
+          # Những file này được browser import trực tiếp nên không được dùng node:*
+          for f in src/indicators/index.js src/features.js src/ml/gbdt.js src/ml/dataset.js \
+                   src/data/binance.js src/analysis/engine.js src/ml/train.js src/backtest.js; do
+            if grep -qE "^import .*from '(node:|@)" "$f"; then
+              echo "::error file=$f::$f import module chỉ có ở Node — bản web sẽ vỡ"
+              grep -nE "^import .*from '(node:|@)" "$f"
+              exit 1
+            fi
+          done
+          echo "OK: các module lõi chạy được trong browser"
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      # Không có bước build: trang là HTML/JS tĩnh, đẩy nguyên repo lên.
+      # .nojekyll đã có trong repo nên GitHub không xử lý qua Jekyll.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

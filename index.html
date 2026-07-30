@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI phân tích kỹ thuật crypto</title>
+<meta name="description" content="Phân tích kỹ thuật crypto bằng chỉ báo, model học máy và Claude. Chạy hoàn toàn trong trình duyệt.">
+<link rel="stylesheet" href="./web/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📈</text></svg>">
+</head>
+<body>
+
+<header>
+  <h1>AI phân tích kỹ thuật</h1>
+  <div class="controls">
+    <input type="text" id="symbol" value="BTC" placeholder="BTC" aria-label="Mã token" autocomplete="off">
+    <select id="interval" aria-label="Khung thời gian"></select>
+    <button class="primary" id="btn-analyze">Phân tích</button>
+    <button id="btn-ai">Phân tích bằng AI</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="controls">
+    <span id="status" class="small muted" role="status" aria-live="polite"></span>
+    <button id="btn-theme" aria-label="Đổi sáng/tối" title="Đổi sáng/tối">◐</button>
+  </div>
+</header>
+
+<main>
+  <div id="banner" class="banner hidden"></div>
+
+  <section class="card">
+    <div class="hero">
+      <div>
+        <div class="signal-label" id="signal-label">
+          <span class="signal-dot" id="signal-dot" style="background: var(--text-muted)"></span>
+          <span>Đang tải…</span>
+        </div>
+        <div class="price-line" id="price-line">—</div>
+        <div class="price-sub" id="price-sub">Đang lấy dữ liệu từ Binance</div>
+      </div>
+      <div>
+        <div class="score-row">
+          <span class="score-value" id="score-value">—</span>
+          <span class="score-max">/ 100 điểm tổng hợp</span>
+        </div>
+        <div class="chart-wrap">
+          <svg class="chart" id="score-bar" viewBox="0 0 600 62" role="img"
+               aria-label="Thang điểm tổng hợp từ -100 (giảm mạnh) đến +100 (tăng mạnh)"></svg>
+        </div>
+        <div class="legend" id="score-parts"></div>
+      </div>
+    </div>
+    <ul class="notes" id="conflicts"></ul>
+  </section>
+
+  <div class="chart-row">
+    <section class="card">
+      <h2>Giá &amp; đường trung bình</h2>
+      <p class="sub" id="price-chart-sub">—</p>
+      <div class="legend" id="price-legend"></div>
+      <div class="chart-wrap" id="price-wrap">
+        <svg class="chart" id="price-chart" viewBox="0 0 900 460" role="img"
+             aria-label="Biểu đồ nến, đường EMA, dải Bollinger và vùng hỗ trợ/kháng cự"></svg>
+        <div class="tooltip" id="price-tip" role="tooltip"></div>
+      </div>
+      <details style="margin-top:10px">
+        <summary class="small muted" style="cursor:pointer">Xem dạng bảng (10 nến gần nhất)</summary>
+        <div id="candle-table" style="margin-top:8px"></div>
+      </details>
+    </section>
+
+    <div style="display:grid; gap:14px; align-content:start; min-width:0">
+      <section class="card">
+        <h2>Chỉ báo động lượng</h2>
+        <p class="sub">RSI (vùng 30/70) và MACD histogram</p>
+        <div class="legend" id="osc-legend"></div>
+        <div class="chart-wrap" id="rsi-wrap">
+          <svg class="chart" id="rsi-chart" viewBox="0 0 420 130" role="img"
+               aria-label="Chỉ số RSI theo thời gian với vùng quá mua 70 và quá bán 30"></svg>
+          <div class="tooltip" id="rsi-tip" role="tooltip"></div>
+        </div>
+        <div class="chart-wrap" id="macd-wrap" style="margin-top:6px">
+          <svg class="chart" id="macd-chart" viewBox="0 0 420 120" role="img"
+               aria-label="MACD histogram và đường MACD theo thời gian"></svg>
+          <div class="tooltip" id="macd-tip" role="tooltip"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Model học máy</h2>
+        <p class="sub" id="ml-sub">—</p>
+        <div id="ml-body" class="small muted">Đang tải…</div>
+      </section>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <section class="card">
+      <h2>Đóng góp của từng nhóm tín hiệu</h2>
+      <p class="sub">Điểm âm nghiêng về giảm, điểm dương nghiêng về tăng. Trọng số sửa được ở tab Cấu hình.</p>
+      <div class="chart-wrap" id="breakdown-wrap">
+        <svg class="chart" id="breakdown-chart" viewBox="0 0 560 300" role="img"
+             aria-label="Biểu đồ cột ngang: đóng góp của từng nhóm tín hiệu vào điểm tổng hợp"></svg>
+        <div class="tooltip" id="breakdown-tip" role="tooltip"></div>
+      </div>
+      <div id="breakdown-reasons" style="margin-top:10px"></div>
+    </section>
+
+    <div style="display:grid; gap:14px; align-content:start; min-width:0">
+      <section class="card">
+        <h2>Vùng giá quan trọng</h2>
+        <p class="sub" id="levels-sub">—</p>
+        <div id="levels-body" class="small muted">Đang tải…</div>
+      </section>
+      <section class="card">
+        <h2>Số liệu chỉ báo</h2>
+        <div id="indicators-body" class="small muted">Đang tải…</div>
+      </section>
+    </div>
+  </div>
+
+  <section class="card">
+    <div class="tabs" role="tablist" style="margin-bottom:12px">
+      <button role="tab" id="tab-ai" aria-selected="true" data-panel="panel-ai">Báo cáo AI</button>
+      <button role="tab" id="tab-train" aria-selected="false" data-panel="panel-train">Huấn luyện ML</button>
+      <button role="tab" id="tab-backtest" aria-selected="false" data-panel="panel-backtest">Backtest</button>
+      <button role="tab" id="tab-config" aria-selected="false" data-panel="panel-config">Cấu hình</button>
+      <button role="tab" id="tab-prompt" aria-selected="false" data-panel="panel-prompt">System prompt</button>
+      <button role="tab" id="tab-settings" aria-selected="false" data-panel="panel-settings">Cài đặt AI</button>
+    </div>
+
+    <div id="panel-ai" role="tabpanel">
+      <div class="controls" style="margin-bottom:10px">
+        <input type="text" id="ask-input" placeholder="Hỏi thêm về phân tích này..."
+               style="flex:1; min-width:240px; text-transform:none" aria-label="Câu hỏi thêm">
+        <button id="btn-ask">Hỏi</button>
+        <span id="ai-key-chip" class="chip warn">Chưa có API key</span>
+      </div>
+      <div class="report" id="ai-report">
+        <span class="muted">Bấm “Phân tích bằng AI” để Claude đọc toàn bộ số liệu và viết nhận định,
+        kịch bản, gợi ý hành động. Cần API key — nhập ở tab “Cài đặt AI”.</span>
+      </div>
+    </div>
+
+    <div id="panel-train" class="hidden" role="tabpanel">
+      <p class="sub" style="margin-top:0">
+        Train model gradient boosting ngay trong trình duyệt bạn (chạy trong Web Worker nên trang
+        không bị đứng). Mất khoảng 1–3 phút tuỳ máy. Model lưu vào trình duyệt này.
+      </p>
+      <div class="controls">
+        <button class="primary" id="btn-train">Bắt đầu train</button>
+        <span class="small muted" id="train-target">—</span>
+      </div>
+      <div class="log hidden" id="train-log"></div>
+      <div id="train-result" style="margin-top:12px"></div>
+      <div style="margin-top:16px">
+        <h3 class="small" style="margin:0 0 6px; color:var(--text-secondary)">Model đang có</h3>
+        <div id="models-list" class="small muted">—</div>
+      </div>
+    </div>
+
+    <div id="panel-backtest" class="hidden" role="tabpanel">
+      <p class="sub" style="margin-top:0">
+        Chạy lại chiến lược trên lịch sử với stop loss / take profit thật. Vào lệnh ở giá đóng nến;
+        chạm cả SL và TP trong cùng nến thì tính là SL (bảo thủ); chốt 50% ở TP1 rồi kéo SL về entry.
+      </p>
+      <div class="controls">
+        <label class="small muted" for="bt-candles">Số nến</label>
+        <input type="number" id="bt-candles" value="3000" min="400" max="20000" step="500" style="width:100px">
+        <button class="primary" id="btn-backtest">Chạy backtest</button>
+      </div>
+      <div class="log hidden" id="bt-log"></div>
+      <div id="bt-result" style="margin-top:12px"></div>
+    </div>
+
+    <div id="panel-config" class="hidden" role="tabpanel">
+      <p class="sub" style="margin-top:0">
+        Đây là phần “training/setting” cho AI. Sửa giá trị rồi rời khỏi ô là tự lưu (vào trình duyệt
+        của bạn, không ảnh hưởng người khác). Khoá <code>ml.*</code> ảnh hưởng cách train nên cần train lại.
+      </p>
+      <div id="config-body" class="muted">Đang tải…</div>
+    </div>
+
+    <div id="panel-prompt" class="hidden" role="tabpanel">
+      <p class="sub" style="margin-top:0">
+        System prompt quyết định “tính cách” và cấu trúc báo cáo của Claude.
+      </p>
+      <textarea id="prompt-text" spellcheck="false" aria-label="System prompt"></textarea>
+      <div class="controls" style="margin-top:8px">
+        <button class="primary" id="btn-save-prompt">Lưu</button>
+        <button id="btn-reset-prompt">Về mặc định</button>
+        <span class="small muted" id="prompt-status"></span>
+      </div>
+    </div>
+
+    <div id="panel-settings" class="hidden" role="tabpanel">
+      <h3 style="margin:0 0 6px; font-size:14px">API key của Claude</h3>
+      <p class="sub" style="margin-top:0">
+        Trang này là tĩnh, không có server nào của tôi ở giữa. Key bạn nhập được lưu trong
+        <strong>localStorage của chính trình duyệt bạn</strong> và chỉ gửi trực tiếp tới
+        <code>api.anthropic.com</code>. Không ai khác mở trang này thấy được key của bạn.
+      </p>
+      <div class="controls" style="margin-bottom:8px">
+        <input type="password" id="apikey-input" placeholder="sk-ant-..." autocomplete="off"
+               style="flex:1; min-width:260px; text-transform:none" aria-label="API key Claude">
+        <button class="primary" id="btn-save-key">Lưu key</button>
+        <button id="btn-test-key">Kiểm tra key</button>
+      </div>
+      <div class="small muted" id="key-status"></div>
+
+      <div class="banner warn" style="margin-top:14px">
+        Lưu ý bảo mật: bất kỳ ai dùng được máy này đều có thể đọc key trong localStorage.
+        Nên tạo một key riêng cho việc này và đặt hạn mức chi tiêu trong Console của Anthropic,
+        để nếu lộ thì thiệt hại có giới hạn.
+      </div>
+
+      <h3 style="margin:18px 0 6px; font-size:14px">Lấy key ở đâu</h3>
+      <ol class="small" style="margin:0; padding-left:20px; color:var(--text-secondary); line-height:1.8">
+        <li>Vào <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com → API keys</a></li>
+        <li>Tạo key mới, sao chép (chỉ hiện một lần)</li>
+        <li>Dán vào ô trên, bấm Lưu key rồi Kiểm tra key</li>
+      </ol>
+
+      <h3 style="margin:18px 0 6px; font-size:14px">Không có key thì sao?</h3>
+      <p class="small muted" style="margin:0">
+        Toàn bộ phần còn lại vẫn chạy đầy đủ và miễn phí: chỉ báo kỹ thuật, vùng hỗ trợ/kháng cự,
+        điểm tổng hợp, model học máy (cả train lẫn dự đoán), và backtest. Chỉ mất phần Claude viết
+        báo cáo bằng lời.
+      </p>
+    </div>
+  </section>
+
+  <p class="small muted" style="text-align:center; margin:8px 0 0">
+    Dữ liệu từ Binance public API · mọi tính toán chạy trong trình duyệt bạn ·
+    <a href="https://github.com/ElonHoang/Trading" target="_blank" rel="noopener">mã nguồn</a><br>
+    Đây là công cụ phân tích kỹ thuật tự động, không phải lời khuyên đầu tư.
+  </p>
+</main>
+
+<script type="module" src="./web/app.js"></script>
+</body>
+</html>

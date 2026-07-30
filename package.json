@@ -1,0 +1,21 @@
+{
+  "name": "ta-ai-bot",
+  "version": "1.0.0",
+  "description": "AI technical-analysis bot for crypto tokens: indicators + gradient boosting model + Claude reasoning, delivered over Telegram",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "web": "node --env-file-if-exists=.env src/server.js",
+    "bot": "node --env-file-if-exists=.env src/bot.js",
+    "analyze": "node --env-file-if-exists=.env src/cli.js",
+    "train": "node --env-file-if-exists=.env bin/train.js",
+    "backtest": "node --env-file-if-exists=.env bin/backtest.js",
+    "models:index": "node bin/build-model-index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "grammy": "^1.45.1"
+  }
+}

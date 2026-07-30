@@ -1,0 +1,108 @@
+{
+  "_note": "Đây là phần 'training/setting' cho AI. Sửa file này (hoặc dùng /set trong bot) để thay đổi cách AI đánh giá thị trường. Không cần sửa code.",
+  "indicators": {
+    "emaFast": 20,
+    "emaMid": 50,
+    "emaSlow": 200,
+    "rsi": 14,
+    "macdFast": 12,
+    "macdSlow": 26,
+    "macdSignal": 9,
+    "bbPeriod": 20,
+    "bbMult": 2,
+    "atr": 14,
+    "adx": 14,
+    "stochK": 14,
+    "stochD": 3,
+    "vwap": 20,
+    "volumeAvg": 20
+  },
+  "weights": {
+    "_note": "Trọng số cho từng nhóm tín hiệu (0 = tắt hẳn tín hiệu đó). Tổng không cần bằng 100, hệ thống tự chuẩn hoá.",
+    "trend": 25,
+    "momentum": 15,
+    "macd": 15,
+    "structure": 15,
+    "volume": 10,
+    "meanReversion": 8,
+    "stochastic": 6,
+    "derivatives": 6
+  },
+  "thresholds": {
+    "_note": "Ngưỡng phân loại tín hiệu trên thang -100..100. buy/sell càng cao càng ít lệnh nhưng chất lượng hơn — đã kiểm chứng bằng /backtest trên BTC/ETH/SOL/BNB: mức 30 tốt hơn mức 18 ở 3/4 token.",
+    "strongBuy": 50,
+    "buy": 30,
+    "sell": -30,
+    "strongSell": -50,
+    "minAdxForTrend": 20,
+    "rsiOverbought": 70,
+    "rsiOversold": 30,
+    "volumeSpikeRatio": 1.6,
+    "fundingExtreme": 0.0004
+  },
+  "ml": {
+    "_note": "Model học máy (gradient boosting). horizon = số nến dự đoán về phía trước. thresholdMode: atr | fixed | triple-barrier",
+    "enabled": true,
+    "weightVsRules": 0.4,
+    "horizon": 24,
+    "thresholdMode": "atr",
+    "atrMult": 0.6,
+    "thresholdPct": 1.5,
+    "trainCandles": 16000,
+    "earlyStoppingMetric": "auc",
+    "trainRatio": 0.75,
+    "nTrees": 400,
+    "maxDepth": 3,
+    "learningRate": 0.05,
+    "lambda": 3,
+    "minChildWeight": 15,
+    "subsample": 0.7,
+    "colsample": 0.7,
+    "earlyStoppingRounds": 40,
+    "minTestAuc": 0.52,
+    "confidenceMargin": 0.12
+  },
+  "risk": {
+    "_note": "Sinh mức entry / stoploss / take-profit. slAtrMult = SL cách entry bao nhiêu lần ATR. exitStrategy: scaled | tp1 | tp2 (dùng cho backtest).",
+    "slAtrMult": 2.5,
+    "takeProfitR": [
+      1,
+      2,
+      3
+    ],
+    "maxRiskPercent": 2,
+    "preferSrLevels": true,
+    "exitStrategy": "scaled",
+    "partialFraction": 0.5
+  },
+  "llm": {
+    "_note": "Cấu hình phần suy luận bằng Claude. effort: low|medium|high|xhigh|max",
+    "enabled": true,
+    "model": "claude-opus-5",
+    "effort": "high",
+    "maxTokens": 6000,
+    "language": "vi"
+  },
+  "alerts": {
+    "_note": "Cảnh báo tự động cho các cặp trong watchlist.",
+    "minAbsScore": 35,
+    "onlyOnSignalChange": true,
+    "pollSeconds": 60
+  },
+  "analysis": {
+    "_note": "candles = số nến nạp về khi phân tích. multiTimeframe = xem thêm khung lớn hơn để xác nhận xu hướng.",
+    "candles": 400,
+    "multiTimeframe": true,
+    "higherTimeframeMap": {
+      "5m": "1h",
+      "15m": "4h",
+      "30m": "4h",
+      "1h": "4h",
+      "2h": "1d",
+      "4h": "1d",
+      "6h": "1d",
+      "12h": "1d",
+      "1d": "1w"
+    }
+  }
+}
