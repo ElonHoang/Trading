@@ -59,7 +59,9 @@
     "maxRiskPercent": 2,
     "preferSrLevels": true,
     "exitStrategy": "scaled",
-    "partialFraction": 0.5
+    "partialFraction": 0.5,
+    "displayLeverage": 10,
+    "_noteLeverage": "Chi dung de QUY DOI hien thi loi nhuan trong tin cap nhat TP. Khong anh huong tinh toan entry/SL/TP hay backtest."
   },
   "llm": {
     "_note": "Cấu hình phần suy luận bằng Claude. effort: low|medium|high|xhigh|max",

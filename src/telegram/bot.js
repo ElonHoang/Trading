@@ -15,7 +15,8 @@ import { readSubscribers, addSubscriber, removeSubscriber } from '../data/subscr
 import { createMonitor } from './monitor.js';
 import { buildContext } from '../analysis/context.js';
 import { buildSetup, buildProjections } from '../analysis/setup.js';
-import { buildCaption, buildQuoteMessage, splitCaption } from './caption.js';
+import { buildCaption, buildQuoteMessage, splitCaption, buildTpUpdate } from './caption.js';
+import { setCallMessages } from '../data/open-calls.js';
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
@@ -322,28 +323,43 @@ const monitor = createMonitor({
       }
     };
 
-    // --- Chạm TP trung gian, kèo vẫn mở ---
-    if (payload.kind === 'progress') {
-      const { call, hitTps } = payload;
-      const txt = `✅ <b>${call.symbol} ${call.interval}</b> — ${call.side === 'long' ? 'LONG' : 'SHORT'}`
-        + ` đã chạm ${hitTps.join(', ')}. Kèo vẫn mở, chưa call lại mã này.`;
-      return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML' }));
+    // --- Chạm TP: theo template "cấu trúc sau khi done tp call kèo" ---
+    if (payload.kind === 'progress' || payload.kind === 'tp') {
+      const { call, hitTps, snapshot } = payload;
+      const strategy = await loadStrategy();
+      const txt = buildTpUpdate(call, hitTps, snapshot, strategy.risk);
+      return send((id) => bot.api.sendMessage(id, txt, {
+        parse_mode: 'HTML',
+        // Trích dẫn lại kèo gốc nếu còn lưu được message id.
+        ...(call.messages?.[id] ? { reply_to_message_id: call.messages[id] } : {}),
+      }));
     }
 
     // --- Kèo đã chốt ---
     if (payload.kind === 'closed') {
-      const { call, result } = payload;
-      const icon = { stopped: '🛑', target: '🎯', expired: '⏱' }[result.status] ?? 'ℹ️';
-      const label = {
-        stopped: 'CHẠM STOPLOSS',
-        target: 'CHẠM TP CUỐI',
-        expired: 'HẾT HẠN GIỮ',
-      }[result.status] ?? result.status;
+      const { call, result, snapshot } = payload;
+      const strategy = await loadStrategy();
+      const reply = (id) => (call.messages?.[id]
+        ? { reply_to_message_id: call.messages[id] } : {});
+
+      // Chốt vì chạm TP cuối -> dùng đúng template cập nhật TP.
+      if (result.status === 'target') {
+        const txt = `${buildTpUpdate(call, result.hitTps, snapshot, strategy.risk)}\n`
+          + `\n<i>Giữ ${result.bars} nến. Mã này được call lại từ nến sau.</i>`;
+        return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML', ...reply(id) }));
+      }
+
+      const icon = result.status === 'stopped' ? '🛑' : '⏱';
+      const label = result.status === 'stopped' ? 'CHẠM STOPLOSS' : 'HẾT HẠN GIỮ';
+      const d = call.entry;
+      const loss = result.lastPrice != null && d
+        ? ((result.lastPrice - d) / d) * 100 * (call.side === 'long' ? 1 : -1) : null;
       const txt = `${icon} <b>${call.symbol} ${call.interval}</b> — ${label}\n`
-        + `${call.side === 'long' ? 'LONG' : 'SHORT'} từ ${call.entry}`
+        + `${call.side === 'long' ? 'LONG' : 'SHORT'} từ ${d}`
+        + (loss != null ? ` · kết quả ${loss >= 0 ? '+' : ''}${loss.toFixed(2)}%` : '')
         + (result.hitTps.length ? ` · đã chạm ${result.hitTps.join(', ')}` : '')
         + `\nGiữ ${result.bars} nến. Mã này được call lại từ nến sau.`;
-      return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML' }));
+      return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML', ...reply(id) }));
     }
 
     // --- Call kèo mới ---
@@ -356,10 +372,16 @@ const monitor = createMonitor({
       ? `🔔 ${changedFrom} → ${setup.signal}\n`
       : '🔔 KÈO MỚI\n';
     const { caption, rest } = splitCaption(head + buildCaption(snapshot, { setup, projections }));
+    // Giữ message id để tin cập nhật TP sau này reply vào đúng kèo gốc.
+    const messages = {};
     await send(async (id) => {
-      await bot.api.sendPhoto(id, photo, { caption, parse_mode: 'HTML' });
+      const sent = await bot.api.sendPhoto(id, photo, { caption, parse_mode: 'HTML' });
+      if (sent?.message_id) messages[id] = sent.message_id;
       if (rest) await bot.api.sendMessage(id, rest, { parse_mode: 'HTML' });
     });
+    if (Object.keys(messages).length) {
+      await setCallMessages(snapshot.symbol, messages).catch(() => {});
+    }
   },
 });
 

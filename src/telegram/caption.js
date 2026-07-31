@@ -129,6 +129,74 @@ export function splitCaption(text, limit = CAPTION_LIMIT) {
   };
 }
 
+/**
+ * Tin cập nhật khi kèo chạm TP, theo mục "cấu trúc sau khi done tp call kèo"
+ * trong README.md.
+ *
+ * @param call    kèo đang mở (từ data/open-calls.js)
+ * @param hitTps  nhãn các TP vừa chạm trong lượt này, vd ['TP1']
+ * @param snap    snapshot mới nhất, để nhận định dòng tiền còn thuận hay không
+ * @param risk    strategy.risk — quyết định % chốt và đòn bẩy để quy đổi lợi nhuận
+ */
+export function buildTpUpdate(call, hitTps, snap = null, risk = {}) {
+  const d = decimalsFor(call.entry);
+  const isLong = call.side === 'long';
+  const targets = call.targets ?? [];
+  const lastLabel = hitTps[hitTps.length - 1];
+  const tp = targets.find((t) => t.label === lastLabel);
+  const idx = targets.findIndex((t) => t.label === lastLabel);
+  const isFinal = idx === targets.length - 1;
+  const nextTp = targets[idx + 1] ?? null;
+
+  // Lợi nhuận tính trên giá TP vừa chạm, theo hướng lệnh.
+  const spotPct = tp ? ((tp.price - call.entry) / call.entry) * 100 * (isLong ? 1 : -1) : null;
+  const lev = risk.displayLeverage ?? 10;
+
+  // % chốt lấy từ risk.partialFraction — cùng con số mà backtest dùng cho
+  // chiến lược 'scaled', không phải số tự đặt ra.
+  const partial = Math.round((risk.partialFraction ?? 0.5) * 100);
+
+  const L = [];
+  L.push(`🚀 <b>CẬP NHẬT: ${esc(call.symbol)} HIT ${isFinal ? 'TP FULL' : esc(lastLabel)}!</b>`);
+  if (spotPct != null) {
+    L.push(`💰 Lợi nhuận: ${pct(spotPct)} (Spot) | ${pct(spotPct * lev)} (Đòn bẩy ${lev}x)`);
+  }
+
+  L.push(HR);
+  L.push('🎯 <b>CHI TIẾT CHỐT LỜI</b>');
+  L.push(`• Entry đã gọi : ${fmt(call.entry, d)}`);
+  L.push(`• Mốc TP vừa hit : ${tp ? fmt(tp.price, d) : '—'}`);
+  L.push(`• Trạng thái lệnh : ${isFinal ? 'Chốt hết' : 'Đã chốt 1 phần, gồng tiếp'}`);
+
+  L.push(HR);
+  L.push('🛠 <b>HÀNH ĐỘNG TIẾP THEO</b>');
+  if (isFinal) {
+    L.push('✅ Chốt lời: Đóng 100% khối lượng còn lại tại đây.');
+    L.push('🛡 Quản lý rủi ro: Lệnh đã đóng hết, không còn rủi ro.');
+  } else {
+    L.push(`✅ Chốt lời: Đóng ${idx === 0 ? partial : 50}% khối lượng lệnh tại đây.`);
+    L.push(idx === 0
+      ? '🛡 Quản lý rủi ro: Dời Stoploss về Entry (hoà vốn).'
+      : `🛡 Quản lý rủi ro: Giữ Stoploss ở ${fmt(call.entry, d)} (entry).`);
+    if (nextTp) L.push(`👀 Mục tiêu tiếp: ${esc(nextTp.label)} tại ${fmt(nextTp.price, d)}.`);
+  }
+
+  // Nhận định dựa trên dòng tiền hiện tại, không phải câu chữ cho có.
+  const slope = snap?.indicators?.cvdSlope;
+  if (slope != null) {
+    const stillWith = isLong ? slope > 0 : slope < 0;
+    L.push(HR);
+    L.push('💡 <b>NHẬN ĐỊNH NGẮN</b>');
+    L.push(stillWith
+      ? `💬 CVD vẫn ${pct(slope * 100, 1)} cùng chiều lệnh — lực còn thuận, `
+        + `${isFinal ? 'kèo đã chốt hết' : 'gồng phần còn lại được'}.`
+      : `💬 CVD đã đảo sang ${pct(slope * 100, 1)} ngược chiều lệnh — `
+        + `${isFinal ? 'chốt hết là hợp lý' : 'cân nhắc chốt sớm phần còn lại'}.`);
+  }
+
+  return L.join('\n');
+}
+
 /** Tin nhắn giá nhanh cho /gia. */
 export function buildQuoteMessage(snap) {
   const d = decimalsFor(snap.price.lastClose);

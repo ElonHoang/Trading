@@ -219,3 +219,24 @@ git add models/ && git commit -m "Thêm model ETH 4h" && git push
 - Phân tích kỹ thuật không dự đoán được tin tức, hack, hay quyết định của Fed.
 
 **Đây là công cụ phân tích kỹ thuật tự động, không phải lời khuyên đầu tư.**
+
+## cấu trúc sau khi done tp call kèo 
+🚀 CẬP NHẬT: [CẶP_GIAO_DỊCH] HIT TP [1/2/3/FULL]! 
+💰 Lợi nhuận hiện tại: +[X]% (Spot) | +[Y]% (Đòn bẩy [Z]x)
+
+━━━━━━━━━━━━━━━━━━
+🎯 CHI TIẾT CHỐT LỜI
+• Entry đã gọi : [GIÁ_VÀO]
+• Mốc TP vừa hit : [GIÁ_HIỆN_TẠI]
+• Trạng thái lệnh : [Đã chốt 1 phần / Chốt hết / Gồng tiếp]
+
+━━━━━━━━━━━━━━━━━━
+🛠 HÀNH ĐỘNG TIẾP THEO (KHUYẾN NGHỊ)
+✅ Chốt lời: Đóng [30%/50%/100%] khối lượng lệnh tại đây.
+🛡 Quản lý rủi ro: Dời Stoploss về Entry (Hòa vốn) [hoặc dời về mức giá...]
+👀 Mục tiêu tiếp: Hướng tới TP [2/3] tại giá [GIÁ_TP_TIẾP_THEO].
+
+━━━━━━━━━━━━━━━━━━
+💡 NHẬN ĐỊNH NGẮN
+💬 [Ghi chú: Ví dụ - Lực mua/bán vẫn còn rất mạnh, anh em đã dời SL về Entry cứ yên tâm gồng tiếp nhé!]
+🔗 Trích dẫn lại kèo gốc: [Link/Reply lại tin nhắn call kèo ban đầu]

@@ -47,6 +47,17 @@ export async function openCall(symbol, { interval, side, entry, stopLoss, target
   return save(map);
 }
 
+/**
+ * Lưu message_id của tin nhắn call gốc theo từng chat, để tin cập nhật TP có thể
+ * reply vào đúng kèo đó ("trích dẫn lại kèo gốc").
+ */
+export async function setCallMessages(symbol, messages) {
+  const map = await readOpenCalls();
+  if (!map[symbol]) return map;
+  map[symbol].messages = messages;
+  return save(map);
+}
+
 export async function closeCall(symbol) {
   const map = await readOpenCalls();
   if (!(symbol in map)) return map;
