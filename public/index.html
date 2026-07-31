@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phân tích kỹ thuật crypto</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #262d38;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --up: #26a69a;
+    --down: #ef5350;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 16px; }
+  h1 span { color: var(--muted); font-weight: 400; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  input, select, button {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+  }
+  input { width: 130px; text-transform: uppercase; }
+  input::placeholder { text-transform: none; color: var(--muted); }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #04101f; font-weight: 600; }
+
+  /* Trạng thái kết nối WebSocket */
+  #conn { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); margin-left: auto; }
+  #conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  #conn.live .dot { background: var(--up); animation: pulse 1.8s ease-in-out infinite; }
+  #conn.live { color: var(--up); }
+  #conn.connecting .dot { background: #f0b90b; animation: pulse .9s ease-in-out infinite; }
+  #conn.offline .dot { background: var(--down); }
+  #conn.offline { color: var(--down); }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 6px 4px 11px; font-size: 13px;
+  }
+  .chip button { border: 0; background: none; padding: 0 4px; color: var(--muted); line-height: 1; }
+  .chip button:hover { color: var(--down); }
+  .chip > span { cursor: pointer; }
+  .chip > span:hover { color: var(--accent); }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .hero { display: flex; flex-wrap: wrap; gap: 28px; padding: 16px 18px; margin-bottom: 14px; }
+  .hero .price { font-size: 27px; font-weight: 650; letter-spacing: -.5px; transition: color .35s; }
+  .hero dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .hero dd { margin: 3px 0 0; font-variant-numeric: tabular-nums; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  /* Nháy nhẹ mỗi lần giá đổi để thấy dữ liệu đang chạy */
+  .tick-up { animation: flashUp .5s ease-out; }
+  .tick-down { animation: flashDown .5s ease-out; }
+  @keyframes flashUp { from { background: #26a69a44 } to { background: transparent } }
+  @keyframes flashDown { from { background: #ef535044 } to { background: transparent } }
+
+  .chartbox { position: relative; padding: 10px 4px 4px; margin-bottom: 14px; }
+  canvas { display: block; width: 100%; }
+  #chart { height: 380px; }
+  #rsi { height: 108px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 0 14px 8px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 16px; height: 2px; vertical-align: middle; margin-right: 5px; }
+
+  #tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: #0b0f14ee; border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-size: 12px; font-variant-numeric: tabular-nums;
+    white-space: nowrap; z-index: 5;
+  }
+  #tip b { color: var(--muted); font-weight: 400; display: inline-block; min-width: 34px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 1px; background: var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+  .cell { background: var(--panel); padding: 12px 14px; }
+  .cell dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .cell dd { margin: 4px 0 0; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .cell small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .cell.stale dt::after { content: ' · ảnh chụp'; opacity: .65; text-transform: none; letter-spacing: 0; }
+
+  .levels { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .levels section { padding: 14px 16px; }
+  .levels h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; font-weight: 500; }
+  .levels li { list-style: none; display: flex; justify-content: space-between; padding: 3px 0; font-variant-numeric: tabular-nums; }
+  .levels ul { margin: 0; padding: 0; }
+  .levels time { color: var(--muted); font-size: 12px; }
+
+  #msg { padding: 11px 14px; border-radius: 8px; margin-bottom: 14px; display: none; }
+  #msg.err { display: block; background: #3d1618; border: 1px solid #6b2226; color: #ffb4b0; }
+  #msg.load { display: block; background: var(--panel); border: 1px solid var(--border); color: var(--muted); }
+
+  .foot { color: var(--muted); font-size: 12px; margin-top: 18px; }
+  @media (max-width: 640px) { .levels { grid-template-columns: 1fr; } #conn { margin-left: 0; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Phân tích kỹ thuật crypto <span>· dữ liệu Binance công khai</span></h1>
+
+  <div class="toolbar">
+    <input id="symbol" value="BTC" placeholder="BTC, ETH, SOL…" autocomplete="off">
+    <select id="interval"></select>
+    <select id="limit">
+      <option value="150">150 nến</option>
+      <option value="300" selected>300 nến</option>
+      <option value="500">500 nến</option>
+      <option value="1000">1000 nến</option>
+    </select>
+    <button class="primary" id="go">Phân tích</button>
+    <button id="save">+ Theo dõi</button>
+    <div id="conn"><span class="dot"></span><span id="connText">chưa kết nối</span></div>
+  </div>
+
+  <div class="chips" id="watchlist"></div>
+  <div id="msg"></div>
+
+  <dl class="card hero" id="hero" hidden></dl>
+
+  <div class="card chartbox">
+    <div class="legend">
+      <span><i style="background:#f0b90b"></i>MA50</span>
+      <span><i style="background:#a371f7"></i>MA200</span>
+      <span><i style="background:#37414f"></i>Bollinger 20·2</span>
+      <span style="margin-left:auto" id="range"></span>
+    </div>
+    <canvas id="chart"></canvas>
+    <canvas id="rsi"></canvas>
+    <div id="tip"></div>
+  </div>
+
+  <dl class="grid" id="stats"></dl>
+
+  <div class="levels">
+    <section class="card">
+      <h2>Kháng cự gần nhất</h2>
+      <ul id="res"></ul>
+    </section>
+    <section class="card">
+      <h2>Hỗ trợ gần nhất</h2>
+      <ul id="sup"></ul>
+    </section>
+  </div>
+
+  <p class="foot" id="foot"></p>
+</div>
+
+<script type="module">
+// Cùng module tính toán mà server dùng -> chỉ báo tính lại trên tick không lệch logic.
+import { computeAll } from '/lib/summary.js';
+// Cùng bộ vẽ mà bot Telegram dùng để xuất PNG -> chart trên web và trên bot giống nhau.
+import {
+  renderPricePanel, renderRsiPanel, PAD,
+  decimalsFor, fmt, pct, compact, timeLabel,
+} from '/lib/chart.js';
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  symbol: $('symbol'), interval: $('interval'), limit: $('limit'),
+  go: $('go'), save: $('save'), watchlist: $('watchlist'), msg: $('msg'),
+  hero: $('hero'), stats: $('stats'), res: $('res'), sup: $('sup'),
+  chart: $('chart'), rsi: $('rsi'), tip: $('tip'), range: $('range'), foot: $('foot'),
+  conn: $('conn'), connText: $('connText'),
+};
+
+let state = null;   // payload từ /api/analyze, sau đó được WebSocket cập nhật tại chỗ
+let hover = null;   // index nến đang trỏ chuột
+let prevPrice = null;
+
+/* ---------- format ---------- */
+// decimalsFor / fmt / pct / compact / timeLabel đến từ /lib/chart.js
+
+const clockLabel = (ms) => new Date(ms).toLocaleTimeString('vi-VN');
+
+const cls = (v) => (v == null ? '' : v >= 0 ? 'up' : 'down');
+
+/* ---------- vẽ chart ---------- */
+
+// Canvas cần scale theo devicePixelRatio, nếu không chữ và nét sẽ bị mờ.
+function prepare(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
+  return { ctx, w, h };
+}
+
+// Hai hàm dưới chỉ lo phần riêng của trình duyệt: đo kích thước canvas, scale
+// theo devicePixelRatio và truyền index đang hover. Phần vẽ nằm ở /lib/chart.js.
+function drawChart() {
+  const { ctx, w, h } = prepare(els.chart);
+  renderPricePanel(ctx, {
+    candles: state.candles,
+    series: state.series,
+    interval: state.interval,
+    width: w,
+    height: h,
+    hover,
+    font: '11px ui-sans-serif, system-ui, sans-serif',
+  });
+}
+
+function drawRsi() {
+  const { ctx, w, h } = prepare(els.rsi);
+  renderRsiPanel(ctx, {
+    candles: state.candles,
+    series: state.series,
+    width: w,
+    height: h,
+    hover,
+    font: '11px ui-sans-serif, system-ui, sans-serif',
+  });
+}
+
+// WebSocket đẩy tick liên tục, nên gộp mọi yêu cầu vẽ vào một frame.
+let frameQueued = false;
+function scheduleRender() {
+  if (frameQueued || !state) return;
+  frameQueued = true;
+  requestAnimationFrame(() => {
+    frameQueued = false;
+    if (!state) return;
+    drawChart();
+    drawRsi();
+    renderHero();
+    renderStats();
+    renderLevels();
+  });
+}
+
+function redraw() {
+  if (!state) return;
+  drawChart();
+  drawRsi();
+}
+
+/* ---------- tooltip ---------- */
+
+function onMove(e) {
+  if (!state) return;
+  const rect = els.chart.getBoundingClientRect();
+  const plotW = rect.width - PAD.left - PAD.right;
+  const i = Math.floor(((e.clientX - rect.left - PAD.left) / plotW) * state.candles.length);
+  if (i < 0 || i >= state.candles.length) return hideTip();
+
+  hover = i;
+  redraw();
+
+  const c = state.candles[i];
+  const d = decimalsFor(c.close);
+  const chg = ((c.close - c.open) / c.open) * 100;
+  els.tip.innerHTML = `
+    <div style="margin-bottom:4px">${timeLabel(c.openTime, state.interval)}</div>
+    <div><b>Mở</b> ${fmt(c.open, d)}</div>
+    <div><b>Cao</b> ${fmt(c.high, d)}</div>
+    <div><b>Thấp</b> ${fmt(c.low, d)}</div>
+    <div><b>Đóng</b> <span class="${cls(chg)}">${fmt(c.close, d)} (${pct(chg)})</span></div>
+    <div><b>KL</b> ${compact(c.volume)}</div>
+    <div><b>RSI</b> ${fmt(state.series.rsi[i], 1)}</div>`;
+  els.tip.style.opacity = '1';
+
+  // Lật tooltip sang trái khi sắp tràn mép phải.
+  const box = els.chart.parentElement.getBoundingClientRect();
+  const x = e.clientX - box.left;
+  const tw = els.tip.offsetWidth;
+  els.tip.style.left = `${x + tw + 24 > box.width ? x - tw - 14 : x + 14}px`;
+  els.tip.style.top = `${Math.min(e.clientY - box.top + 12, box.height - els.tip.offsetHeight - 8)}px`;
+}
+
+function hideTip() {
+  els.tip.style.opacity = '0';
+  if (hover !== null) { hover = null; redraw(); }
+}
+
+/* ---------- render số ---------- */
+
+function renderHero() {
+  const { summary, ticker, symbol, interval } = state;
+  const d = decimalsFor(summary.price);
+  const item = (label, value, klass = '') =>
+    `<div><dt>${label}</dt><dd class="${klass}">${value}</dd></div>`;
+
+  els.hero.hidden = false;
+  els.hero.innerHTML = `
+    <div>
+      <dt>${symbol} · ${interval}</dt>
+      <dd class="price ${cls(ticker?.priceChangePercent)}" id="bigPrice">${fmt(summary.price, d)}</dd>
+    </div>
+    ${item('Thay đổi 24h', pct(ticker?.priceChangePercent), cls(ticker?.priceChangePercent))}
+    ${item('Cao / thấp 24h', ticker ? `${fmt(ticker.highPrice, d)} / ${fmt(ticker.lowPrice, d)}` : '—')}
+    ${item('KL 24h (quote)', ticker ? compact(ticker.quoteVolume) : '—')}
+    ${item('Xu hướng', summary.trend.label,
+      summary.trend.bias === 'up' ? 'up' : summary.trend.bias === 'down' ? 'down' : '')}`;
+
+  // Nháy nền theo chiều giá vừa đổi.
+  if (prevPrice != null && summary.price !== prevPrice) {
+    const el = $('bigPrice');
+    el.classList.add(summary.price > prevPrice ? 'tick-up' : 'tick-down');
+    el.addEventListener('animationend', () => el.classList.remove('tick-up', 'tick-down'), { once: true });
+  }
+  prevPrice = summary.price;
+}
+
+function renderStats() {
+  const { summary, derivatives, orderbook, fetchedAt } = state;
+  const d = decimalsFor(summary.price);
+  const cell = (label, value, klass = '', note = '', stale = false) =>
+    `<div class="cell${stale ? ' stale' : ''}"><dt>${label}</dt><dd class="${klass}">${value}</dd>${note ? `<small>${note}</small>` : ''}</div>`;
+
+  const macdCross = summary.macdHistogram == null ? ''
+    : summary.macdHistogram >= 0 ? 'MACD trên đường tín hiệu' : 'MACD dưới đường tín hiệu';
+  // Funding / OI / sổ lệnh không có trên luồng WebSocket -> ghi rõ mốc thời gian lấy được.
+  const snap = `lúc ${clockLabel(fetchedAt)}`;
+
+  els.stats.innerHTML = [
+    cell('RSI 14', fmt(summary.rsi, 1),
+      summary.rsi == null ? '' : summary.rsi >= 70 ? 'down' : summary.rsi <= 30 ? 'up' : '',
+      summary.rsiZone ?? ''),
+    cell('MA50', fmt(summary.ma50, d), '',
+      summary.ma50 ? `giá ${summary.price >= summary.ma50 ? 'trên' : 'dưới'} MA50` : ''),
+    cell('MA200', fmt(summary.ma200, d), '',
+      summary.ma200 ? `giá ${summary.price >= summary.ma200 ? 'trên' : 'dưới'} MA200` : ''),
+    cell('MACD', fmt(summary.macd, d), cls(summary.macdHistogram), macdCross),
+    cell('ATR 14', fmt(summary.atr, d), '',
+      summary.atrPercent == null ? '' : `${fmt(summary.atrPercent, 2)}% giá`),
+    cell('Bollinger', `${fmt(summary.bbLower, d)} – ${fmt(summary.bbUpper, d)}`, '', 'chu kỳ 20 · 2σ'),
+    cell('Khối lượng', compact(summary.volume), '',
+      summary.volumeVsAvg == null ? '' : `${fmt(summary.volumeVsAvg, 2)}× trung bình 20`),
+    cell('Funding', derivatives?.fundingRate == null ? '—' : pct(derivatives.fundingRate * 100, 4),
+      cls(derivatives?.fundingRate), derivatives ? snap : 'không có hợp đồng futures', !!derivatives),
+    cell('Open Interest', compact(derivatives?.openInterest),
+      cls(derivatives?.openInterestChangePct),
+      derivatives?.openInterestChangePct == null ? '' : `${pct(derivatives.openInterestChangePct)} · ${snap}`,
+      !!derivatives),
+    cell('Sổ lệnh', orderbook == null ? '—' : pct(orderbook.imbalance * 100),
+      cls(orderbook?.imbalance), orderbook ? snap : '', !!orderbook),
+  ].join('');
+}
+
+function renderLevels() {
+  const { levels, summary, interval } = state;
+  const d = decimalsFor(summary.price);
+  const row = (lv) => {
+    const gap = ((lv.price - summary.price) / summary.price) * 100;
+    return `<li><span>${fmt(lv.price, d)} <span class="${cls(gap)}">${pct(gap)}</span></span>
+            <time>${timeLabel(lv.time, interval)}</time></li>`;
+  };
+  const fill = (el, list) => {
+    el.innerHTML = list.length ? list.map(row).join('')
+      : '<li style="color:var(--muted)">Không tìm thấy trong khoảng nến này</li>';
+  };
+  fill(els.res, levels.resistance);
+  fill(els.sup, levels.support);
+}
+
+/* ---------- WebSocket Binance ---------- */
+
+// Hai host công khai, không cần API key. Đổi host khi host đầu không nối được
+// (một số vùng chặn stream.binance.com).
+const WS_HOSTS = ['wss://stream.binance.com:9443', 'wss://data-stream.binance.vision'];
+
+let ws = null;
+let wsHost = 0;
+let wsRetry = 0;
+let wsTimer = null;
+let wsToken = 0;   // tăng mỗi lần đổi mã/khung -> socket cũ tự vô hiệu
+
+function setConn(status, text) {
+  els.conn.className = status;
+  els.connText.textContent = text;
+}
+
+function closeStream() {
+  wsToken++;
+  clearTimeout(wsTimer);
+  if (ws) {
+    ws.onclose = null;   // tránh kích hoạt reconnect khi ta chủ động đóng
+    ws.close();
+    ws = null;
+  }
+  setConn('', 'chưa kết nối');
+}
+
+function openStream(symbol, interval) {
+  closeStream();
+  const token = wsToken;
+  wsRetry = 0;
+  wsHost = 0;
+  connect(symbol, interval, token);
+}
+
+function connect(symbol, interval, token) {
+  if (token !== wsToken) return;
+  // Tên stream: symbol phải viết thường, nhưng interval giữ nguyên hoa/thường
+  // vì 1M (tháng) khác 1m (phút).
+  const streams = `${symbol.toLowerCase()}@kline_${interval}/${symbol.toLowerCase()}@ticker`;
+  setConn('connecting', 'đang kết nối…');
+
+  try {
+    ws = new WebSocket(`${WS_HOSTS[wsHost]}/stream?streams=${streams}`);
+  } catch {
+    return scheduleReconnect(symbol, interval, token);
+  }
+
+  ws.onopen = () => {
+    if (token !== wsToken) return ws.close();
+    wsRetry = 0;
+    setConn('live', 'trực tiếp');
+  };
+
+  ws.onmessage = (ev) => {
+    if (token !== wsToken) return;
+    let payload;
+    try { payload = JSON.parse(ev.data); } catch { return; }
+    const data = payload?.data;
+    if (!data) return;
+    if (data.e === 'kline') applyKline(data.k);
+    else if (data.e === '24hrTicker') applyTicker(data);
+  };
+
+  ws.onerror = () => { /* onclose sẽ lo phần nối lại */ };
+
+  ws.onclose = () => {
+    if (token !== wsToken) return;
+    scheduleReconnect(symbol, interval, token);
+  };
+}
+
+function scheduleReconnect(symbol, interval, token) {
+  if (token !== wsToken) return;
+  wsRetry++;
+  // Sau 3 lần thất bại thì thử host còn lại.
+  if (wsRetry % 3 === 0) wsHost = (wsHost + 1) % WS_HOSTS.length;
+  const delay = Math.min(1000 * 2 ** Math.min(wsRetry - 1, 4), 15000);
+  setConn('offline', `mất kết nối · thử lại sau ${Math.round(delay / 1000)}s`);
+  clearTimeout(wsTimer);
+  wsTimer = setTimeout(() => connect(symbol, interval, token), delay);
+}
+
+/** Nến từ WS về cùng hình dạng với nến REST của binance.js. */
+function toCandle(k) {
+  return {
+    openTime: k.t,
+    open: +k.o,
+    high: +k.h,
+    low: +k.l,
+    close: +k.c,
+    volume: +k.v,
+    closeTime: k.T,
+    quoteVolume: +k.q,
+    trades: k.n,
+    takerBuyVolume: +k.V,
+    closed: k.x,
+  };
+}
+
+function applyKline(k) {
+  if (!state) return;
+  const arr = state.candles;
+  const lastOpen = arr[arr.length - 1].openTime;
+  const candle = toCandle(k);
+
+  if (k.t === lastOpen) {
+    arr[arr.length - 1] = candle;          // nến đang chạy -> ghi đè
+  } else if (k.t > lastOpen) {
+    arr.push(candle);                       // sang nến mới
+    if (arr.length > state.maxCandles) arr.shift();
+  } else {
+    return;                                 // nến cũ hơn, bỏ qua
+  }
+
+  // Tính lại toàn bộ chỉ báo bằng đúng module của server.
+  const { series, summary, levels } = computeAll(arr);
+  state.series = series;
+  state.summary = summary;
+  state.levels = levels;
+  state.lastCandleClosed = candle.closed;
+
+  els.range.textContent = `${arr.length} nến · ${timeLabel(arr[0].openTime, state.interval)} → ${timeLabel(arr[arr.length - 1].openTime, state.interval)}`;
+  els.foot.textContent = candle.closed
+    ? 'Nến cuối đã đóng.'
+    : 'Nến cuối chưa đóng — các chỉ báo ở cột cuối còn thay đổi.';
+  scheduleRender();
+}
+
+function applyTicker(d) {
+  if (!state) return;
+  state.ticker = {
+    lastPrice: +d.c,
+    priceChangePercent: +d.P,
+    highPrice: +d.h,
+    lowPrice: +d.l,
+    volume: +d.v,
+    quoteVolume: +d.q,
+  };
+  scheduleRender();
+}
+
+/* ---------- watchlist ---------- */
+
+async function loadWatchlist(list) {
+  const items = list ?? await (await fetch('/api/watchlist')).json();
+  els.watchlist.innerHTML = items.length
+    ? items.map((s) => `<span class="chip"><span data-load="${s}">${s}</span><button data-del="${s}" title="Bỏ theo dõi">×</button></span>`).join('')
+    : '<span style="color:var(--muted);font-size:13px">Chưa theo dõi mã nào. Bấm “+ Theo dõi” để thêm.</span>';
+}
+
+els.watchlist.addEventListener('click', async (e) => {
+  const load = e.target.dataset.load;
+  const del = e.target.dataset.del;
+  if (load) {
+    els.symbol.value = load;
+    run();
+  } else if (del) {
+    loadWatchlist(await (await fetch(`/api/watchlist/${del}`, { method: 'DELETE' })).json());
+  }
+});
+
+els.save.addEventListener('click', async () => {
+  const res = await fetch('/api/watchlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol: els.symbol.value }),
+  });
+  const body = await res.json();
+  if (res.ok) loadWatchlist(body);
+  else showError(body.error);
+});
+
+/* ---------- chạy ---------- */
+
+function showError(text) {
+  els.msg.className = 'err';
+  els.msg.textContent = text;
+}
+
+async function run() {
+  const symbol = els.symbol.value.trim();
+  if (!symbol) return showError('Nhập mã token trước đã.');
+
+  closeStream();
+  els.go.disabled = true;
+  els.msg.className = 'load';
+  els.msg.textContent = `Đang tải ${symbol.toUpperCase()}…`;
+  hideTip();
+
+  try {
+    const params = new URLSearchParams({
+      symbol, interval: els.interval.value, limit: els.limit.value,
+    });
+    const res = await fetch(`/api/analyze?${params}`);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+
+    state = body;
+    state.maxCandles = body.candles.length;   // giữ cửa sổ cố định khi WS thêm nến mới
+    state.fetchedAt = Date.now();
+    prevPrice = null;
+
+    els.msg.className = '';
+    els.symbol.value = body.symbol;
+    els.range.textContent = `${body.candles.length} nến · ${timeLabel(body.candles[0].openTime, body.interval)} → ${timeLabel(body.candles.at(-1).openTime, body.interval)}`;
+    els.foot.textContent = body.lastCandleClosed
+      ? 'Nến cuối đã đóng.'
+      : 'Nến cuối chưa đóng — các chỉ báo ở cột cuối còn thay đổi.';
+
+    renderHero();
+    renderStats();
+    renderLevels();
+    redraw();
+
+    openStream(body.symbol, body.interval);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    els.go.disabled = false;
+  }
+}
+
+els.go.addEventListener('click', run);
+els.symbol.addEventListener('keydown', (e) => e.key === 'Enter' && run());
+els.interval.addEventListener('change', () => state && run());
+els.limit.addEventListener('change', () => state && run());
+els.chart.addEventListener('mousemove', onMove);
+els.rsi.addEventListener('mousemove', onMove);
+els.chart.addEventListener('mouseleave', hideTip);
+els.rsi.addEventListener('mouseleave', hideTip);
+window.addEventListener('resize', redraw);
+// Tab ẩn lâu -> socket thường bị treo, mở lại khi quay về.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state && (!ws || ws.readyState > 1)) {
+    openStream(state.symbol, state.interval);
+  }
+});
+
+const intervals = await (await fetch('/api/intervals')).json();
+els.interval.innerHTML = intervals
+  .map((iv) => `<option value="${iv}"${iv === '4h' ? ' selected' : ''}>${iv}</option>`).join('');
+await loadWatchlist();
+run();
+</script>
+</body>
+</html>

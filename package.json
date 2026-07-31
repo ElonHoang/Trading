@@ -4,11 +4,18 @@
   "description": "Bot phân tích kỹ thuật crypto: dữ liệu Binance + Claude, gửi qua Telegram",
   "private": true,
   "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "bot": "node --env-file-if-exists=.env src/telegram/bot.js"
+  },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
+    "@napi-rs/canvas": "^1.0.3",
+    "express": "^5.2.1",
     "grammy": "^1.45.1"
   }
 }
