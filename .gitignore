@@ -10,3 +10,7 @@ node_modules/
 npm-debug.log*
 .DS_Store
 Thumbs.db
+
+# models/ ĐƯỢC commit: bản web trên GitHub Pages cần model đóng gói sẵn để
+# người mở trang có dự đoán ML ngay mà không phải tự train.
+# Nhớ chạy `npm run models:index` sau khi thêm/xoá model.
