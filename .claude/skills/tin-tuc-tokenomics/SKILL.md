@@ -64,6 +64,16 @@ Phân loại tin là **từ khoá, không phải phân tích cảm xúc AI**. Kh
 
 **Ủng hộ:** FDV/vốn hoá ≤ 1,15 · xếp hạng ≤ 50 · có tin tích cực và không có tin tiêu cực.
 
+### Mức `info` KHÔNG được hiển thị
+
+`buildSetup` chỉ đưa mức `warn` vào `cautions`. Mức `info` — "không tìm thấy tin nào khớp", "thông báo removal không ghi token trong tiêu đề", "không lấy được tokenomics" — chuyển sang field `notes` và **không hiện ra tin nhắn**. Chúng là ghi chú về việc *không kiểm tra được*, không đổi quyết định nào, và xuất hiện gần như mọi lần nên chỉ là nhiễu.
+
+Một ngoại lệ có chủ ý: **"không đọc được thông báo delist" là `warn`, không phải `info`** — nó nghĩa là việc kiểm tra delist đã *thất bại*, khác hẳn với *đã kiểm tra và không thấy gì*. Ẩn nó đi là nuốt mất một cảnh báo an toàn trước khi vào long.
+
+### Giới hạn số request
+
+Kĩ năng 2 gọi CoinGecko (2 request mỗi token: `/search` rồi `/coins/{id}`, cache 15 phút). Free tier chỉ cho vài chục request/phút, nên **chỉ gọi `buildContext` khi phần kỹ thuật ĐÃ ra kèo** — gọi cho cả 24 mã mỗi lượt quét sẽ bị HTTP 429 và bối cảnh âm thầm trả `null`. Xem `evaluateOn()` trong `src/telegram/bot.js`: chạy `buildSetup` khan trước, chỉ khi `side !== 'none'` mới dựng bối cảnh.
+
 ## Từ bối cảnh ra hướng vào lệnh
 
 `buildSetup(snapshot, context)` trả về:

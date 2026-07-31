@@ -158,7 +158,9 @@ Xung đột thì **nói rõ là xung đột**, đừng ép ra kết luận dứt
 - **OI và funding là `null` với token không có hợp đồng futures.** Kiểm `der?.openInterest != null`; thiếu thì ghi "không có hợp đồng futures", không ghi 0.
 - **Order book là ảnh chụp tại một thời điểm**, không có lịch sử nên **không backtest được**. Cộng với spoofing, đừng dùng nó làm căn cứ chính.
 - **Volume chỉ của Binance spot**, không phải tổng toàn thị trường.
-- Cần ≥ 80 nến đã đóng để phân tích (warm-up cho `volumeAvg` và `cvdSlope`).
+- Cần ≥ `MIN_CANDLES` (30) nến đã đóng để chấm điểm; ML cần ≥ `features.WARMUP` (60).
+- **Cổ phiếu token hoá (bStocks) không có futures** → mất cả `derivatives` và `positioning`, chỉ còn 4 nhóm. Cổng đồng thuận tính trên mẫu nhỏ hơn nên **dễ đạt hơn một cách giả tạo** — cảnh giác khi thấy chúng trong danh sách quét.
+- **Chi phí request**: phân tích đầy đủ 1 mã tốn 56 request-weight (riêng `depth limit=1000` đã 50), giới hạn Binance 6.000/phút. Đừng gọi `analyze` trong vòng lặp rộng — sàng lọc trước bằng `screenSymbols()` (1 request, 80 weight cho cả sàn).
 
 ## Vào điểm tổng như thế nào
 
@@ -167,3 +169,22 @@ Xung đột thì **nói rõ là xung đột**, đừng ép ra kết luận dứt
 **Nhóm thiếu dữ liệu bị LOẠI khỏi phép chuẩn hoá**, không tính là 0 điểm. Điều này quan trọng: order book không có lịch sử nên trong backtest nó luôn thiếu; nếu tính là 0 thì điểm tổng bị pha loãng và gần như không bao giờ vượt ngưỡng (đã từng làm backtest chỉ ra 9 lệnh thay vì 60).
 
 Đổi cách đánh giá thì sửa `weights`/`thresholds`, **đừng sửa hàm chỉ báo**. Sửa xong phải chạy lại `npm run backtest` trước khi tin.
+
+## Cổng đồng thuận — khác ngưỡng điểm
+
+`scoreSignals()` trả thêm `consensus`: bao nhiêu nhóm **có dữ liệu** thực sự cùng hướng với điểm tổng (mỗi nhóm phải có `|score| ≥ thresholds.consensusMinGroupScore`, mặc định 0,15).
+
+Đây không trùng với ngưỡng điểm: `|điểm| ≥ 30` có thể chỉ đến từ 2 nhóm rất mạnh trong khi 4 nhóm còn lại trung tính. Cổng đòi nhiều nhóm độc lập cùng xác nhận.
+
+`buildSetup(snapshot, context, { consensusPercent })` sẽ đặt `side = 'none'` nếu chưa đạt, và ghi lý do vào `blockers`.
+
+**Cảnh báo phải nêu khi bàn về ngưỡng này:** số nhóm có dữ liệu khác nhau giữa chạy thật và backtest — chạy thật có 6, backtest chỉ có 3 (`orderBook`, `derivatives`, `positioning` không có lịch sử theo nến). Nên `70%` = 3/3 khi backtest nhưng = 5/6 khi chạy thật. **Không kiểm chứng đầy đủ được bằng backtest.**
+
+Đo thật trên BTC 4h, 3000 nến: mức 60% (đang dùng) không loại tín hiệu nào, cho 60 lệnh / PF 1,05 / +1,03%. Mức 70% loại 41 tín hiệu, còn 41 lệnh / PF 1,63 / +26,76%. Nhưng 41 lệnh chỉ vừa qua ngưỡng 40 mà `README.md` coi là quá ít để kết luận.
+
+## Setup và phép chiếu
+
+`src/analysis/setup.js`:
+
+- `buildSetup(snapshot, context, opts)` → `side`, `entry`, `stopLoss`, `riskPercent`, `targets`, `rrToTp1` (R:R tới **mục tiêu cấu trúc gần nhất**, không phải tới TP1 — TP1 định nghĩa là 1R nên đo tới nó luôn ra 1, vô nghĩa), `reasons` (chỉ nhóm cùng hướng, xếp theo đóng góp thật), `cautions`, `notes`, `blockers`.
+- `buildProjections(snapshot, risk)` → hai kịch bản lên/xuống, mỗi cái có điều kiện kích hoạt (đóng nến qua mức S/R thật kèm số lần chạm), entry, SL đặt ngoài mức cấu trúc, TP, và điều kiện vô hiệu. `primary` là kịch bản đang được điểm ủng hộ — **thứ tự ưu tiên suy từ điểm, không phải xác suất thống kê**.
