@@ -357,9 +357,14 @@ export function renderPricePanel(ctx, {
       tag(`Cắt lỗ ${fmt(setup.stopLoss, priceDec)} (${pct(movePct(setup.stopLoss))})`,
         clampY(yOf(setup.stopLoss)), '#ef5350');
     }
-    tag(`${setup.side === 'long' ? 'LONG' : 'SHORT'} vào ${fmt(setup.entry, priceDec)}`
-      + (setup.rrToTp1 ? ` · R:R ${fmt(setup.rrToTp1, 2)}` : ''),
-    yEntry, COLORS.entry, 'left');
+    // Hộp "chờ" (dựng từ phép chiếu, chưa phải kèo) phải khác hộp kèo thật.
+    const dir = setup.side === 'long' ? 'LONG' : 'SHORT';
+    tag(setup.pending
+      ? `CHỜ ${dir} · qua ${fmt(setup.entry, priceDec)}`
+        + (setup.rrToTp1 ? ` · R:R ${fmt(setup.rrToTp1, 2)}` : '')
+      : `${dir} vào ${fmt(setup.entry, priceDec)}`
+        + (setup.rrToTp1 ? ` · R:R ${fmt(setup.rrToTp1, 2)}` : ''),
+    yEntry, setup.pending ? COLORS.text : COLORS.entry, 'left');
   }
 
   // Đường giá hiện tại + thẻ giá bên phải

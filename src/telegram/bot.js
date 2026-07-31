@@ -163,7 +163,7 @@ async function sendAnalysis(ctx, symbolInput, interval, { edit = false } = {}) {
     : await evaluateBestInterval(symbolInput, strategy);
 
   const photo = new InputFile(
-    renderAnalysisPng(payload, { setup }),
+    renderAnalysisPng(payload, { setup, projections }),
     `${payload.symbol}-${payload.interval}.png`,
   );
   // Template đầy đủ có thể vượt 1024 ký tự -> tách phần dư sang tin nhắn riêng
@@ -317,7 +317,7 @@ const monitor = createMonitor({
     const chats = await readSubscribers();
     if (!chats.length) return;
     const photo = new InputFile(
-      renderAnalysisPng(snapshot, { setup }),
+      renderAnalysisPng(snapshot, { setup, projections }),
       `${snapshot.symbol}-${snapshot.interval}.png`,
     );
     const head = changedFrom

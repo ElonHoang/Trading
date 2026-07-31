@@ -44,18 +44,23 @@ export function createMonitor({ listTargets, evaluate, notify, loadStrategy, log
           if (prev.lastCandleTime === candleTime) continue;
 
           const score = snapshot.combined.score;
-          const signal = setup.blocked ? 'BLOCKED' : setup.signal;
-          const worthTelling = Math.abs(score) >= minAbs || setup.blocked;
+          const signal = setup.signal;
           const changed = signal !== prev.lastSignal;
 
           state.set(key, { lastCandleTime: candleTime, lastSignal: signal });
 
-          if (!worthTelling) continue;
+          // CHỈ báo khi có kèo thật. Không bắn "đứng ngoài" hay "chờ tín hiệu" —
+          // điểm cao mà bị bối cảnh phủ quyết hoặc chưa đủ đồng thuận thì không
+          // phải một kèo, báo ra chỉ là nhiễu.
+          if (setup.side === 'none') continue;
+          if (Math.abs(score) < minAbs) continue;
           if (onlyOnChange && !changed) continue;
-          // Lần đầu chạy: không bắn lại toàn bộ lịch sử, chỉ ghi nhận trạng thái.
-          if (prev.lastSignal === undefined && !setup.blocked && Math.abs(score) < minAbs) continue;
 
-          await notify({ target, snapshot, setup, projections, changedFrom: prev.lastSignal ?? null });
+          await notify({
+            target, snapshot, setup, projections,
+            changedFrom: prev.lastSignal ?? null,
+            interval: snapshot.interval,
+          });
         } catch (err) {
           log(`[monitor] ${key}: ${err.message}`);
         }

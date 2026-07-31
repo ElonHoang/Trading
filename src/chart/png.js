@@ -25,13 +25,32 @@ const FONT = ['Segoe UI', 'Arial', 'DejaVu Sans', 'Liberation Sans', 'Helvetica'
  */
 export function renderAnalysisPng(snap, {
   width = 1280, priceHeight = 560, cvdHeight = 210, scale = 2, setup = null,
-  maxBars = null,
+  projections = null, maxBars = null,
 } = {}) {
   const s = snap.series;
   if (!s || !s.close?.length) throw new Error('Snapshot thiếu series — gọi analyze với includeSeries');
 
   const hasSetup = setup && setup.side && setup.side !== 'none' && setup.entry != null;
-  const bars = maxBars ?? (hasSetup ? MAX_BARS_WITH_SETUP : MAX_BARS);
+
+  // Chưa có kèo thì vẫn vẽ hộp — dùng kịch bản đang được điểm ủng hộ, đánh dấu
+  // là CHỜ. Nếu không thì ảnh mất hẳn hộp Long/Short mỗi khi cổng đồng thuận
+  // chặn, và người xem không biết cần chờ mốc nào.
+  let box = hasSetup ? setup : null;
+  if (!box && projections) {
+    const pick = projections.primary === 'short' ? projections.down
+      : projections.primary === 'long' ? projections.up : null;
+    if (pick) {
+      box = {
+        side: pick.direction,
+        entry: pick.entry,
+        stopLoss: pick.stopLoss,
+        targets: pick.targets,
+        rrToTp1: pick.rrToStructure,
+        pending: true,
+      };
+    }
+  }
+  const bars = maxBars ?? (box ? MAX_BARS_WITH_SETUP : MAX_BARS);
 
   // Chỉ lấy `bars` nến cuối cho dễ đọc. Cắt đồng bộ mọi mảng song song, nếu
   // lệch index thì CVD sẽ không khớp nến.
@@ -72,9 +91,12 @@ export function renderAnalysisPng(snap, {
     interval: snap.interval,
     width,
     height: priceHeight,
-    levels: snap.structure,
-    walls: snap.orderBook?.walls ?? [],
-    setup,
+    // KHÔNG vẽ hỗ trợ/kháng cự và tường lệnh trên ảnh: cộng lại là 10 đường kẻ
+    // ngang cùng nhãn, che nến và làm rối mắt. Số liệu vẫn có đủ trong caption
+    // (buildCaption), và các mức đó vẫn được dùng để tính entry/SL/TP.
+    levels: null,
+    walls: [],
+    setup: box,
     font: `13px ${FONT}`,
   });
   ctx.restore();
@@ -88,7 +110,7 @@ export function renderAnalysisPng(snap, {
     width,
     height: cvdHeight,
     // Phải khớp vùng chừa của panel giá để trục thời gian không lệch.
-    forwardRatio: hasSetup ? FORWARD_RATIO : 0,
+    forwardRatio: box ? FORWARD_RATIO : 0,
     font: `13px ${FONT}`,
   });
   ctx.restore();

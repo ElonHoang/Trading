@@ -126,12 +126,18 @@ export function buildSetup(snapshot, context = null, {
   }
 
   // --- Cảnh báo: xung đột kỹ thuật + rủi ro cơ bản ---
+  // Chỉ lấy mức 'warn'. Mức 'info' là ghi chú về việc KHÔNG kiểm tra được
+  // (không tìm thấy tin, thông báo không ghi token...) — không đổi quyết định
+  // nào nên không hiển thị. Vẫn giữ trong `notes` để không mất dấu.
   const cautions = [
     ...(snapshot.conflicts ?? []).map((c) => ({ source: 'Kĩ năng 1', text: c })),
     ...(context?.warnings ?? [])
-      .filter((w) => w.severity !== 'critical')
+      .filter((w) => w.severity === 'warn')
       .map((w) => ({ source: 'Kĩ năng 2', severity: w.severity, text: w.text })),
   ];
+  const notes = (context?.warnings ?? [])
+    .filter((w) => w.severity === 'info')
+    .map((w) => w.text);
 
   // TP1 định nghĩa là 1R nên R:R tới TP1 luôn = 1, vô nghĩa. Đo tới mục tiêu
   // cấu trúc gần nhất (mức S/R thật) mới cho biết còn bao nhiêu room.
@@ -157,6 +163,7 @@ export function buildSetup(snapshot, context = null, {
     rrToTp1: finalSide === 'none' ? null : (rr != null ? Number(rr.toFixed(2)) : null),
     reasons,
     cautions,
+    notes,
     contextBias: context?.bias ?? null,
     consensus: cons,
     consensusGate,

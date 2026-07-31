@@ -70,6 +70,14 @@ export function buildCaption(snap, { setup = null, projections = null } = {}) {
     + ` | OI ${der?.openInterestChangePct != null ? pct(der.openInterestChangePct) : '—'}`
     + ` | ${p?.longAccountPercent != null ? `${fmt(p.longAccountPercent, 1)}% Đang Long` : '—'}`);
 
+  // Tường lệnh không vẽ trên ảnh nữa (rối mắt) -> nêu ở đây, mỗi bên mức lớn nhất.
+  const bidWall = (ob?.walls ?? []).find((w) => w.side === 'bid');
+  const askWall = (ob?.walls ?? []).find((w) => w.side === 'ask');
+  if (bidWall || askWall) {
+    L.push(`• Tường lệnh : ${bidWall ? `MUA ${fmt(bidWall.price, d)} (${fmt(bidWall.ratioToAvg, 0)}x)` : '—'}`
+      + ` | ${askWall ? `BÁN ${fmt(askWall.price, d)} (${fmt(askWall.ratioToAvg, 0)}x)` : '—'}`);
+  }
+
   // ---- Lý do ----
   const reasons = (setup?.reasons ?? []).slice(0, 3);
   const cautions = (setup?.cautions ?? []).slice(0, 2);

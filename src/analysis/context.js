@@ -65,15 +65,19 @@ export async function buildContext(symbol, cfg = {}) {
       blockLong = true;
     }
     if (delistRisk.unparsedNotices?.length) {
+      // Luôn có vài thông báo dạng "Notice of Removal of Spot Trading Pairs -
+      // <ngày>" không ghi token trong tiêu đề -> đây là nhiễu, để mức info.
       warnings.push({
         severity: 'info',
         text: `${delistRisk.unparsedNotices.length} thông báo removal không ghi token trong tiêu đề — nên tự mở kiểm tra`,
       });
     }
     if (!delistRisk.sourceAvailable) {
+      // KHÔNG phải info: nghĩa là việc kiểm tra delist đã THẤT BẠI, không phải
+      // "đã kiểm tra và không thấy gì". Phải hiện ra trước khi vào long.
       warnings.push({
-        severity: 'info',
-        text: 'Không đọc được thông báo Binance (endpoint không chính thức) — chỉ dựa vào trạng thái cặp',
+        severity: 'warn',
+        text: 'Không đọc được thông báo delist của Binance — chưa kiểm tra được rủi ro delist',
       });
     }
   }
