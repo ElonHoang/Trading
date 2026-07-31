@@ -15,7 +15,7 @@ import { readSubscribers, addSubscriber, removeSubscriber } from '../data/subscr
 import { createMonitor } from './monitor.js';
 import { buildContext } from '../analysis/context.js';
 import { buildSetup, buildProjections } from '../analysis/setup.js';
-import { buildCaption, buildQuoteMessage } from './caption.js';
+import { buildCaption, buildQuoteMessage, splitCaption } from './caption.js';
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
@@ -33,12 +33,46 @@ Rồi chạy lại: npm run bot`);
   process.exit(1);
 }
 
-const DEFAULT_INTERVAL = '4h';
+// Khung dùng để CALL KÈO. Xét theo thứ tự này: 1h trước vì ít nhiễu hơn, chỉ
+// rơi xuống 15m khi 1h chưa đủ điều kiện. Không dùng 4h để call nữa — nhưng vẫn
+// xem được 4h/1d/1w bằng nút bấm hoặc /ta btc 4h.
+const CALL_INTERVALS = ['1h', '15m'];
+const DEFAULT_INTERVAL = CALL_INTERVALS[0];
 const CANDLES = 300;
 // Các khung hay dùng, hiện thành hàng nút dưới ảnh chart.
 const QUICK_INTERVALS = ['15m', '1h', '4h', '1d', '1w'];
 
+// Chỉ những user id này được dùng lệnh GHI (/canhbao, /tatcanhbao, /add, /del).
+// Mặc định FAIL-CLOSED: chưa khai báo thì chặn hết, vì bot có thể đang ở trong
+// group và ai cũng sửa được watchlist dùng chung.
+const OWNER_IDS = (process.env.TELEGRAM_OWNER_IDS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
 const bot = new Bot(token);
+
+/**
+ * Chặn lệnh ghi nếu không phải chủ bot. Trả false khi đã từ chối (phía gọi
+ * dừng lại). Thông báo kèm luôn user id để chủ bot tự thêm vào .env.
+ */
+async function requireOwner(ctx) {
+  const userId = String(ctx.from?.id ?? '');
+  if (OWNER_IDS.includes(userId)) return true;
+
+  if (!OWNER_IDS.length) {
+    await ctx.reply(
+      '🔒 Lệnh này chỉ dành cho chủ bot, nhưng <code>TELEGRAM_OWNER_IDS</code> đang trống '
+      + 'nên tôi chặn tất cả cho an toàn.\n\n'
+      + `User id của bạn: <code>${userId}</code>\n\n`
+      + 'Thêm vào file <code>.env</code> rồi khởi động lại bot:\n'
+      + `<code>TELEGRAM_OWNER_IDS=${userId}</code>`,
+      { parse_mode: 'HTML' },
+    );
+  } else {
+    await ctx.reply(`🔒 Chỉ chủ bot dùng được lệnh này. User id của bạn: <code>${userId}</code>`,
+      { parse_mode: 'HTML' });
+  }
+  return false;
+}
 
 const HELP = `<b>Bot phân tích kỹ thuật crypto</b>
 Dữ liệu từ REST công khai của Binance.
@@ -64,7 +98,8 @@ function intervalKeyboard(symbol, current) {
 /** Tách "btc 1h" thành { symbol, interval }; thiếu khung thì dùng mặc định. */
 function parseArgs(text) {
   const parts = String(text || '').trim().split(/\s+/).filter(Boolean);
-  return { symbol: parts[0], interval: parts[1] || DEFAULT_INTERVAL };
+  // interval = null -> bot tu chon khung theo CALL_INTERVALS.
+  return { symbol: parts[0], interval: parts[1] ?? null };
 }
 
 /** Gọi engine dùng chung: cùng số liệu với CLI, bot AI và dashboard. */
@@ -77,21 +112,63 @@ async function runAnalyze(symbolInput, interval) {
   });
 }
 
+/**
+ * Dựng kèo trên một khung cụ thể. Kĩ năng 2 là lớp phụ nên lỗi mạng của nó
+ * không được làm mất phần kỹ thuật.
+ */
+async function evaluateOn(symbolInput, interval, strategy) {
+  const snapshot = await runAnalyze(symbolInput, interval);
+  const consensusPercent = strategy.thresholds?.consensusPercent ?? null;
+  // Chạy khan trước để biết có kèo hay không — chỉ gọi Kĩ năng 2 khi cần, vì
+  // CoinGecko giới hạn vài chục request/phút.
+  const dry = buildSetup(snapshot, null, { consensusPercent });
+  const context = dry.side === 'none'
+    ? null
+    : await buildContext(snapshot.symbol).catch(() => null);
+  return {
+    snapshot,
+    setup: context ? buildSetup(snapshot, context, { consensusPercent }) : dry,
+    projections: buildProjections(snapshot, strategy.risk),
+  };
+}
+
+/**
+ * Chọn khung để call kèo: xét lần lượt CALL_INTERVALS, lấy khung ĐẦU TIÊN ra
+ * được kèo thật. Không khung nào đủ điều kiện thì trả về khung có |điểm| cao
+ * nhất để vẫn báo cáo số liệu thay vì im lặng.
+ */
+async function evaluateBestInterval(symbolInput, strategy) {
+  const tried = [];
+  for (const iv of CALL_INTERVALS) {
+    try {
+      const r = await evaluateOn(symbolInput, iv, strategy);
+      if (r.setup.side !== 'none') return { ...r, triedIntervals: CALL_INTERVALS };
+      tried.push(r);
+    } catch (err) {
+      // Khung nhỏ có thể thiếu nến với token mới list -> thử khung tiếp theo.
+      tried.push({ error: err });
+    }
+  }
+  const usable = tried.filter((r) => r.snapshot);
+  if (!usable.length) throw tried[0]?.error ?? new Error('Không phân tích được khung nào');
+  usable.sort((a, b) => Math.abs(b.snapshot.combined.score) - Math.abs(a.snapshot.combined.score));
+  return { ...usable[0], triedIntervals: CALL_INTERVALS };
+}
+
 async function sendAnalysis(ctx, symbolInput, interval, { edit = false } = {}) {
-  const payload = await runAnalyze(symbolInput, interval);
   const strategy = await loadStrategy();
-  // Kĩ năng 2 là lớp phụ: lỗi mạng không được làm mất phần kỹ thuật.
-  const context = await buildContext(payload.symbol).catch(() => null);
-  const setup = buildSetup(payload, context, {
-    consensusPercent: strategy.thresholds?.consensusPercent ?? null,
-  });
-  const projections = buildProjections(payload, strategy.risk);
+  // interval = null -> tự chọn khung theo CALL_INTERVALS.
+  const { snapshot: payload, setup, projections } = interval
+    ? await evaluateOn(symbolInput, interval, strategy)
+    : await evaluateBestInterval(symbolInput, strategy);
 
   const photo = new InputFile(
     renderAnalysisPng(payload, { setup }),
     `${payload.symbol}-${payload.interval}.png`,
   );
-  const caption = buildCaption(payload, { setup, projections });
+  // Template đầy đủ có thể vượt 1024 ký tự -> tách phần dư sang tin nhắn riêng
+  // thay vì cắt mất kịch bản chờ.
+  const { caption, rest } = splitCaption(buildCaption(payload, { setup, projections }));
   const reply_markup = intervalKeyboard(payload.symbol, payload.interval);
 
   if (edit) {
@@ -102,13 +179,22 @@ async function sendAnalysis(ctx, symbolInput, interval, { edit = false } = {}) {
         { type: 'photo', media: photo, caption, parse_mode: 'HTML' },
         { reply_markup },
       );
+      if (rest) await ctx.reply(rest, { parse_mode: 'HTML' });
       return;
     } catch { /* rơi xuống nhánh gửi mới */ }
   }
   await ctx.replyWithPhoto(photo, { caption, parse_mode: 'HTML', reply_markup });
+  if (rest) await ctx.reply(rest, { parse_mode: 'HTML' });
 }
 
 bot.command(['start', 'help'], (ctx) => ctx.reply(HELP, { parse_mode: 'HTML' }));
+
+// Ai cũng xem được id của mình — cần để chủ bot lấy id đưa vào TELEGRAM_OWNER_IDS.
+bot.command('id', (ctx) => ctx.reply(
+  `User id: <code>${ctx.from?.id}</code>\nChat id: <code>${ctx.chat?.id}</code>`
+  + `\nQuyền lệnh ghi: ${OWNER_IDS.includes(String(ctx.from?.id)) ? '✅ có' : '❌ không'}`,
+  { parse_mode: 'HTML' },
+));
 
 bot.command('ta', async (ctx) => {
   const { symbol, interval } = parseArgs(ctx.match);
@@ -144,6 +230,7 @@ bot.command('list', async (ctx) => {
 });
 
 bot.command('add', async (ctx) => {
+  if (!await requireOwner(ctx)) return;
   try {
     const list = await addSymbol(ctx.match);
     await ctx.reply(`Đã lưu. Danh sách: ${list.join(', ')}`);
@@ -153,6 +240,7 @@ bot.command('add', async (ctx) => {
 });
 
 bot.command('del', async (ctx) => {
+  if (!await requireOwner(ctx)) return;
   const list = await removeSymbol(ctx.match);
   await ctx.reply(list.length ? `Còn lại: ${list.join(', ')}` : 'Danh sách đã rỗng.');
 });
@@ -171,6 +259,7 @@ bot.callbackQuery(/^ta:([A-Z0-9]+):(\S+)$/, async (ctx) => {
 /* ---------- theo dõi liên tục ---------- */
 
 bot.command('canhbao', async (ctx) => {
+  if (!await requireOwner(ctx)) return;
   const list = await addSubscriber(ctx.chat.id);
   const strategy = await loadStrategy();
   const watch = await readWatchlist();
@@ -185,6 +274,7 @@ bot.command('canhbao', async (ctx) => {
 });
 
 bot.command('tatcanhbao', async (ctx) => {
+  if (!await requireOwner(ctx)) return;
   await removeSubscriber(ctx.chat.id);
   await ctx.reply('🔕 Đã tắt cảnh báo tự động cho chat này.');
 });
@@ -212,25 +302,16 @@ const monitor = createMonitor({
     ]);
     // Mã người dùng tự thêm luôn được theo, kể cả khi không qua sàng lọc.
     const symbols = [...new Set([...watch, ...screen.symbols])];
-    return symbols.map((symbol) => ({ symbol, interval: DEFAULT_INTERVAL }));
+    // interval = null -> monitor tu chon khung theo CALL_INTERVALS.
+    return symbols.map((symbol) => ({ symbol, interval: null }));
   },
   evaluate: async ({ symbol, interval }) => {
-    const snapshot = await runAnalyze(symbol, interval);
     const strategy = await loadStrategy();
-    const consensusPercent = strategy.thresholds?.consensusPercent ?? null;
-
-    // Chỉ gọi Kĩ năng 2 khi kỹ thuật ĐÃ ra kèo. CoinGecko free chỉ cho vài chục
-    // request/phút — gọi cho cả 25 mã mỗi lượt sẽ bị 429 và bối cảnh âm thầm rỗng.
-    const dry = buildSetup(snapshot, null, { consensusPercent });
-    const context = dry.side === 'none'
-      ? null
-      : await buildContext(snapshot.symbol).catch(() => null);
-
-    return {
-      snapshot,
-      setup: context ? buildSetup(snapshot, context, { consensusPercent }) : dry,
-      projections: buildProjections(snapshot, strategy.risk),
-    };
+    // Kĩ năng 2 chỉ được gọi khi kỹ thuật đã ra kèo (xem evaluateOn) — CoinGecko
+    // giới hạn vài chục request/phút, gọi cho cả 24 mã mỗi lượt sẽ bị 429.
+    return interval
+      ? evaluateOn(symbol, interval, strategy)
+      : evaluateBestInterval(symbol, strategy);
   },
   notify: async ({ snapshot, setup, projections, changedFrom }) => {
     const chats = await readSubscribers();
@@ -258,7 +339,8 @@ bot.catch((err) => {
 });
 
 await bot.api.setMyCommands([
-  { command: 'ta', description: 'Chart + kèo + lý do (vd: /ta btc 4h)' },
+  { command: 'ta', description: 'Call kèo, tự chọn khung 1h/15m (vd: /ta btc)' },
+  { command: 'id', description: 'Xem user id và quyền của bạn' },
   { command: 'gia', description: 'Giá nhanh (vd: /gia eth)' },
   { command: 'canhbao', description: 'Bật theo dõi liên tục, tự báo khi có kèo' },
   { command: 'tatcanhbao', description: 'Tắt theo dõi liên tục' },

@@ -117,3 +117,32 @@ Trước khi đưa ra bất kỳ phân tích thị trường nào, **phải** d�
 | 2 | Tin tức & tokenomics | Tokenomics, rủi ro delist, tin tức — xác nhận hoặc **phủ quyết** setup của Kĩ năng 1 | [`.claude/skills/tin-tuc-tokenomics/SKILL.md`](.claude/skills/tin-tuc-tokenomics/SKILL.md) |
 
 Kĩ năng 2 **không cộng điểm** — dòng tiền tính bằng giây/giờ còn tokenomics tính bằng ngày/tuần, trộn vào một thang sẽ làm méo điểm và mất khả năng backtest.
+
+### Cấu trúc khi call lẹnh
+
+🔥 [CẶP_GIAO_DỊCH] | Khung [KHUNG_TG]
+💰 Giá hiện tại: [GIÁ_HIỆN_TẠI] ([+/- %])
+🚨 KHUYẾN NGHỊ: 🔴 [SHORT/BÁN] hoặc 🟢 [LONG/MUA] (Điểm: [ĐIỂM]/100)
+
+━━━━━━━━━━━━━━━━━━
+🎯 CHI TIẾT LỆNH
+• Entry (Vào lệnh): [GIÁ_VÀO]
+• Stoploss (Cắt lỗ): [GIÁ_SL] (Rủi ro [+/- %])
+• Take Profit (Chốt lời):
+   👉 TP 1: [GIÁ_TP1]
+   👉 TP 2: [GIÁ_TP2]
+   👉 TP 3: [GIÁ_TP3]
+⚖️ Tỷ lệ R:R: [TỶ_LỆ]
+
+━━━━━━━━━━━━━━━━━━
+📊 DỮ LIỆU THỊ TRƯỜNG
+• Hỗ trợ/Kháng cự : HT [GIÁ_HT] | KC [GIÁ_KC]
+• Dòng tiền (CVD) : CVD [+/- %] | Vol [X]x | Sổ lệnh [+/- %]
+• Tâm lý đám đông : Funding [+/- %] | OI [+/- %] | [X]% Đang Long
+
+━━━━━━━━━━━━━━━━━━
+💡 LÝ DO VÀO LỆNH
+🔻 [Lý do 1: Ví dụ - Giá đi ngang nhưng CVD giảm → Đang phân phối]
+🔻 [Lý do 2: Ví dụ - Đám đông dồn Long quá mức → Dễ bị quét thanh lý]
+🔻 [Lý do 3: Ghi chú về tin tức, khối lượng...]
+
