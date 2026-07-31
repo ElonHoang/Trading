@@ -2,7 +2,7 @@
 //   npm run analyze -- BTC 4h
 //   npm run analyze -- ETH 1h --no-ai      (chỉ chỉ báo + ML, không gọi Claude)
 
-import { normalizeSymbol, INTERVAL_MS } from './data/binance.js';
+import { resolveSymbol, INTERVAL_MS } from './data/binance.js';
 import { loadStrategy } from './config.js';
 import { loadModel } from './ml/model-store.js';
 import { analyze } from './analysis/engine.js';
@@ -20,7 +20,7 @@ if (!symbolArg) {
   process.exit(1);
 }
 
-const symbol = normalizeSymbol(symbolArg);
+const symbol = await resolveSymbol(symbolArg);
 const strategy = await loadStrategy();
 
 try {

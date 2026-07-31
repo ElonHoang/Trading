@@ -1,52 +1,38 @@
 {
-  "_note": "Đây là phần 'training/setting' cho AI. Sửa file này (hoặc dùng /set trong bot) để thay đổi cách AI đánh giá thị trường. Không cần sửa code.",
+  "_note": "Đây là phần 'training/setting' cho AI. Sửa file này (hoặc dùng /set trong bot) để thay đổi cách AI đánh giá thị trường. Không cần sửa code. Bộ chỉ báo được phép dùng nằm ở .claude/skills/chi-bao/SKILL.md.",
   "indicators": {
-    "emaFast": 20,
-    "emaMid": 50,
-    "emaSlow": 200,
-    "rsi": 14,
-    "macdFast": 12,
-    "macdSlow": 26,
-    "macdSignal": 9,
-    "bbPeriod": 20,
-    "bbMult": 2,
-    "atr": 14,
-    "adx": 14,
-    "stochK": 14,
-    "stochD": 3,
-    "vwap": 20,
-    "volumeAvg": 20
+    "volumeAvg": 20,
+    "cvdSlope": 20
   },
   "weights": {
-    "_note": "Trọng số cho từng nhóm tín hiệu (0 = tắt hẳn tín hiệu đó). Tổng không cần bằng 100, hệ thống tự chuẩn hoá.",
-    "trend": 25,
-    "momentum": 15,
-    "macd": 15,
-    "structure": 15,
-    "volume": 10,
-    "meanReversion": 8,
-    "stochastic": 6,
-    "derivatives": 6
+    "_note": "Trọng số cho từng nhóm tín hiệu (0 = tắt hẳn tín hiệu đó). Tổng không cần bằng 100, hệ thống tự chuẩn hoá. Nhóm nào thiếu dữ liệu bị LOẠI khỏi chuẩn hoá thay vì tính 0 điểm. Sáu nhóm này khớp đúng danh sách chỉ báo trong skill.",
+    "cvd": 28,
+    "volume": 22,
+    "derivatives": 18,
+    "positioning": 14,
+    "structure": 12,
+    "orderBook": 6
   },
   "thresholds": {
-    "_note": "Ngưỡng phân loại tín hiệu trên thang -100..100. buy/sell càng cao càng ít lệnh nhưng chất lượng hơn — đã kiểm chứng bằng /backtest trên BTC/ETH/SOL/BNB: mức 30 tốt hơn mức 18 ở 3/4 token.",
+    "_note": "Ngưỡng phân loại tín hiệu trên thang -100..100. buy/sell càng cao càng ít lệnh nhưng chất lượng hơn. CHÚ Ý: các mức dưới đây được kế thừa từ bộ chỉ báo cũ và CHƯA được backtest lại với bộ chỉ báo dòng tiền — chạy npm run backtest trước khi tin.",
     "strongBuy": 50,
     "buy": 30,
     "sell": -30,
     "strongSell": -50,
-    "minAdxForTrend": 20,
-    "rsiOverbought": 70,
-    "rsiOversold": 30,
     "volumeSpikeRatio": 1.6,
-    "fundingExtreme": 0.0004
+    "fundingExtreme": 0.0004,
+    "sidewaysPercent": 1.5,
+    "crowdSkew": 0.12,
+    "_consensusNote": "Cổng đồng thuận: bao nhiêu % nhóm CÓ DỮ LIỆU phải cùng hướng mới gọi kèo. Khác ngưỡng buy/sell — |điểm| cao có thể chỉ đến từ 2 nhóm rất mạnh. CHÚ Ý: chạy thật có 6 nhóm, backtest chỉ có 3 (orderBook/derivatives/positioning không có lịch sử), nên cùng một % sẽ nghiêm khắc hơn nhiều khi chạy thật.",
+    "consensusPercent": 60,
+    "consensusMinGroupScore": 0.15
   },
   "ml": {
-    "_note": "Model học máy (gradient boosting). horizon = số nến dự đoán về phía trước. thresholdMode: atr | fixed | triple-barrier",
+    "_note": "Model học máy (gradient boosting). horizon = số nến dự đoán về phía trước. thresholdMode: fixed | triple-barrier. Rào tính theo % giá vì hệ thống đã bỏ ATR.",
     "enabled": true,
     "weightVsRules": 0.4,
     "horizon": 24,
-    "thresholdMode": "atr",
-    "atrMult": 0.6,
+    "thresholdMode": "triple-barrier",
     "thresholdPct": 1.5,
     "trainCandles": 16000,
     "earlyStoppingMetric": "auc",
@@ -63,8 +49,8 @@
     "confidenceMargin": 0.12
   },
   "risk": {
-    "_note": "Sinh mức entry / stoploss / take-profit. slAtrMult = SL cách entry bao nhiêu lần ATR. exitStrategy: scaled | tp1 | tp2 (dùng cho backtest).",
-    "slAtrMult": 2.5,
+    "_note": "Sinh mức entry / stoploss / take-profit. slPercent = SL cách entry bao nhiêu % giá (thay cho bội số ATR trước đây). exitStrategy: scaled | tp1 | tp2 (dùng cho backtest).",
+    "slPercent": 2.5,
     "takeProfitR": [
       1,
       2,
@@ -84,10 +70,13 @@
     "language": "vi"
   },
   "alerts": {
-    "_note": "Cảnh báo tự động cho các cặp trong watchlist.",
+    "_note": "Cảnh báo tự động. Vòng quét sàng lọc rẻ trước (1 request ticker toàn sàn, 80 weight) rồi mới phân tích sâu số ít mã. Phân tích đầy đủ 1 mã tốn 56 weight (riêng depth limit=1000 đã 50), nên quét cả 479 cặp sẽ tốn ~26.800 weight/lượt — vượt giới hạn 6.000/phút của Binance.",
     "minAbsScore": 35,
     "onlyOnSignalChange": true,
-    "pollSeconds": 60
+    "pollSeconds": 60,
+    "scanTopVolume": 15,
+    "scanTopMovers": 15,
+    "scanMinQuoteVolumeUsd": 3000000
   },
   "analysis": {
     "_note": "candles = số nến nạp về khi phân tích. multiTimeframe = xem thêm khung lớn hơn để xác nhận xu hướng.",

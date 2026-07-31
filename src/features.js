@@ -1,20 +1,22 @@
 // Chuyển chỉ báo thành vector đặc trưng cho model ML.
 // Nguyên tắc: mọi feature phải "dừng" (stationary) — tức là tỉ lệ/chuẩn hoá,
 // KHÔNG dùng giá tuyệt đối, vì giá BTC năm 2020 và 2026 không cùng thang đo.
+//
+// Bộ feature này chỉ dựng từ những gì còn lại sau khi hệ thống bỏ các chỉ báo giá
+// thuần: volume, CVD, hành động giá thuần (returns + hình nến) và thời gian.
+// Order book, OI và funding rate KHÔNG vào đây được: API chỉ trả giá trị hiện tại
+// (OI có 14 kỳ 4h), không có chuỗi lịch sử theo từng nến để gán nhãn.
 
 export const FEATURE_NAMES = [
   'ret1', 'ret3', 'ret5', 'ret10', 'ret20',
-  'rsi', 'rsiSlope',
-  'macdHistNorm', 'macdLineNorm', 'macdCrossAge',
-  'emaFastRatio', 'emaMidRatio', 'emaSlowRatio', 'emaFastMidSpread',
-  'bbPercentB', 'bbWidth',
-  'atrPct', 'atrRatio',
-  'adx', 'diSpread',
-  'stochK', 'stochKD',
-  'volZ', 'volRatio', 'obvSlope',
-  'vwapRatio', 'rangePos', 'bodyRatio', 'upperWick', 'lowerWick',
+  'volZ', 'volRatio',
+  'cvdDeltaNorm', 'cvdSlope', 'cvdSlopeChange',
+  'rangePos', 'bodyRatio', 'upperWick', 'lowerWick',
   'hourOfDay', 'dayOfWeek',
 ];
+
+/** Số nến warm-up tối thiểu: ret20, volumeAvg 20, cvdSlope 20 + 5 nến để so độ dốc. */
+export const WARMUP = 60;
 
 const safeDiv = (a, b) => (b === 0 || b == null || a == null || !Number.isFinite(b) ? 0 : a / b);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -25,34 +27,15 @@ const fin = (v) => (Number.isFinite(v) ? v : 0);
  * Trả về null nếu chưa đủ dữ liệu warm-up.
  */
 export function featureVector(candles, ind, i) {
-  if (i < 205) return null; // cần đủ cho EMA200 + slope
+  if (i < WARMUP) return null;
   const c = candles[i];
   const close = c.close;
   if (!close) return null;
 
-  const need = [ind.rsi[i], ind.macdHist[i], ind.emaFast[i], ind.emaMid[i], ind.emaSlow[i],
-    ind.bbUpper[i], ind.bbLower[i], ind.atr[i], ind.adx[i], ind.stochK[i], ind.volumeAvg[i]];
+  const need = [ind.volumeAvg[i], ind.cvd[i], ind.cvdDelta[i], ind.cvdSlope[i]];
   if (need.some((v) => v == null)) return null;
 
   const ret = (n) => safeDiv(close - candles[i - n].close, candles[i - n].close) * 100;
-
-  // MACD cross age: bao nhiêu nến kể từ lần histogram đổi dấu (chuẩn hoá về [-1,1])
-  let crossAge = 0;
-  const sgn = Math.sign(ind.macdHist[i]);
-  for (let j = i - 1; j >= Math.max(0, i - 30); j--) {
-    if (ind.macdHist[j] == null || Math.sign(ind.macdHist[j]) !== sgn) break;
-    crossAge++;
-  }
-
-  const bbRange = ind.bbUpper[i] - ind.bbLower[i];
-  const percentB = bbRange > 0 ? (close - ind.bbLower[i]) / bbRange : 0.5;
-
-  // ATR hiện tại so với ATR trung bình 50 nến -> đo mở rộng/co hẹp biến động
-  let atrAvg = 0, atrCount = 0;
-  for (let j = i - 49; j <= i; j++) {
-    if (j >= 0 && ind.atr[j] != null) { atrAvg += ind.atr[j]; atrCount++; }
-  }
-  atrAvg = atrCount ? atrAvg / atrCount : ind.atr[i];
 
   // Volume z-score trên 50 nến
   const volWin = [];
@@ -60,11 +43,16 @@ export function featureVector(candles, ind, i) {
   const volMean = volWin.reduce((a, b) => a + b, 0) / volWin.length;
   const volSd = Math.sqrt(volWin.reduce((s, v) => s + (v - volMean) ** 2, 0) / volWin.length);
 
-  // OBV slope chuẩn hoá theo volume trung bình
-  const obvSlope = safeDiv(ind.obv[i] - ind.obv[i - 10], Math.abs(volMean) * 10);
+  // Delta của nến hiện tại so với chính volume nến đó -> [-1, 1]
+  const cvdDeltaNorm = clamp(safeDiv(ind.cvdDelta[i], c.volume), -1, 1);
+
+  // Độ dốc CVD đang mạnh lên hay yếu đi
+  const slopePrev = ind.cvdSlope[i - 5];
+  const cvdSlopeChange = slopePrev == null ? 0 : ind.cvdSlope[i] - slopePrev;
 
   // Vị trí giá trong range 50 nến
-  let hh = -Infinity, ll = Infinity;
+  let hh = -Infinity;
+  let ll = Infinity;
   for (let j = i - 49; j <= i; j++) {
     if (j < 0) continue;
     if (candles[j].high > hh) hh = candles[j].high;
@@ -81,27 +69,11 @@ export function featureVector(candles, ind, i) {
 
   const v = [
     ret(1), ret(3), ret(5), ret(10), ret(20),
-    ind.rsi[i] / 100,
-    (ind.rsi[i] - (ind.rsi[i - 5] ?? ind.rsi[i])) / 100,
-    safeDiv(ind.macdHist[i], close) * 1000,
-    safeDiv(ind.macdLine[i], close) * 1000,
-    clamp(crossAge / 30, 0, 1) * sgn,
-    safeDiv(close - ind.emaFast[i], ind.emaFast[i]) * 100,
-    safeDiv(close - ind.emaMid[i], ind.emaMid[i]) * 100,
-    safeDiv(close - ind.emaSlow[i], ind.emaSlow[i]) * 100,
-    safeDiv(ind.emaFast[i] - ind.emaMid[i], ind.emaMid[i]) * 100,
-    clamp(percentB, -0.5, 1.5),
-    safeDiv(bbRange, ind.bbMid[i]) * 100,
-    safeDiv(ind.atr[i], close) * 100,
-    safeDiv(ind.atr[i], atrAvg),
-    ind.adx[i] / 100,
-    safeDiv((ind.plusDI[i] ?? 0) - (ind.minusDI[i] ?? 0), 100),
-    ind.stochK[i] / 100,
-    safeDiv((ind.stochK[i] ?? 0) - (ind.stochD[i] ?? 0), 100),
-    safeDiv(candles[i].volume - volMean, volSd),
-    safeDiv(candles[i].volume, ind.volumeAvg[i]),
-    obvSlope,
-    ind.vwap[i] != null ? safeDiv(close - ind.vwap[i], ind.vwap[i]) * 100 : 0,
+    safeDiv(c.volume - volMean, volSd),
+    safeDiv(c.volume, ind.volumeAvg[i]),
+    cvdDeltaNorm,
+    clamp(ind.cvdSlope[i], -1, 1),
+    clamp(cvdSlopeChange, -2, 2),
     rangePos,
     bodyRatio, upperWick, lowerWick,
     date.getUTCHours() / 24,

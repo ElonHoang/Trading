@@ -2,14 +2,14 @@
   {
     "symbol": "BTCUSDT",
     "interval": "4h",
-    "trainedAt": "2026-07-30T10:23:48.563Z",
-    "samples": 5445,
+    "trainedAt": "2026-07-31T09:40:44.910Z",
+    "samples": 15301,
     "horizon": 24,
-    "labelMode": "atr",
-    "testAuc": 0.5539,
-    "testAccuracy": 0.5198,
-    "walkForwardAuc": 0.5406,
-    "trees": 62,
-    "sizeKB": 30
+    "labelMode": "triple-barrier",
+    "testAuc": 0.5116,
+    "testAccuracy": 0.5175,
+    "walkForwardAuc": 0.5076,
+    "trees": 43,
+    "sizeKB": 25
   }
 ]

@@ -1,4 +1,4 @@
-// Backtest bộ quy tắc + (tuỳ chọn) model ML, có stoploss/take-profit thật.
+﻿// Backtest bộ quy tắc + (tuỳ chọn) model ML, có stoploss/take-profit thật.
 // Chạy: npm run backtest -- BTCUSDT 4h
 //
 // Giả định (nói rõ để không tự lừa mình):
@@ -51,6 +51,7 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
   const t = strategy.thresholds;
   const trades = [];
   let position = null;
+  let skippedConsensus = 0;
   let srCache = null;
   let srCacheIndex = -999;
 
@@ -124,7 +125,7 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
       srCache = supportResistance(candles.slice(Math.max(0, i - 200), i + 1));
       srCacheIndex = i;
     }
-    const { ruleScore } = scoreSignals(candles, ind, strategy, { sr: srCache }, i);
+    const { ruleScore, consensus } = scoreSignals(candles, ind, strategy, { sr: srCache }, i);
 
     let mlProb = null;
     let score = ruleScore;
@@ -138,6 +139,15 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
 
     const signal = labelForScore(score, t);
     if (signal.side === 'none') continue;
+
+    // Cùng cổng đồng thuận với lúc chạy thật, nếu không backtest sẽ đo một luật
+    // khác với luật thực tế bắn kèo.
+    // LƯU Ý: ở đây chỉ có 3 nhóm có lịch sử (volume/cvd/structure) — chạy thật có
+    // 6 nhóm, nên cùng một % sẽ nghiêm khắc hơn khi chạy thật.
+    if (t.consensusPercent != null && consensus.percent < t.consensusPercent) {
+      skippedConsensus++;
+      continue;
+    }
 
     const levels = buildLevels(candles, ind, srCache, signal, strategy.risk, i);
     if (!levels.stopLoss || !levels.targets?.length) continue;
@@ -174,6 +184,12 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
     settings: {
       feePercent, maxHoldBars, mlWeight, usedModel: Boolean(stored), srEvery,
       exitStrategy, partialFraction: exitStrategy === 'scaled' ? partialFraction : null,
+      consensusPercent: t.consensusPercent ?? null,
+      // Nói rõ số tín hiệu bị cổng đồng thuận loại — không im lặng cắt bớt.
+      skippedByConsensus: skippedConsensus,
+      consensusNote: t.consensusPercent != null
+        ? 'Backtest chỉ có 3 nhóm có lịch sử (volume/cvd/structure); chạy thật có 6 nhóm nên cùng % sẽ nghiêm khắc hơn'
+        : null,
     },
     stats,
     trades: trades.slice(-40),

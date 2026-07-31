@@ -1,11 +1,11 @@
-// Dashboard chạy hoàn toàn trong browser — không cần server.
+﻿// Dashboard chạy hoàn toàn trong browser — không cần server.
 //
 // Import trực tiếp các module lõi trong src/ (cùng code mà bot Telegram dùng):
 // dữ liệu lấy thẳng từ Binance, chỉ báo và model ML tính tại máy người dùng,
 // Claude gọi trực tiếp bằng API key của chính họ.
 
 import { analyze } from '../src/analysis/engine.js';
-import { normalizeSymbol, INTERVAL_MS } from '../src/data/binance.js';
+import { normalizeSymbol, resolveSymbol, INTERVAL_MS } from '../src/data/binance.js';
 import {
   loadStrategy, setStrategyValue, flattenStrategy, resetStrategy, overrideCount, isOverridden,
   loadPrompt, savePrompt, resetPrompt, promptIsCustom,
@@ -20,7 +20,7 @@ const NS = 'http://www.w3.org/2000/svg';
 const state = {
   snapshot: null,
   strategy: null,
-  symbol: 'BTC',
+  symbol: null,
   interval: '4h',
   configLoaded: false,
   busy: false,
@@ -215,13 +215,11 @@ function drawPriceChart(snap) {
 
   const lows = s.low.filter((v) => v != null);
   const highs = s.high.filter((v) => v != null);
-  const emaVals = [...s.emaFast, ...s.emaMid, ...s.emaSlow, ...s.bbUpper, ...s.bbLower]
-    .filter((v) => v != null);
   const srPrices = [...snap.structure.support, ...snap.structure.resistance]
     .filter((l) => Math.abs(l.distancePct) < 12).map((l) => l.price);
 
-  let min = Math.min(...lows, ...emaVals, ...srPrices);
-  let max = Math.max(...highs, ...emaVals, ...srPrices);
+  let min = Math.min(...lows, ...srPrices);
+  let max = Math.max(...highs, ...srPrices);
   const pad = (max - min) * 0.06 || Math.abs(max) * 0.01 || 1;
   min -= pad; max += pad;
 
@@ -237,28 +235,23 @@ function drawPriceChart(snap) {
     svg.appendChild(mk('text', { x: W - padR + 5, y: yy + 3 }, fmtNum(v)));
   }
 
-  const bbPts = [];
-  for (let i = 0; i < n; i++) if (s.bbUpper[i] != null) bbPts.push(`${x(i)},${y(s.bbUpper[i])}`);
-  for (let i = n - 1; i >= 0; i--) if (s.bbLower[i] != null) bbPts.push(`${x(i)},${y(s.bbLower[i])}`);
-  if (bbPts.length > 3) {
-    svg.appendChild(mk('polygon', {
-      points: bbPts.join(' '), fill: cssVar('--text-muted'), opacity: 0.09, stroke: 'none',
-    }));
-  }
-
+  // Hỗ trợ/kháng cự là khung tham chiếu duy nhất trên biểu đồ giá — không còn
+  // EMA hay Bollinger (xem .claude/skills/chi-bao/SKILL.md).
   const srColor = { support: cssVar('--good'), resistance: cssVar('--critical') };
   for (const kind of ['support', 'resistance']) {
     for (const lvl of snap.structure[kind].slice(0, 3)) {
       if (lvl.price < min || lvl.price > max) continue;
       const yy = y(lvl.price);
+      // Mức bị chạm nhiều lần thì vẽ dày hơn.
       svg.appendChild(mk('line', {
         x1: padL, y1: yy, x2: W - padR, y2: yy,
-        stroke: srColor[kind], 'stroke-width': 1, 'stroke-dasharray': '5 4', opacity: 0.75,
+        stroke: srColor[kind], 'stroke-width': Math.min(2.5, 1 + (lvl.touches - 1) * 0.5),
+        'stroke-dasharray': '5 4', opacity: 0.75,
       }));
       svg.appendChild(mk('text', {
         x: W - padR - 3, y: yy - 3, 'text-anchor': 'end',
         fill: srColor[kind], class: 'series-label',
-      }, `${kind === 'support' ? 'HT' : 'KC'} ${fmtNum(lvl.price)}`));
+      }, `${kind === 'support' ? 'HT' : 'KC'} ${fmtNum(lvl.price)} · ${lvl.touches}x`));
     }
   }
 
@@ -274,29 +267,18 @@ function drawPriceChart(snap) {
     }));
   }
 
-  const P = snap.indicatorParams || { emaFast: 20, emaMid: 50, emaSlow: 200, bbPeriod: 20, bbMult: 2 };
-  const emaDefs = [
-    { key: 'emaFast', color: cssVar('--series-1'), label: `EMA${P.emaFast}` },
-    { key: 'emaMid', color: cssVar('--series-2'), label: `EMA${P.emaMid}` },
-    { key: 'emaSlow', color: cssVar('--series-3'), label: `EMA${P.emaSlow}` },
-  ];
-  const labelSlots = [];
-  for (const def of emaDefs) {
-    const pts = [];
-    for (let i = 0; i < n; i++) if (s[def.key][i] != null) pts.push(`${x(i)},${y(s[def.key][i])}`);
-    if (pts.length < 2) continue;
-    svg.appendChild(mk('polyline', {
-      points: pts.join(' '), fill: 'none', stroke: def.color,
-      'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+  // Tường lệnh trong sổ lệnh: vẽ như mức ngang, chỉ khi nằm trong khung giá.
+  for (const w of snap.orderBook?.walls ?? []) {
+    if (w.price < min || w.price > max) continue;
+    const yy = y(w.price);
+    const col = w.side === 'bid' ? cssVar('--good') : cssVar('--critical');
+    svg.appendChild(mk('line', {
+      x1: padL, y1: yy, x2: W - padR, y2: yy,
+      stroke: col, 'stroke-width': 3, opacity: 0.3,
     }));
-    const lastVal = [...s[def.key]].reverse().find((v) => v != null);
-    if (lastVal == null) continue;
-    let ly = y(lastVal) + 3;
-    while (labelSlots.some((v) => Math.abs(v - ly) < 11)) ly += 11;
-    labelSlots.push(ly);
     svg.appendChild(mk('text', {
-      x: W - padR + 5, y: ly, fill: def.color, class: 'series-label',
-    }, def.label));
+      x: padL + 3, y: yy - 3, fill: col, class: 'series-label',
+    }, `Tường ${w.side === 'bid' ? 'MUA' : 'BÁN'} ${w.ratioToAvg.toFixed(1)}x`));
   }
 
   const maxVol = Math.max(...s.volume.filter(Number.isFinite), 1);
@@ -334,28 +316,25 @@ function drawPriceChart(snap) {
     plotX: padL, plotW, count: n, top: priceTop, bottom: volTop + volH,
     onIndex: (i) => {
       const changePct = ((s.close[i] - s.open[i]) / s.open[i]) * 100;
+      const share = s.volume[i] ? (s.cvdDelta[i] / s.volume[i]) * 100 : null;
       return `<div class="tt-time">${fmtTime(s.time[i], snap.interval)}</div>`
         + ttRow('Mở', fmtNum(s.open[i])) + ttRow('Cao', fmtNum(s.high[i]))
         + ttRow('Thấp', fmtNum(s.low[i]))
         + ttRow('Đóng', `${fmtNum(s.close[i])} (${fmtSigned(changePct)}%)`)
-        + ttRow(`EMA${P.emaFast}`, fmtNum(s.emaFast[i]))
-        + ttRow(`EMA${P.emaMid}`, fmtNum(s.emaMid[i]))
-        + ttRow(`EMA${P.emaSlow}`, fmtNum(s.emaSlow[i]))
-        + ttRow('Khối lượng', fmtNum(s.volume[i]));
+        + ttRow('Khối lượng', fmtNum(s.volume[i]))
+        + ttRow('Mua chủ động', share == null ? '—' : `${fmtSigned(share)}% KL`);
     },
   });
 
   const lg = $('price-legend');
   clear(lg);
   lg.append(
-    legendItem(`EMA${P.emaFast}`, cssVar('--series-1')),
-    legendItem(`EMA${P.emaMid}`, cssVar('--series-2')),
-    legendItem(`EMA${P.emaSlow}`, cssVar('--series-3')),
     legendItem('Hỗ trợ', cssVar('--good'), true),
     legendItem('Kháng cự', cssVar('--critical'), true),
+    legendItem('Khối lượng TB', cssVar('--text-muted'), true),
   );
   $('price-chart-sub').textContent =
-    `${n} nến ${snap.interval} · nến xanh = đóng cao hơn mở · dải mờ = Bollinger ${P.bbPeriod}/${P.bbMult}`;
+    `${n} nến ${snap.interval} · nến xanh = đóng cao hơn mở · HT/KC kèm số lần chạm`;
 
   renderCandleTable(snap);
 }
@@ -367,7 +346,8 @@ function renderCandleTable(snap) {
   const table = document.createElement('table');
   const head = document.createElement('thead');
   head.innerHTML = '<tr><th>Thời gian</th><th class="num">Mở</th><th class="num">Cao</th>'
-    + '<th class="num">Thấp</th><th class="num">Đóng</th><th class="num">%</th><th class="num">RSI</th></tr>';
+    + '<th class="num">Thấp</th><th class="num">Đóng</th><th class="num">%</th>'
+    + '<th class="num">Mua CĐ</th></tr>';
   const body = document.createElement('tbody');
   for (let i = Math.max(0, s.close.length - 10); i < s.close.length; i++) {
     const chg = ((s.close[i] - s.open[i]) / s.open[i]) * 100;
@@ -377,7 +357,9 @@ function renderCandleTable(snap) {
       [fmtNum(s.open[i]), 'num'], [fmtNum(s.high[i]), 'num'],
       [fmtNum(s.low[i]), 'num'], [fmtNum(s.close[i]), 'num'],
       [`${fmtSigned(chg)}%`, `num ${chg >= 0 ? 'delta-up' : 'delta-down'}`],
-      [s.rsi[i] == null ? '—' : s.rsi[i].toFixed(1), 'num'],
+      [s.volume[i] && s.cvdDelta[i] != null
+        ? `${fmtSigned((s.cvdDelta[i] / s.volume[i]) * 100)}%` : '—',
+      `num ${(s.cvdDelta[i] ?? 0) >= 0 ? 'delta-up' : 'delta-down'}`],
     ]) {
       const td = document.createElement('td');
       td.className = cls;
@@ -390,75 +372,82 @@ function renderCandleTable(snap) {
   host.appendChild(table);
 }
 
-// ---------- RSI ----------
+// ---------- CVD luỹ tiến ----------
 
-function drawRsi(snap) {
-  const svg = $('rsi-chart');
-  const tip = $('rsi-tip');
+function drawCvd(snap) {
+  const svg = $('cvd-chart');
+  const tip = $('cvd-tip');
   clear(svg);
   const s = snap.series;
-  const W = 420, H = 130, padL = 4, padR = 30, padT = 12, padB = 16;
+  const W = 420, H = 130, padL = 4, padR = 44, padT = 14, padB = 16;
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const n = s.rsi.length;
+  const n = s.cvd.length;
+  const vals = s.cvd.filter((v) => v != null);
+  if (!vals.length) return;
+  const lo = Math.min(...vals);
+  const hi = Math.max(...vals);
+  const span = hi - lo || Math.abs(hi) || 1;
   const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const y = (v) => padT + plotH - (v / 100) * plotH;
+  const y = (v) => padT + plotH - ((v - lo) / span) * plotH;
 
-  svg.appendChild(mk('rect', {
-    x: padL, y: y(70), width: plotW, height: y(30) - y(70),
-    fill: cssVar('--text-muted'), opacity: 0.07,
-  }));
-  for (const [v, label] of [[70, '70 quá mua'], [50, '50'], [30, '30 quá bán']]) {
+  for (const v of [lo, lo + span / 2, hi]) {
     svg.appendChild(mk('line', {
       x1: padL, y1: y(v), x2: W - padR, y2: y(v), class: 'grid-line',
-      'stroke-dasharray': v === 50 ? '2 3' : null,
     }));
-    svg.appendChild(mk('text', { x: W - padR + 4, y: y(v) + 3 }, label));
+    svg.appendChild(mk('text', { x: W - padR + 4, y: y(v) + 3 }, fmtNum(v)));
   }
 
   const pts = [];
-  for (let i = 0; i < n; i++) if (s.rsi[i] != null) pts.push(`${x(i)},${y(s.rsi[i])}`);
+  for (let i = 0; i < n; i++) if (s.cvd[i] != null) pts.push(`${x(i)},${y(s.cvd[i])}`);
   if (pts.length > 1) {
     svg.appendChild(mk('polyline', {
       points: pts.join(' '), fill: 'none', stroke: cssVar('--series-1'),
       'stroke-width': 2, 'stroke-linejoin': 'round',
     }));
   }
-  if (s.rsi[n - 1] != null) {
+  const lastCvd = [...s.cvd].reverse().find((v) => v != null);
+  if (lastCvd != null) {
     svg.appendChild(mk('circle', {
-      cx: x(n - 1), cy: y(s.rsi[n - 1]), r: 4.5,
+      cx: x(n - 1), cy: y(lastCvd), r: 4.5,
       fill: cssVar('--series-1'), stroke: cssVar('--surface-1'), 'stroke-width': 2,
     }));
   }
+
+  const slope = snap.indicators.cvdSlope;
   svg.appendChild(mk('text', {
-    x: padL, y: 9, class: 'series-label', fill: cssVar('--text-secondary'),
-  }, `RSI ${snap.indicators.rsi ?? '—'}`));
+    x: padL, y: 10, class: 'series-label', fill: cssVar('--text-secondary'),
+  }, `CVD luỹ tiến · ${snap.indicatorParams?.cvdSlope ?? 20} nến: `
+    + `${slope == null ? '—' : fmtSigned(slope * 100)}% khối lượng`));
 
   attachCrosshair(svg, tip, {
     plotX: padL, plotW, count: n, top: padT, bottom: padT + plotH,
-    onIndex: (i) => (s.rsi[i] == null ? null
-      : `<div class="tt-time">${fmtTime(s.time[i], snap.interval)}</div>${ttRow('RSI', s.rsi[i].toFixed(1))}`),
+    onIndex: (i) => (s.cvd[i] == null ? null
+      : `<div class="tt-time">${fmtTime(s.time[i], snap.interval)}</div>`
+        + ttRow('CVD', fmtNum(s.cvd[i]))
+        + ttRow('Độ dốc', s.cvdSlope[i] == null ? '—' : `${fmtSigned(s.cvdSlope[i] * 100)}% KL`)),
   });
 }
 
-// ---------- MACD ----------
+// ---------- Delta từng nến ----------
 
-function drawMacd(snap) {
-  const svg = $('macd-chart');
-  const tip = $('macd-tip');
+function drawFlow(snap) {
+  const svg = $('flow-chart');
+  const tip = $('flow-tip');
   clear(svg);
   const s = snap.series;
-  const W = 420, H = 120, padL = 4, padR = 30, padT = 14, padB = 14;
+  const W = 420, H = 120, padL = 4, padR = 44, padT = 14, padB = 14;
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const n = s.macdHist.length;
-  const vals = [...s.macdHist, ...s.macdLine, ...s.macdSignal].filter((v) => v != null);
-  const extent = Math.max(...vals.map(Math.abs), 1e-9);
+  const n = s.cvdDelta.length;
+  // Chuẩn hoá delta theo volume từng nến -> so được giữa các nến to nhỏ khác nhau.
+  const share = s.cvdDelta.map((d, i) => (d != null && s.volume[i] ? d / s.volume[i] : null));
+  const extent = Math.max(...share.filter((v) => v != null).map(Math.abs), 0.05);
   const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
   const y = (v) => padT + plotH / 2 - (v / extent) * (plotH / 2);
   const barW = Math.max(1, Math.min(6, (plotW / Math.max(1, n - 1)) * 0.6));
 
   svg.appendChild(mk('line', { x1: padL, y1: y(0), x2: W - padR, y2: y(0), class: 'axis-line' }));
   for (let i = 0; i < n; i++) {
-    const v = s.macdHist[i];
+    const v = share[i];
     if (v == null) continue;
     svg.appendChild(mk('rect', {
       x: x(i) - barW / 2, y: v >= 0 ? y(v) : y(0), width: barW,
@@ -466,38 +455,36 @@ function drawMacd(snap) {
       fill: v >= 0 ? cssVar('--up') : cssVar('--down'), opacity: 0.75, rx: Math.min(1.5, barW / 3),
     }));
   }
-  for (const [key, color] of [['macdLine', cssVar('--series-1')], ['macdSignal', cssVar('--series-2')]]) {
-    const pts = [];
-    for (let i = 0; i < n; i++) if (s[key][i] != null) pts.push(`${x(i)},${y(s[key][i])}`);
-    if (pts.length > 1) {
-      svg.appendChild(mk('polyline', {
-        points: pts.join(' '), fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round',
-      }));
-    }
-  }
-  svg.appendChild(mk('text', { x: padL, y: 10, class: 'series-label', fill: cssVar('--text-secondary') }, 'MACD'));
+  svg.appendChild(mk('text', {
+    x: padL, y: 10, class: 'series-label', fill: cssVar('--text-secondary'),
+  }, 'Mua chủ động ròng mỗi nến (% khối lượng)'));
   svg.appendChild(mk('text', { x: W - padR + 4, y: y(0) + 3 }, '0'));
+  svg.appendChild(mk('text', { x: W - padR + 4, y: y(extent) + 3 }, `+${(extent * 100).toFixed(0)}%`));
+  svg.appendChild(mk('text', { x: W - padR + 4, y: y(-extent) + 3 }, `−${(extent * 100).toFixed(0)}%`));
 
   attachCrosshair(svg, tip, {
     plotX: padL, plotW, count: n, top: padT, bottom: padT + plotH,
-    onIndex: (i) => (s.macdHist[i] == null ? null
+    onIndex: (i) => (share[i] == null ? null
       : `<div class="tt-time">${fmtTime(s.time[i], snap.interval)}</div>`
-        + ttRow('Histogram', fmtNum(s.macdHist[i]))
-        + ttRow('MACD', fmtNum(s.macdLine[i]))
-        + ttRow('Signal', fmtNum(s.macdSignal[i]))),
+        + ttRow('Mua chủ động', `${fmtSigned(share[i] * 100)}% KL`)
+        + ttRow('Delta', fmtNum(s.cvdDelta[i]))
+        + ttRow('Khối lượng', fmtNum(s.volume[i]))),
   });
 
   const lg = $('osc-legend');
   clear(lg);
-  lg.append(legendItem('RSI / MACD', cssVar('--series-1')), legendItem('Signal', cssVar('--series-2')));
+  lg.append(
+    legendItem('CVD luỹ tiến', cssVar('--series-1')),
+    legendItem('Mua chủ động', cssVar('--up')),
+    legendItem('Bán chủ động', cssVar('--down')),
+  );
 }
 
 // ---------- Đóng góp từng nhóm ----------
 
 const GROUP_LABELS = {
-  trend: 'Xu hướng', momentum: 'Động lượng', macd: 'MACD', structure: 'Cấu trúc',
-  volume: 'Khối lượng', meanReversion: 'Hồi quy TB', stochastic: 'Stochastic',
-  derivatives: 'Phái sinh',
+  cvd: 'CVD', volume: 'Khối lượng', derivatives: 'Phái sinh (OI + funding)', positioning: 'Định vị đám đông',
+  structure: 'Hỗ trợ/kháng cự', orderBook: 'Sổ lệnh',
 };
 
 function drawBreakdown(snap) {
@@ -635,12 +622,6 @@ function renderHero(snap) {
     const li = document.createElement('li');
     li.className = 'alert';
     li.textContent = c;
-    list.appendChild(li);
-  }
-  if (snap.divergence) {
-    const li = document.createElement('li');
-    li.className = 'alert';
-    li.textContent = `Phân kỳ ${snap.divergence.type === 'bullish' ? 'TĂNG' : 'GIẢM'}: ${snap.divergence.detail}`;
     list.appendChild(li);
   }
 }
@@ -789,14 +770,12 @@ function renderIndicators(snap) {
   const dl = document.createElement('dl');
   dl.className = 'kv';
   const rows = [
-    ['RSI', `${i.rsi} (5 nến trước ${i.rsi5BarsAgo})`],
-    ['ADX', `${i.adx}  (+DI ${i.plusDI} / −DI ${i.minusDI})`],
-    ['MACD hist', `${fmtNum(i.macdHist)} (trước ${fmtNum(i.macdHistPrev)})`],
-    ['Stochastic K/D', `${i.stochK} / ${i.stochD}`],
-    ['ATR', `${fmtNum(i.atr)} (${i.atrPercent}% giá)`],
-    ['Bollinger', `${fmtNum(i.bbLower)} – ${fmtNum(i.bbUpper)}`],
-    ['Khối lượng', `${i.volumeRatio}x trung bình`],
-    ['VWAP20', fmtNum(i.vwap)],
+    ['Khối lượng', `${fmtNum(i.volume)} (${i.volumeRatio}x trung bình)`],
+    ['CVD luỹ tiến', fmtNum(i.cvd)],
+    ['Mua chủ động nến này',
+      i.cvdDeltaShare == null ? '—' : `${fmtSigned(i.cvdDeltaShare * 100)}% khối lượng`],
+    [`CVD ${snap.indicatorParams?.cvdSlope ?? 20} nến`,
+      i.cvdSlope == null ? '—' : `${fmtSigned(i.cvdSlope * 100)}% khối lượng cùng kỳ`],
   ];
   if (snap.derivatives?.fundingRate != null) {
     rows.push(['Funding rate', `${snap.derivatives.fundingRatePercent}%`]);
@@ -804,7 +783,16 @@ function renderIndicators(snap) {
       rows.push(['Open interest', `${fmtSigned(snap.derivatives.openInterestChangePct)}%`]);
     }
   }
-  if (snap.orderBook) rows.push(['Lệch sổ lệnh', `${fmtSigned(snap.orderBook.imbalance * 100)}%`]);
+  if (snap.orderBook) {
+    rows.push(['Lệch sổ lệnh', `${fmtSigned(snap.orderBook.imbalance * 100)}%`]);
+    if (snap.orderBook.depthSpanPct != null) {
+      rows.push(['Độ trải sổ lệnh', `±${snap.orderBook.depthSpanPct.toFixed(2)}%`]);
+    }
+    for (const w of snap.orderBook.walls ?? []) {
+      rows.push([`Tường ${w.side === 'bid' ? 'mua' : 'bán'}`,
+        `${fmtNum(w.price)} (${fmtSigned(w.distancePct)}%, ${w.ratioToAvg.toFixed(1)}x TB)`]);
+    }
+  }
   for (const [k, v] of rows) {
     const dt = document.createElement('dt'); dt.textContent = k;
     const dd = document.createElement('dd'); dd.textContent = String(v);
@@ -819,25 +807,53 @@ function renderAll(snap) {
   state.snapshot = snap;
   renderHero(snap);
   drawPriceChart(snap);
-  drawRsi(snap);
-  drawMacd(snap);
+  drawCvd(snap);
+  drawFlow(snap);
   drawBreakdown(snap);
   renderMl(snap);
   renderLevels(snap);
   renderIndicators(snap);
-  $('train-target').textContent = `Sẽ train: ${snap.symbol} ${snap.interval}`;
+  updateTargetLabel();
+}
+
+/**
+ * Token đang chọn = ô nhập, luôn luôn. Không có fallback về BTC: nếu để trống
+ * thì báo lỗi chứ không âm thầm phân tích một token khác.
+ */
+async function selectedSymbol() {
+  const raw = $('symbol').value.trim();
+  if (!raw) throw new Error('Nhập mã token trước đã (ví dụ BTC, ETH, SOL).');
+  // Đối chiếu danh sách cặp thật của Binance thay vì đoán, để "wbtc" ra WBTCUSDT
+  // còn "ethbtc" ra ETHBTC.
+  return resolveSymbol(raw);
+}
+
+/** Cho người dùng thấy train/backtest sẽ chạy trên token nào. */
+function updateTargetLabel() {
+  const el = $('train-target');
+  if (!el) return;
+  const raw = $('symbol').value.trim();
+  if (!raw) {
+    el.textContent = 'Chưa chọn token';
+    return;
+  }
+  try {
+    el.textContent = `Sẽ train: ${normalizeSymbol(raw)} ${$('interval').value}`;
+  } catch {
+    // Đang gõ dở, chưa thành mã hợp lệ.
+    el.textContent = 'Chưa chọn token';
+  }
 }
 
 async function runAnalyze() {
   if (state.busy) return;
   state.busy = true;
   hideBanner();
-  const symbolRaw = $('symbol').value.trim() || 'BTC';
   const interval = $('interval').value;
   $('btn-analyze').disabled = true;
   setStatus('đang lấy dữ liệu Binance…', true);
   try {
-    const symbol = normalizeSymbol(symbolRaw);
+    const symbol = await selectedSymbol();
     state.symbol = symbol;
     state.interval = interval;
     state.strategy = await loadStrategy();
@@ -991,8 +1007,15 @@ function runWorkerJob(kind, message, { logEl, resultEl, button, onDone }) {
 }
 
 async function runTrain() {
-  const symbol = state.snapshot?.symbol || normalizeSymbol($('symbol').value.trim() || 'BTC');
-  const interval = state.snapshot?.interval || $('interval').value;
+  // Lấy từ ô nhập, KHÔNG lấy từ snapshot cũ: người dùng có thể đã đổi token mà
+  // chưa bấm Phân tích, khi đó train phải theo token mới.
+  let symbol;
+  try {
+    symbol = await selectedSymbol();
+  } catch (err) {
+    return showBanner(err.message);
+  }
+  const interval = $('interval').value;
   const strategy = state.strategy || await loadStrategy();
   runWorkerJob('Train', { job: 'train', symbol, interval, strategy }, {
     logEl: $('train-log'),
@@ -1123,8 +1146,13 @@ function statTile(title, value, sub, tone) {
 }
 
 async function runBacktest() {
-  const symbol = state.snapshot?.symbol || normalizeSymbol($('symbol').value.trim() || 'BTC');
-  const interval = state.snapshot?.interval || $('interval').value;
+  let symbol;
+  try {
+    symbol = await selectedSymbol();
+  } catch (err) {
+    return showBanner(err.message);
+  }
+  const interval = $('interval').value;
   const strategy = state.strategy || await loadStrategy();
   const candles = Number($('bt-candles').value) || 3000;
   runWorkerJob('Backtest', {
@@ -1502,6 +1530,10 @@ async function init() {
   $('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') runAnalyze(); });
   $('ask-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') runAsk(); });
   $('interval').addEventListener('change', runAnalyze);
+  // Nhãn "Sẽ train" phải theo ô nhập ngay khi gõ, để không train nhầm token.
+  $('symbol').addEventListener('input', updateTargetLabel);
+  $('interval').addEventListener('change', updateTargetLabel);
+  updateTargetLabel();
   for (const btn of document.querySelectorAll('[role="tab"]')) {
     btn.addEventListener('click', () => switchTab(btn.id));
   }

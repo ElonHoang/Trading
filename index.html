@@ -55,12 +55,12 @@
 
   <div class="chart-row">
     <section class="card">
-      <h2>Giá &amp; đường trung bình</h2>
+      <h2>Giá &amp; vùng hỗ trợ/kháng cự</h2>
       <p class="sub" id="price-chart-sub">—</p>
       <div class="legend" id="price-legend"></div>
       <div class="chart-wrap" id="price-wrap">
         <svg class="chart" id="price-chart" viewBox="0 0 900 460" role="img"
-             aria-label="Biểu đồ nến, đường EMA, dải Bollinger và vùng hỗ trợ/kháng cự"></svg>
+             aria-label="Biểu đồ nến, khối lượng, vùng hỗ trợ/kháng cự và tường lệnh"></svg>
         <div class="tooltip" id="price-tip" role="tooltip"></div>
       </div>
       <details style="margin-top:10px">
@@ -71,18 +71,18 @@
 
     <div style="display:grid; gap:14px; align-content:start; min-width:0">
       <section class="card">
-        <h2>Chỉ báo động lượng</h2>
-        <p class="sub">RSI (vùng 30/70) và MACD histogram</p>
+        <h2>Dòng tiền chủ động</h2>
+        <p class="sub">CVD luỹ tiến và mua chủ động ròng mỗi nến</p>
         <div class="legend" id="osc-legend"></div>
-        <div class="chart-wrap" id="rsi-wrap">
-          <svg class="chart" id="rsi-chart" viewBox="0 0 420 130" role="img"
-               aria-label="Chỉ số RSI theo thời gian với vùng quá mua 70 và quá bán 30"></svg>
-          <div class="tooltip" id="rsi-tip" role="tooltip"></div>
+        <div class="chart-wrap" id="cvd-wrap">
+          <svg class="chart" id="cvd-chart" viewBox="0 0 420 130" role="img"
+               aria-label="CVD luỹ tiến theo thời gian"></svg>
+          <div class="tooltip" id="cvd-tip" role="tooltip"></div>
         </div>
-        <div class="chart-wrap" id="macd-wrap" style="margin-top:6px">
-          <svg class="chart" id="macd-chart" viewBox="0 0 420 120" role="img"
-               aria-label="MACD histogram và đường MACD theo thời gian"></svg>
-          <div class="tooltip" id="macd-tip" role="tooltip"></div>
+        <div class="chart-wrap" id="flow-wrap" style="margin-top:6px">
+          <svg class="chart" id="flow-chart" viewBox="0 0 420 120" role="img"
+               aria-label="Mua chủ động ròng mỗi nến, tính theo phần trăm khối lượng"></svg>
+          <div class="tooltip" id="flow-tip" role="tooltip"></div>
         </div>
       </section>
 

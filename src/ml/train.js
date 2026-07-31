@@ -114,12 +114,11 @@ export async function trainModel(symbolInput, interval, strategy, onProgress = (
   const dataset = buildDataset(candles, {
     horizon: mlCfg.horizon ?? 12,
     thresholdMode: mlCfg.thresholdMode ?? 'triple-barrier',
-    atrMult: mlCfg.atrMult ?? 1.0,
     thresholdPct: mlCfg.thresholdPct ?? 1.5,
     indicatorParams: strategy.indicators,
   });
   if (dataset.X.length < 300) {
-    throw new Error(`Chỉ có ${dataset.X.length} mẫu sau khi gán nhãn — quá ít. Giảm ml.atrMult hoặc tăng ml.trainCandles.`);
+    throw new Error(`Chỉ có ${dataset.X.length} mẫu sau khi gán nhãn — quá ít. Giảm ml.thresholdPct hoặc tăng ml.trainCandles.`);
   }
 
   const params = {

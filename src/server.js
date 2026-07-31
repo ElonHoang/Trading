@@ -1,41 +1,54 @@
 // Server cho UI local. Không cần API key: mọi dữ liệu lấy từ REST công khai của Binance.
+//
+// Phục vụ hai giao diện:
+//   /            dashboard tĩnh (index.html + web/) — giống hệt bản trên GitHub Pages,
+//                mọi tính toán chạy trong browser bằng chính các module trong src/
+//   /realtime/   giao diện realtime (public/index.html) — nến cập nhật qua WebSocket
+//                Binance, số liệu phân tích lấy từ /api/analyze
+//
+// Chỉ những thư mục trong ALLOWED_ROOTS được phục vụ, nên .env, node_modules
+// và data/ không bị lộ.
 
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { analyze } from './analysis/analyze.js';
-import { INTERVALS } from './data/binance.js';
+import { analyze } from './analysis/engine.js';
+import { INTERVALS, resolveSymbol } from './data/binance.js';
+import { loadStrategy } from './config.js';
+import { loadModel } from './ml/model-store.js';
 import { readWatchlist, addSymbol, removeSymbol } from './data/watchlist.js';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 3000;
 
-// Module browser import trực tiếp: tính lại chỉ báo và vẽ chart khi WebSocket
-// đẩy nến mới. Chỉ mở đúng các file này, không expose cả thư mục src/.
-const BROWSER_MODULES = {
-  'indicators.js': 'analysis/indicators.js',
-  'summary.js': 'analysis/summary.js',
-  'chart.js': 'chart/render.js',
-};
+// Dashboard tĩnh import trực tiếp module trong src/ qua HTTP, nên phải phục vụ
+// nguyên trạng các thư mục này.
+const ALLOWED_ROOTS = ['web', 'src', 'config', 'models'];
+const ALLOWED_FILES = ['/', '/index.html', '/favicon.ico', '/README.md'];
 
 const app = express();
 app.use(express.json());
-app.use(express.static(path.join(rootDir, 'public')));
 
-for (const [name, rel] of Object.entries(BROWSER_MODULES)) {
-  app.get(`/lib/${name}`, (req, res) => {
-    res.type('application/javascript').sendFile(path.join(rootDir, 'src', rel));
-  });
-}
+// Giao diện realtime
+app.use('/realtime', express.static(path.join(rootDir, 'public')));
 
 app.get('/api/intervals', (req, res) => res.json(INTERVALS));
 
 app.get('/api/analyze', async (req, res) => {
-  const { symbol, interval = '4h', limit } = req.query;
+  const { symbol, interval = '4h', bars } = req.query;
   try {
     if (!symbol) throw new Error('Thiếu tham số symbol');
-    res.json(await analyze(symbol, interval, Number(limit) || 300));
+    // Đối chiếu danh sách cặp thật của Binance, không đoán.
+    const normalized = await resolveSymbol(symbol);
+    const strategy = await loadStrategy();
+    // Chưa train model cho cặp này thì engine tự báo trong ml.reason.
+    const storedModel = await loadModel(normalized, interval).catch(() => null);
+    res.json(await analyze(normalized, interval, strategy, {
+      storedModel,
+      includeSeries: true,
+      seriesBars: Number(bars) || 180,
+    }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -55,6 +68,15 @@ app.delete('/api/watchlist/:symbol', async (req, res) => {
   res.json(await removeSymbol(req.params.symbol));
 });
 
+// Static cho dashboard tĩnh, đặt sau /api để không chắn route.
+app.use((req, res, next) => {
+  const top = req.path.split('/')[1];
+  if (ALLOWED_FILES.includes(req.path) || ALLOWED_ROOTS.includes(top)) return next();
+  return res.status(404).type('text/plain; charset=utf-8').send(`Không tìm thấy: ${req.path}`);
+});
+app.use(express.static(rootDir, { index: 'index.html', dotfiles: 'deny' }));
+
 app.listen(PORT, () => {
-  console.log(`Giao diện phân tích: http://localhost:${PORT}`);
+  console.log(`Dashboard tĩnh:      http://localhost:${PORT}`);
+  console.log(`Giao diện realtime:  http://localhost:${PORT}/realtime/`);
 });

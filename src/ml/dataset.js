@@ -6,20 +6,21 @@ import { featureVector, FEATURE_NAMES } from '../features.js';
 /**
  * Gán nhãn cho từng nến.
  *
+ * Rào và ngưỡng tính theo % giá (`thresholdPct`) vì hệ thống đã bỏ ATR — xem
+ * .claude/skills/chi-bao/SKILL.md.
+ *
  * thresholdMode:
- *  - 'triple-barrier' (khuyến nghị): đặt hai rào TP/SL cách entry `atrMult` lần ATR.
+ *  - 'triple-barrier' (khuyến nghị): đặt hai rào TP/SL cách entry `thresholdPct`%.
  *    Đi tới trước tối đa `horizon` nến xem rào nào bị chạm TRƯỚC.
  *    label 1 = rào trên chạm trước, 0 = rào dưới chạm trước, bỏ mẫu nếu không chạm rào nào.
  *    Nhãn này khớp đúng với cách tool sinh SL/TP, nên xác suất model trả về
  *    đọc được là "khả năng ăn TP trước khi ăn SL".
- *  - 'atr': label theo lợi nhuận sau đúng `horizon` nến, ngưỡng nhiễu = atrMult*ATR%*sqrt(horizon).
- *  - 'fixed': như trên nhưng ngưỡng cố định = thresholdPct (%).
+ *  - 'fixed': label theo lợi nhuận sau đúng `horizon` nến, ngưỡng cố định = thresholdPct (%).
  */
 export function buildDataset(candles, opts = {}) {
   const {
     horizon = 6,
     thresholdMode = 'triple-barrier',
-    atrMult = 1.0,
     thresholdPct = 1.5,
     indicatorParams = {},
   } = opts;
@@ -35,11 +36,10 @@ export function buildDataset(candles, opts = {}) {
     const fv = featureVector(candles, ind, i);
     if (!fv) continue;
     const entry = candles[i].close;
-    const atrVal = ind.atr[i];
-    if (!atrVal) continue;
+    if (!entry) continue;
 
     if (thresholdMode === 'triple-barrier') {
-      const dist = atrMult * atrVal;
+      const dist = entry * (thresholdPct / 100);
       const upper = entry + dist;
       const lower = entry - dist;
       let label = null;
@@ -69,13 +69,7 @@ export function buildDataset(candles, opts = {}) {
 
     const exit = candles[i + horizon].close;
     const ret = ((exit - entry) / entry) * 100;
-    let thr;
-    if (thresholdMode === 'atr') {
-      thr = atrMult * ((atrVal / entry) * 100) * Math.sqrt(horizon);
-    } else {
-      thr = thresholdPct;
-    }
-    thr = Math.max(thr, 0.2);
+    const thr = Math.max(thresholdPct, 0.2);
     if (Math.abs(ret) < thr) { skippedNeutral++; continue; }
     X.push(fv);
     y.push(ret > 0 ? 1 : 0);
@@ -94,7 +88,7 @@ export function buildDataset(candles, opts = {}) {
       positiveRate: y.length ? y.reduce((a, b) => a + b, 0) / y.length : 0,
       horizon,
       thresholdMode,
-      atrMult,
+      thresholdPct,
     },
   };
 }

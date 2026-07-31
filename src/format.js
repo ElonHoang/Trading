@@ -1,4 +1,4 @@
-// Định dạng snapshot thành văn bản thuần (plain text) — an toàn cho Telegram
+﻿// Định dạng snapshot thành văn bản thuần (plain text) — an toàn cho Telegram
 // mà không phải escape markdown.
 
 import { fmtNum } from './analysis/engine.js';
@@ -58,19 +58,32 @@ function translateReliability(r) {
 export function formatIndicators(s) {
   const i = s.indicators;
   const L = ['📊 CHỈ BÁO'];
-  L.push(`RSI ${i.rsi} (5 nến trước: ${i.rsi5BarsAgo})   ADX ${i.adx} (+DI ${i.plusDI} / -DI ${i.minusDI})`);
-  L.push(`MACD: line ${fmtNum(i.macdLine)} | signal ${fmtNum(i.macdSignal)} | hist ${fmtNum(i.macdHist)} (trước: ${fmtNum(i.macdHistPrev)})`);
-  L.push(`EMA${20}/${50}/${200}: ${fmtNum(i.emaFast)} / ${fmtNum(i.emaMid)} / ${fmtNum(i.emaSlow)}`);
-  L.push(`Bollinger: ${fmtNum(i.bbLower)} — ${fmtNum(i.bbMid)} — ${fmtNum(i.bbUpper)}`);
-  L.push(`Stochastic K/D: ${i.stochK} / ${i.stochD}    ATR: ${fmtNum(i.atr)} (${i.atrPercent}%)`);
-  L.push(`Khối lượng: ${i.volumeRatio}x trung bình    VWAP20: ${fmtNum(i.vwap)}`);
-  if (s.divergence) {
-    L.push(`⚠️ Phân kỳ ${s.divergence.type === 'bullish' ? 'TĂNG' : 'GIẢM'}: ${s.divergence.detail}`);
-  }
+
+  L.push(`Khối lượng: ${fmtNum(i.volume)} (${i.volumeRatio}x trung bình ${s.indicatorParams?.volumeAvg ?? 20} nến)`);
+
+  const share = i.cvdDeltaShare != null ? `${(i.cvdDeltaShare * 100).toFixed(1)}%` : '—';
+  const slope = i.cvdSlope != null ? `${(i.cvdSlope * 100).toFixed(1)}%` : '—';
+  L.push(`CVD luỹ tiến: ${fmtNum(i.cvd)}   nến này: ${share} khối lượng là mua chủ động ròng`);
+  L.push(`CVD ${s.indicatorParams?.cvdSlope ?? 20} nến: ${slope} khối lượng cùng kỳ`);
+
   if (s.derivatives?.fundingRate != null) {
-    L.push(`Funding: ${s.derivatives.fundingRatePercent}%` +
-      (s.derivatives.openInterestChangePct != null
-        ? `   OI: ${s.derivatives.openInterestChangePct > 0 ? '+' : ''}${s.derivatives.openInterestChangePct}%` : ''));
+    L.push(`Funding: ${s.derivatives.fundingRatePercent}%`
+      + (s.derivatives.openInterestChangePct != null
+        ? `   OI: ${s.derivatives.openInterestChangePct > 0 ? '+' : ''}${s.derivatives.openInterestChangePct}% (14 kỳ 4h)`
+        : ''));
+  } else {
+    L.push('Funding / OI: không có hợp đồng futures cho token này');
+  }
+
+  const ob = s.orderBook;
+  if (ob) {
+    L.push(`Sổ lệnh: lệch ${(ob.imbalance * 100).toFixed(1)}% về phía ${ob.imbalance > 0 ? 'mua' : 'bán'}`
+      + (ob.depthSpanPct != null ? `   độ trải ±${ob.depthSpanPct.toFixed(2)}%` : ''));
+    for (const w of ob.walls ?? []) {
+      L.push(`   Tường ${w.side === 'bid' ? 'MUA ' : 'BÁN '} ${fmtNum(w.price)} `
+        + `(${w.distancePct >= 0 ? '+' : ''}${w.distancePct.toFixed(2)}%, ${w.ratioToAvg.toFixed(1)}x TB)`);
+    }
+    if (ob.walls?.length) L.push('   (tường lệnh có thể là spoofing — đối chiếu CVD/volume)');
   }
   return L.join('\n');
 }
@@ -78,9 +91,8 @@ export function formatIndicators(s) {
 export function formatBreakdown(s) {
   const L = ['🧮 PHÂN TÍCH THEO NHÓM (đóng góp vào điểm tổng)'];
   const names = {
-    trend: 'Xu hướng', momentum: 'Động lượng', macd: 'MACD', structure: 'Cấu trúc',
-    volume: 'Khối lượng', meanReversion: 'Hồi quy TB', stochastic: 'Stochastic',
-    derivatives: 'Phái sinh',
+    cvd: 'CVD', volume: 'Khối lượng', derivatives: 'Phái sinh (OI + funding)',
+    positioning: 'Định vị đám đông', structure: 'Hỗ trợ/kháng cự', orderBook: 'Sổ lệnh',
   };
   const entries = Object.entries(s.rules.breakdown)
     .filter(([, v]) => v.weight > 0)

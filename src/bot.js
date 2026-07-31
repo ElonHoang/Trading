@@ -1,4 +1,4 @@
-// Bot Telegram. Chạy: npm run bot
+﻿// Bot Telegram. Chạy: npm run bot
 //
 // Lệnh:
 //   /a BTC 4h          phân tích đầy đủ (chỉ báo + ML + Claude)
@@ -16,7 +16,7 @@
 //   /unwatch BTC 4h  |  /watchlist
 
 import { Bot, GrammyError, HttpError } from 'grammy';
-import { normalizeSymbol, INTERVAL_MS } from './data/binance.js';
+import { resolveSymbol, INTERVAL_MS } from './data/binance.js';
 import {
   loadStrategy, setStrategyValue, flattenStrategy, loadPrompt, savePrompt,
   loadWatchlist, saveWatchlist,
@@ -71,8 +71,9 @@ async function send(ctx, text) {
   }
 }
 
-/** Phân tích tham số "BTC 4h" -> { symbol, interval } */
-function parseArgs(text, fallbackInterval = DEFAULT_INTERVAL) {
+/** Phân tích tham số "BTC 4h" -> { symbol, interval }. Async vì symbol được đối chiếu
+ *  với danh sách cặp thật của Binance thay vì đoán. */
+async function parseArgs(text, fallbackInterval = DEFAULT_INTERVAL) {
   const parts = String(text || '').trim().split(/\s+/).filter(Boolean);
   if (!parts.length) throw new Error('Thiếu mã token. Ví dụ: /a BTC 4h');
   let interval = fallbackInterval;
@@ -81,7 +82,7 @@ function parseArgs(text, fallbackInterval = DEFAULT_INTERVAL) {
     if (INTERVAL_MS[parts[1]]) interval = parts[1];
     else throw new Error(`Khung "${parts[1]}" không hợp lệ. Hợp lệ: ${Object.keys(INTERVAL_MS).join(', ')}`);
   }
-  return { symbol: normalizeSymbol(symbolPart), interval, rest: parts.slice(2).join(' ') };
+  return { symbol: await resolveSymbol(symbolPart), interval, rest: parts.slice(2).join(' ') };
 }
 
 async function guard(ctx, key, fn) {
@@ -136,7 +137,7 @@ Mặc định: ${DEFAULT_INTERVAL}`;
 bot.command(['start', 'help'], (ctx) => send(ctx, HELP));
 
 bot.command(['a', 'analyze'], (ctx) => guard(ctx, 'analyze', async () => {
-  const { symbol, interval } = parseArgs(ctx.match);
+  const { symbol, interval } = await parseArgs(ctx.match);
   const strategy = await loadStrategy();
   const status = await ctx.reply(`⏳ Đang lấy dữ liệu ${symbol} ${interval}...`);
 
@@ -163,7 +164,7 @@ bot.command(['a', 'analyze'], (ctx) => guard(ctx, 'analyze', async () => {
 }));
 
 bot.command(['q', 'quick'], (ctx) => guard(ctx, 'analyze', async () => {
-  const { symbol, interval } = parseArgs(ctx.match);
+  const { symbol, interval } = await parseArgs(ctx.match);
   const strategy = await loadStrategy();
   await ctx.reply(`⏳ ${symbol} ${interval}...`);
   const snapshot = await analyze(symbol, interval, strategy, {
@@ -192,7 +193,7 @@ bot.command('ask', (ctx) => guard(ctx, 'ask', async () => {
 }));
 
 bot.command('train', (ctx) => guard(ctx, 'train', async () => {
-  const { symbol, interval } = parseArgs(ctx.match);
+  const { symbol, interval } = await parseArgs(ctx.match);
   const strategy = await loadStrategy();
   const status = await ctx.reply(`🎓 Bắt đầu train ${symbol} ${interval}...`);
   let lastText = '';
@@ -221,13 +222,13 @@ bot.command('models', async (ctx) => {
 });
 
 bot.command('delmodel', (ctx) => guard(ctx, 'delmodel', async () => {
-  const { symbol, interval } = parseArgs(ctx.match);
+  const { symbol, interval } = await parseArgs(ctx.match);
   const ok = await deleteModel(symbol, interval);
   await ctx.reply(ok ? `Đã xoá model ${symbol} ${interval}.` : `Không tìm thấy model ${symbol} ${interval}.`);
 }));
 
 bot.command('backtest', (ctx) => guard(ctx, 'backtest', async () => {
-  const { symbol, interval, rest } = parseArgs(ctx.match);
+  const { symbol, interval, rest } = await parseArgs(ctx.match);
   const strategy = await loadStrategy();
   const nCandles = Number(rest) || 3000;
   const status = await ctx.reply(`📉 Backtest ${symbol} ${interval}...`);
@@ -254,7 +255,7 @@ bot.command('config', async (ctx) => {
   L.push('/set weights.trend 30          (tăng trọng số xu hướng)');
   L.push('/set ml.weightVsRules 0.6      (tin model ML nhiều hơn)');
   L.push('/set thresholds.buy 25         (khắt khe hơn khi ra tín hiệu mua)');
-  L.push('/set risk.slAtrMult 2          (stoploss xa hơn)');
+  L.push('/set risk.slPercent 2          (stoploss xa hơn, tính theo % giá)');
   L.push('/set llm.effort max            (Claude suy luận sâu hơn, tốn token hơn)');
   await send(ctx, L.join('\n'));
 });
@@ -290,7 +291,7 @@ bot.command('setprompt', (ctx) => guard(ctx, 'setprompt', async () => {
 // ---------- Watchlist & cảnh báo ----------
 
 bot.command('watch', (ctx) => guard(ctx, 'watch', async () => {
-  const { symbol, interval } = parseArgs(ctx.match);
+  const { symbol, interval } = await parseArgs(ctx.match);
   const list = await loadWatchlist();
   const chatId = String(ctx.chat.id);
   if (list.some((w) => w.chatId === chatId && w.symbol === symbol && w.interval === interval)) {
@@ -303,7 +304,7 @@ bot.command('watch', (ctx) => guard(ctx, 'watch', async () => {
 }));
 
 bot.command('unwatch', (ctx) => guard(ctx, 'watch', async () => {
-  const { symbol, interval } = parseArgs(ctx.match);
+  const { symbol, interval } = await parseArgs(ctx.match);
   const chatId = String(ctx.chat.id);
   const list = await loadWatchlist();
   const next = list.filter((w) => !(w.chatId === chatId && w.symbol === symbol && w.interval === interval));

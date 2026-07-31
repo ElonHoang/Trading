@@ -1,14 +1,17 @@
-// Bộ máy phân tích: chỉ báo -> điểm theo quy tắc -> kết hợp xác suất ML -> tín hiệu + mức giá.
+﻿// Bộ máy phân tích: chỉ báo -> điểm theo quy tắc -> kết hợp xác suất ML -> tín hiệu + mức giá.
 // Đây là phần deterministic (không có LLM), luôn chạy được kể cả khi không có API key.
 
 import {
-  fetchKlines, fetchTicker24h, fetchDerivatives, fetchOrderBookImbalance,
+  fetchKlines, fetchTicker24h, fetchDerivatives, fetchOrderBookImbalance, fetchPositioning,
 } from '../data/binance.js';
-import { computeIndicators, supportResistance, rsiDivergence } from '../indicators/index.js';
+import { computeIndicators, supportResistance } from '../indicators/index.js';
 import { featureVector, FEATURE_NAMES } from '../features.js';
 import { predictProba } from '../ml/gbdt.js';
 
 const clamp = (v, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
+
+/** Số nến đã đóng tối thiểu để chấm điểm được (volumeAvg 20 + cvdSlope 20 + pivot). */
+export const MIN_CANDLES = 30;
 
 /** Chỉ giữ các nến đã đóng — nến đang chạy làm chỉ báo nhảy loạn. */
 export function closedCandles(candles) {
@@ -28,197 +31,150 @@ export function scoreSignals(candles, ind, strategy, extras = {}, i = candles.le
   const t = strategy.thresholds;
   const groups = {};
 
-  // --- Xu hướng: vị trí giá so với EMA và thứ tự EMA ---
-  {
-    const reasons = [];
-    let s = 0;
-    const ef = ind.emaFast[i], em = ind.emaMid[i], es = ind.emaSlow[i];
-    if (ef != null && em != null) {
-      if (ef > em) { s += 0.35; reasons.push(`EMA${ind.params.emaFast} nằm trên EMA${ind.params.emaMid}`); }
-      else { s -= 0.35; reasons.push(`EMA${ind.params.emaFast} nằm dưới EMA${ind.params.emaMid}`); }
-    }
-    if (es != null) {
-      if (c.close > es) { s += 0.3; reasons.push(`Giá trên EMA${ind.params.emaSlow} (xu hướng dài hạn tăng)`); }
-      else { s -= 0.3; reasons.push(`Giá dưới EMA${ind.params.emaSlow} (xu hướng dài hạn giảm)`); }
-    }
-    if (ef != null && c.close > ef) s += 0.15; else if (ef != null) s -= 0.15;
-
-    // ADX làm hệ số khuếch đại: xu hướng yếu thì giảm điểm
-    const adxVal = ind.adx[i];
-    if (adxVal != null) {
-      if (adxVal < t.minAdxForTrend) {
-        s *= 0.5;
-        reasons.push(`ADX ${adxVal.toFixed(1)} < ${t.minAdxForTrend} → xu hướng yếu, thị trường đi ngang`);
-      } else {
-        reasons.push(`ADX ${adxVal.toFixed(1)} → xu hướng có lực`);
-      }
-      const di = (ind.plusDI[i] ?? 0) - (ind.minusDI[i] ?? 0);
-      s += clamp(di / 40) * 0.2;
-    }
-    groups.trend = { score: clamp(s), reasons };
+  // Biên độ 50 nến gần nhất — dùng chung cho volume climax và cấu trúc.
+  const lookback = Math.min(50, i);
+  let rangeHigh = -Infinity;
+  let rangeLow = Infinity;
+  for (let j = i - lookback + 1; j <= i; j++) {
+    if (j < 0) continue;
+    if (candles[j].high > rangeHigh) rangeHigh = candles[j].high;
+    if (candles[j].low < rangeLow) rangeLow = candles[j].low;
   }
+  const rangePos = rangeHigh > rangeLow ? (c.close - rangeLow) / (rangeHigh - rangeLow) : 0.5;
 
-  // --- Động lượng: RSI ---
+  // Giá đi ngang hay có hướng rõ? Dùng cho phân kỳ CVD kiểu gom hàng/phân phối.
+  const cvdBack = ind.params.cvdSlope;
+  const priceChgPct = ((c.close - candles[Math.max(0, i - cvdBack)].close)
+    / candles[Math.max(0, i - cvdBack)].close) * 100;
+  const sidewaysPct = t.sidewaysPercent ?? 1.5;
+  const sideways = Math.abs(priceChgPct) < sidewaysPct;
+
+  // --- Khối lượng: xác nhận, bẫy breakout, hay climax cạn lực ---
   {
     const reasons = [];
     let s = 0;
-    const r = ind.rsi[i];
-    if (r != null) {
-      s = clamp((r - 50) / 25);
-      reasons.push(`RSI ${r.toFixed(1)}`);
-      if (r > t.rsiOverbought) {
-        s *= 0.4;
-        reasons.push(`RSI trên ${t.rsiOverbought} → quá mua, rủi ro điều chỉnh`);
-      } else if (r < t.rsiOversold) {
-        s *= 0.4;
-        reasons.push(`RSI dưới ${t.rsiOversold} → quá bán, có thể bật lên`);
-      }
-      const prev = ind.rsi[i - 5];
-      if (prev != null) {
-        const slope = r - prev;
-        s += clamp(slope / 15) * 0.25;
-        reasons.push(`RSI ${slope >= 0 ? 'tăng' : 'giảm'} ${Math.abs(slope).toFixed(1)} điểm trong 5 nến`);
-      }
-    }
-    const div = extras.divergence;
-    if (div) {
-      s += div.type === 'bullish' ? 0.35 : -0.35;
-      reasons.push(`Phân kỳ ${div.type === 'bullish' ? 'tăng' : 'giảm'}: ${div.detail}`);
-    }
-    groups.momentum = { score: clamp(s), reasons };
-  }
+    const avg = ind.volumeAvg[i];
+    const dir = Math.sign(c.close - c.open) || 0;
+    if (avg) {
+      const ratio = c.volume / avg;
+      reasons.push(`Khối lượng ${ratio.toFixed(2)}x trung bình ${ind.params.volumeAvg} nến`);
 
-  // --- MACD ---
-  {
-    const reasons = [];
-    let s = 0;
-    const h = ind.macdHist[i], hPrev = ind.macdHist[i - 1], line = ind.macdLine[i];
-    if (h != null) {
-      s += h > 0 ? 0.4 : -0.4;
-      reasons.push(`MACD histogram ${h > 0 ? 'dương' : 'âm'}`);
-      if (hPrev != null) {
-        if (Math.sign(h) !== Math.sign(hPrev)) {
-          s += h > 0 ? 0.35 : -0.35;
-          reasons.push(`MACD vừa cắt ${h > 0 ? 'lên' : 'xuống'} (tín hiệu mới)`);
+      // Có phá vỡ mức S/R gần nhất trong nến này không?
+      const sr = extras.sr;
+      const brokeUp = sr?.resistance?.[0] && c.close > sr.resistance[0].price;
+      const brokeDown = sr?.support?.[0] && c.close < sr.support[0].price;
+      const breakout = brokeUp || brokeDown;
+
+      if (ratio >= t.volumeSpikeRatio) {
+        // Đột biến ở rìa biên độ = climax (panic sell / FOMO) -> cạn lực, KHÔNG xác nhận.
+        const atTop = rangePos > 0.9;
+        const atBottom = rangePos < 0.1;
+        if (atBottom && dir < 0) {
+          s += 0.5;
+          reasons.push('Volume khổng lồ ở đáy biên độ với nến giảm → panic sell, thường là đáy tạm');
+        } else if (atTop && dir > 0) {
+          s -= 0.5;
+          reasons.push('Volume khổng lồ ở đỉnh biên độ với nến tăng → FOMO tột độ, rủi ro tạo đỉnh');
         } else {
-          const expanding = Math.abs(h) > Math.abs(hPrev);
-          s += (expanding ? 0.2 : -0.1) * Math.sign(h);
-          reasons.push(`Histogram ${expanding ? 'đang mở rộng' : 'đang thu hẹp'}`);
+          s += dir * 0.7;
+          reasons.push(`Khối lượng đột biến xác nhận nến ${dir > 0 ? 'tăng' : 'giảm'}`);
+          if (breakout) {
+            s += dir * 0.3;
+            reasons.push(`Phá ${brokeUp ? 'kháng cự' : 'hỗ trợ'} kèm volume lớn → xu hướng mới là thật`);
+          }
         }
+      } else if (breakout) {
+        // Phá mức mà không có dòng tiền -> bull trap / bear trap.
+        s -= dir * 0.5;
+        reasons.push(`Phá ${brokeUp ? 'kháng cự' : 'hỗ trợ'} nhưng volume chỉ ${ratio.toFixed(2)}x `
+          + `→ nghi ${brokeUp ? 'bull trap' : 'bear trap'}, dễ quay đầu`);
+      } else if (ratio < 0.6) {
+        s += dir * 0.1;
+        reasons.push('Khối lượng thấp → tín hiệu giá kém tin cậy');
+      } else {
+        s += dir * 0.3 * ratio;
       }
-      if (line != null) s += line > 0 ? 0.15 : -0.15;
+    } else {
+      reasons.push('Chưa đủ nến để tính khối lượng trung bình');
     }
-    groups.macd = { score: clamp(s), reasons };
+    groups.volume = { score: clamp(s), reasons, available: avg != null };
   }
 
-  // --- Cấu trúc thị trường: đỉnh/đáy, vị trí trong range, khoảng cách tới S/R ---
+  // --- CVD: ai đang chủ động, và có phân kỳ với giá hay không ---
+  {
+    const reasons = [];
+    let s = 0;
+    const slope = ind.cvdSlope[i];
+    if (slope != null) {
+      reasons.push(`CVD ${cvdBack} nến: ${slope >= 0 ? 'mua' : 'bán'} chủ động ròng `
+        + `${(Math.abs(slope) * 100).toFixed(1)}% khối lượng cùng kỳ`);
+      s += clamp(slope * 3) * 0.45;
+      reasons.push(`Giá ${priceChgPct >= 0 ? '+' : ''}${priceChgPct.toFixed(2)}% cùng kỳ`);
+
+      if (sideways) {
+        // Trường hợp mạnh nhất: giá đứng yên nhưng dòng tiền một chiều rõ rệt.
+        if (slope > 0.02) {
+          s += 0.6;
+          reasons.push('Giá đi ngang nhưng CVD tăng → có bên gom hàng âm thầm, thường bật tăng sau đó');
+        } else if (slope < -0.02) {
+          s -= 0.6;
+          reasons.push('Giá đi ngang nhưng CVD giảm → đang bị phân phối, cảnh báo giá sập');
+        } else {
+          reasons.push('Giá đi ngang, CVD cũng cân bằng → chưa có bên nào chiếm ưu thế');
+        }
+      } else if ((priceChgPct > 0) === (slope > 0)) {
+        s += priceChgPct > 0 ? 0.3 : -0.3;
+        reasons.push(`Giá và CVD cùng chiều → dòng tiền xác nhận nhịp `
+          + `${priceChgPct > 0 ? 'tăng' : 'giảm'}`);
+      } else {
+        s += priceChgPct > 0 ? -0.5 : 0.5;
+        reasons.push(priceChgPct > 0
+          ? 'Phân kỳ giảm: giá tăng nhưng CVD giảm → bên bán đang xả lên đầu phe mua'
+          : 'Phân kỳ tăng: giá giảm nhưng CVD tăng → bên mua đang hấp thụ, có thể đảo chiều');
+      }
+    } else {
+      reasons.push('Chưa đủ nến để tính độ dốc CVD');
+    }
+    const delta = ind.cvdDelta[i];
+    if (delta != null && c.volume > 0) {
+      const share = delta / c.volume;
+      s += clamp(share) * 0.2;
+      reasons.push(`Nến hiện tại: ${share >= 0 ? 'mua' : 'bán'} chủ động chiếm `
+        + `${(Math.abs(share) * 100).toFixed(1)}% khối lượng`);
+    }
+    groups.cvd = { score: clamp(s), reasons, available: ind.cvdSlope[i] != null };
+  }
+
+  // --- Cấu trúc: vị trí trong biên độ + khoảng cách tới hỗ trợ/kháng cự ---
   {
     const reasons = [];
     let s = 0;
     const sr = extras.sr;
-    const lookback = Math.min(50, i);
-    let hh = -Infinity, ll = Infinity;
-    for (let j = i - lookback + 1; j <= i; j++) {
-      if (j < 0) continue;
-      if (candles[j].high > hh) hh = candles[j].high;
-      if (candles[j].low < ll) ll = candles[j].low;
-    }
-    const pos = hh > ll ? (c.close - ll) / (hh - ll) : 0.5;
-    s += clamp((pos - 0.5) * 2) * 0.5;
-    reasons.push(`Giá ở ${(pos * 100).toFixed(0)}% biên độ ${lookback} nến gần nhất`);
+    s += clamp((rangePos - 0.5) * 2) * 0.5;
+    reasons.push(`Giá ở ${(rangePos * 100).toFixed(0)}% biên độ ${lookback} nến gần nhất`);
 
     if (sr) {
       const nearestRes = sr.resistance[0];
       const nearestSup = sr.support[0];
       if (nearestRes) {
         const d = ((nearestRes.price - c.close) / c.close) * 100;
-        reasons.push(`Kháng cự gần nhất ${fmtNum(nearestRes.price)} (+${d.toFixed(2)}%, ${nearestRes.touches} lần chạm)`);
+        reasons.push(`Kháng cự gần nhất ${fmtNum(nearestRes.price)} (+${d.toFixed(2)}%, `
+          + `${nearestRes.touches} lần chạm)`);
         if (d < 1) { s -= 0.25; reasons.push('Giá sát kháng cự → rủi ro bị chặn'); }
       }
       if (nearestSup) {
         const d = ((c.close - nearestSup.price) / c.close) * 100;
-        reasons.push(`Hỗ trợ gần nhất ${fmtNum(nearestSup.price)} (-${d.toFixed(2)}%, ${nearestSup.touches} lần chạm)`);
+        reasons.push(`Hỗ trợ gần nhất ${fmtNum(nearestSup.price)} (-${d.toFixed(2)}%, `
+          + `${nearestSup.touches} lần chạm)`);
         if (d < 1) { s += 0.2; reasons.push('Giá sát hỗ trợ → có thể bật lên'); }
       }
       // Breakout: đóng nến trên kháng cự cũ
       if (nearestRes && c.close > nearestRes.price) { s += 0.3; reasons.push('Đã phá kháng cự'); }
     }
-    groups.structure = { score: clamp(s), reasons };
+    groups.structure = { score: clamp(s), reasons, available: true };
   }
 
-  // --- Khối lượng ---
-  {
-    const reasons = [];
-    let s = 0;
-    const avg = ind.volumeAvg[i];
-    if (avg) {
-      const ratio = c.volume / avg;
-      const dir = Math.sign(c.close - c.open) || 0;
-      reasons.push(`Khối lượng ${ratio.toFixed(2)}x trung bình ${ind.params.volumeAvg} nến`);
-      if (ratio >= t.volumeSpikeRatio) {
-        s += dir * 0.6;
-        reasons.push(`Khối lượng đột biến xác nhận nến ${dir > 0 ? 'tăng' : 'giảm'}`);
-      } else if (ratio < 0.6) {
-        reasons.push('Khối lượng thấp → tín hiệu giá kém tin cậy');
-        s *= 0.5;
-      } else {
-        s += dir * 0.25 * ratio;
-      }
-    }
-    const obvSlope = ind.obv[i] - ind.obv[i - 10];
-    if (Number.isFinite(obvSlope)) {
-      s += clamp(obvSlope / (avg ? avg * 10 : 1)) * 0.4;
-      reasons.push(`OBV ${obvSlope >= 0 ? 'tăng' : 'giảm'} trong 10 nến (dòng tiền ${obvSlope >= 0 ? 'vào' : 'ra'})`);
-    }
-    groups.volume = { score: clamp(s), reasons };
-  }
-
-  // --- Hồi quy về trung bình (Bollinger) ---
-  {
-    const reasons = [];
-    let s = 0;
-    const up = ind.bbUpper[i], lo = ind.bbLower[i], mid = ind.bbMid[i];
-    if (up != null && lo != null && up > lo) {
-      const pb = (c.close - lo) / (up - lo);
-      reasons.push(`%B Bollinger ${(pb * 100).toFixed(0)}%`);
-      // Ngoài dải = căng quá -> nghiêng về hồi ngược
-      if (pb > 1) { s -= 0.6; reasons.push('Giá đóng trên dải trên → căng, dễ hồi về'); }
-      else if (pb < 0) { s += 0.6; reasons.push('Giá đóng dưới dải dưới → căng, dễ bật lên'); }
-      else s -= clamp((pb - 0.5) * 2) * 0.35;
-
-      const width = ((up - lo) / mid) * 100;
-      reasons.push(`Độ rộng dải ${width.toFixed(2)}%`);
-      let widthAvg = 0, n = 0;
-      for (let j = Math.max(0, i - 49); j <= i; j++) {
-        if (ind.bbUpper[j] != null && ind.bbMid[j]) {
-          widthAvg += ((ind.bbUpper[j] - ind.bbLower[j]) / ind.bbMid[j]) * 100; n++;
-        }
-      }
-      widthAvg = n ? widthAvg / n : width;
-      if (width < widthAvg * 0.7) reasons.push('Dải Bollinger đang co hẹp → tích luỹ, chuẩn bị bùng nổ biến động');
-    }
-    groups.meanReversion = { score: clamp(s), reasons };
-  }
-
-  // --- Stochastic ---
-  {
-    const reasons = [];
-    let s = 0;
-    const k = ind.stochK[i], d = ind.stochD[i], kPrev = ind.stochK[i - 1], dPrev = ind.stochD[i - 1];
-    if (k != null && d != null) {
-      reasons.push(`Stochastic K ${k.toFixed(1)} / D ${d.toFixed(1)}`);
-      s += clamp((k - 50) / 35) * 0.4;
-      if (kPrev != null && dPrev != null) {
-        if (kPrev <= dPrev && k > d) { s += 0.4; reasons.push('K vừa cắt lên D'); }
-        if (kPrev >= dPrev && k < d) { s -= 0.4; reasons.push('K vừa cắt xuống D'); }
-      }
-      if (k > 80) { s *= 0.5; reasons.push('Vùng quá mua'); }
-      if (k < 20) { s *= 0.5; reasons.push('Vùng quá bán'); }
-    }
-    groups.stochastic = { score: clamp(s), reasons };
-  }
-
-  // --- Phái sinh: funding + open interest + order book ---
+  // --- Phái sinh: funding rate + open interest ---
   {
     const reasons = [];
     let s = 0;
@@ -227,34 +183,143 @@ export function scoreSignals(candles, ind, strategy, extras = {}, i = candles.le
       const fr = d.fundingRate;
       reasons.push(`Funding rate ${(fr * 100).toFixed(4)}%`);
       // Funding cực đoan = đám đông một chiều -> tín hiệu ngược
-      if (fr > t.fundingExtreme) { s -= 0.5; reasons.push('Funding dương cao → long quá đông, rủi ro long squeeze'); }
-      else if (fr < -t.fundingExtreme) { s += 0.5; reasons.push('Funding âm sâu → short quá đông, rủi ro short squeeze'); }
-      else s += clamp(-fr / t.fundingExtreme) * 0.15;
+      if (fr > t.fundingExtreme) {
+        s -= 0.5;
+        reasons.push('Funding dương cao → long quá đông, rủi ro long squeeze');
+      } else if (fr < -t.fundingExtreme) {
+        s += 0.5;
+        reasons.push('Funding âm sâu → short quá đông, rủi ro short squeeze');
+      } else {
+        s += clamp(-fr / t.fundingExtreme) * 0.15;
+      }
 
       if (d.openInterestChangePct != null) {
-        reasons.push(`Open interest ${d.openInterestChangePct >= 0 ? '+' : ''}${d.openInterestChangePct.toFixed(2)}% (14 kỳ)`);
+        // LƯU Ý: OI luôn lấy trên 14 kỳ 4h (~2,3 ngày), không theo khung đang phân tích.
+        reasons.push(`Open interest ${d.openInterestChangePct >= 0 ? '+' : ''}`
+          + `${d.openInterestChangePct.toFixed(2)}% (14 kỳ 4h ≈ 2,3 ngày)`);
         const priceUp = c.close > candles[Math.max(0, i - 14)].close;
-        if (d.openInterestChangePct > 5 && priceUp) { s += 0.25; reasons.push('OI tăng cùng giá → dòng tiền mới vào long'); }
-        if (d.openInterestChangePct > 5 && !priceUp) { s -= 0.25; reasons.push('OI tăng khi giá giảm → dòng tiền mới vào short'); }
+        if (d.openInterestChangePct > 5 && priceUp) {
+          s += 0.25;
+          reasons.push('OI tăng cùng giá → tiền mới vào long, xu hướng có cơ sở');
+        }
+        if (d.openInterestChangePct > 5 && !priceUp) {
+          s -= 0.25;
+          reasons.push('OI tăng khi giá giảm → tiền mới vào short');
+        }
+        if (d.openInterestChangePct < -5 && priceUp) {
+          s -= 0.15;
+          reasons.push('OI giảm khi giá tăng → short đóng vị thế, nhịp tăng dễ hết đà');
+        }
+        if (d.openInterestChangePct < -5 && !priceUp) {
+          s += 0.15;
+          reasons.push('OI giảm khi giá giảm → long cắt lỗ, nhịp giảm đang cạn lực');
+        }
       }
     } else {
-      reasons.push('Không có dữ liệu phái sinh cho token này');
+      reasons.push('Không có hợp đồng futures cho token này');
     }
+    groups.derivatives = { score: clamp(s), reasons, available: d?.fundingRate != null };
+  }
+
+  // --- Sổ lệnh: tường mua/bán + độ mỏng. Chỉ có giá trị ở khung rất ngắn,
+  //     bị spoofing được, không backtest được -> phải đối chiếu CVD và volume.
+  {
+    const reasons = [];
+    let s = 0;
     const ob = extras.orderBook;
     if (ob) {
-      reasons.push(`Sổ lệnh lệch ${(ob.imbalance * 100).toFixed(1)}% về phía ${ob.imbalance > 0 ? 'mua' : 'bán'}`);
-      s += clamp(ob.imbalance * 2) * 0.3;
+      reasons.push(`Sổ lệnh lệch ${(ob.imbalance * 100).toFixed(1)}% về phía `
+        + `${ob.imbalance > 0 ? 'mua' : 'bán'} (${ob.levels ?? '?'} mức)`);
+      s += clamp(ob.imbalance * 2) * 0.5;
+
+      for (const w of ob.walls ?? []) {
+        const where = w.side === 'bid' ? 'dưới' : 'trên';
+        reasons.push(`Tường ${w.side === 'bid' ? 'MUA' : 'BÁN'} tại ${fmtNum(w.price)} `
+          + `(${w.distancePct >= 0 ? '+' : ''}${w.distancePct.toFixed(2)}%, `
+          + `${w.ratioToAvg.toFixed(1)}x trung bình) → `
+          + `${w.side === 'bid' ? 'hỗ trợ cứng phía ' : 'kháng cự mạnh phía '}${where}`);
+        // Tường càng gần giá càng ảnh hưởng mạnh.
+        const near = Math.abs(w.distancePct) < 1 ? 1 : 0.5;
+        s += (w.side === 'bid' ? 0.2 : -0.2) * near;
+      }
+      if (ob.walls?.length) {
+        reasons.push('Lưu ý: tường lệnh có thể là spoofing — chỉ tin nếu CVD và volume cùng hướng');
+      }
+
+      // Sổ lệnh mỏng: cùng số mức nhưng trải trên biên độ giá rộng -> dễ trượt giá.
+      if (ob.depthSpanPct != null && ob.depthSpanPct > 2) {
+        reasons.push(`Sổ lệnh mỏng: ${ob.levels} mức trải trên ±${ob.depthSpanPct.toFixed(2)}% `
+          + '→ volume nhỏ cũng đủ làm giá trượt mạnh');
+        s *= 0.6;
+      }
+    } else {
+      reasons.push('Không lấy được sổ lệnh');
     }
-    groups.derivatives = { score: clamp(s), reasons };
+    groups.orderBook = { score: clamp(s), reasons, available: !!ob };
+  }
+
+  // --- Định vị đám đông: tỉ lệ long/short tài khoản, top trader, taker ---
+  //     Đám đông lệch một bên = bên đó đang có rủi ro bị thanh lý. Đây là dữ liệu
+  //     thật có lịch sử, KHÔNG phải liquidity map theo mức giá (Binance không có).
+  {
+    const reasons = [];
+    let s = 0;
+    const p = extras.positioning;
+    if (p) {
+      if (p.longAccountRatio != null) {
+        const longPct = p.longAccountRatio * 100;
+        reasons.push(`${longPct.toFixed(1)}% tài khoản đang long (chu kỳ ${p.period})`);
+        // Đám đông quá lệch -> tín hiệu ngược, giống funding cực đoan.
+        const skew = p.longAccountRatio - 0.5;
+        if (Math.abs(skew) > (t.crowdSkew ?? 0.12)) {
+          s -= Math.sign(skew) * 0.5;
+          reasons.push(skew > 0
+            ? 'Đám đông dồn về long quá mức → rủi ro bị đạp xuống thanh lý long'
+            : 'Đám đông dồn về short quá mức → rủi ro bị đẩy lên thanh lý short');
+        } else {
+          s -= skew * 1.2;
+        }
+      }
+      if (p.longAccountChange != null && Math.abs(p.longAccountChange) > 0.03) {
+        reasons.push(`Tỉ lệ long ${p.longAccountChange > 0 ? 'tăng' : 'giảm'} `
+          + `${(Math.abs(p.longAccountChange) * 100).toFixed(1)} điểm % trong ${p.samples} kỳ`);
+        s -= Math.sign(p.longAccountChange) * 0.15;
+      }
+      // Top trader lệch ngược đám đông là tín hiệu đáng chú ý.
+      if (p.topLongRatio != null && p.longAccountRatio != null) {
+        const gap = p.topLongRatio - p.longAccountRatio;
+        reasons.push(`Top trader ${(p.topLongRatio * 100).toFixed(1)}% long `
+          + `(lệch ${gap >= 0 ? '+' : ''}${(gap * 100).toFixed(1)} điểm % so với đám đông)`);
+        if (Math.abs(gap) > 0.05) {
+          s += Math.sign(gap) * 0.35;
+          reasons.push(gap > 0
+            ? 'Top trader long nhiều hơn đám đông → nghiêng tăng'
+            : 'Top trader short nhiều hơn đám đông → nghiêng giảm');
+        }
+      }
+      if (p.takerBuySellRatio != null) {
+        reasons.push(`Taker mua/bán ${p.takerBuySellRatio.toFixed(3)}`);
+        s += clamp((p.takerBuySellRatio - 1) * 2) * 0.25;
+      }
+    } else {
+      reasons.push('Không có dữ liệu định vị (token không có hợp đồng futures)');
+    }
+    groups.positioning = { score: clamp(s), reasons, available: !!p };
   }
 
   // --- Tổng hợp có trọng số ---
   const weights = strategy.weights;
   let weighted = 0, totalWeight = 0;
   const breakdown = {};
+  // Nhóm thiếu dữ liệu bị LOẠI khỏi phép chuẩn hoá, không tính là 0 điểm —
+  // nếu tính là 0 thì điểm tổng bị pha loãng và gần như không bao giờ vượt ngưỡng
+  // (đúng lỗi khiến backtest chỉ ra 9 lệnh: backtest không có derivatives/orderBook).
   for (const [name, g] of Object.entries(groups)) {
     const w = Number(weights[name] ?? 0);
-    if (!w) { breakdown[name] = { ...g, weight: 0, contribution: 0 }; continue; }
+    if (!w || g.available === false) {
+      breakdown[name] = { ...g, weight: w, contribution: 0, skipped: g.available === false };
+      continue;
+    }
     weighted += g.score * w;
     totalWeight += w;
     breakdown[name] = { ...g, weight: w, contribution: g.score * w };
@@ -264,7 +329,36 @@ export function scoreSignals(candles, ind, strategy, extras = {}, i = candles.le
     breakdown[k].contributionPct = totalWeight
       ? (breakdown[k].contribution / totalWeight) * 100 : 0;
   }
-  return { ruleScore, breakdown };
+
+  // Đồng thuận: bao nhiêu nhóm CÓ DỮ LIỆU thực sự cùng hướng với điểm tổng.
+  // Khác hẳn ngưỡng điểm: |điểm| >= 35 có thể đến từ 2 nhóm mạnh + 4 nhóm trung
+  // tính, tức chỉ 2/6 nhóm đồng thuận.
+  //
+  // CẢNH BÁO: số nhóm có dữ liệu khác nhau giữa chạy thật (6) và backtest (3) —
+  // orderBook/derivatives/positioning không có lịch sử theo nến. Vì vậy cùng một
+  // ngưỡng % sẽ nghiêm khắc hơn nhiều khi chạy thật.
+  const dir = Math.sign(ruleScore);
+  const active = Object.values(breakdown).filter((g) => g.weight > 0 && !g.skipped);
+  const minGroupScore = strategy.thresholds?.consensusMinGroupScore ?? 0.15;
+  const agree = dir === 0 ? 0 : active.filter(
+    (g) => Math.sign(g.score) === dir && Math.abs(g.score) >= minGroupScore,
+  ).length;
+
+  return {
+    ruleScore,
+    breakdown,
+    consensus: {
+      direction: dir > 0 ? 'long' : dir < 0 ? 'short' : 'none',
+      agree,
+      activeGroups: active.length,
+      percent: active.length ? (agree / active.length) * 100 : 0,
+      // Tên các nhóm cùng hướng, để nêu lý do.
+      agreeing: dir === 0 ? [] : Object.entries(breakdown)
+        .filter(([, g]) => g.weight > 0 && !g.skipped
+          && Math.sign(g.score) === dir && Math.abs(g.score) >= minGroupScore)
+        .map(([name]) => name),
+    },
+  };
 }
 
 function fmtNum(v) {
@@ -289,21 +383,22 @@ export function labelForScore(score, t) {
 
 export function buildLevels(candles, ind, sr, signal, risk, i = candles.length - 1) {
   const price = candles[i].close;
-  const atrVal = ind.atr[i] ?? price * 0.01;
+  // Không còn ATR trong hệ thống -> khoảng stop loss cơ sở tính theo % giá.
+  const baseRisk = price * ((risk.slPercent ?? 2.5) / 100);
   if (signal.side === 'none') {
-    return { side: 'none', entry: price, atr: atrVal, note: 'Không có hướng rõ ràng — chờ tín hiệu.' };
+    return { side: 'none', entry: price, note: 'Không có hướng rõ ràng — chờ tín hiệu.' };
   }
   const isLong = signal.side === 'long';
-  let sl = isLong ? price - risk.slAtrMult * atrVal : price + risk.slAtrMult * atrVal;
+  let sl = isLong ? price - baseRisk : price + baseRisk;
 
-  // Nếu có S/R gần hơn thì đặt SL ra ngoài mức đó một chút (an toàn hơn mức ATR thuần)
+  // Nếu có S/R gần thì đặt SL ra ngoài mức đó một chút — cấu trúc đáng tin hơn % thuần.
   if (risk.preferSrLevels) {
     const level = isLong ? sr.support[0] : sr.resistance[0];
     if (level) {
-      const buffer = atrVal * 0.3;
+      const buffer = baseRisk * 0.3;
       const candidate = isLong ? level.price - buffer : level.price + buffer;
       const dist = Math.abs(price - candidate);
-      if (dist > atrVal * 0.5 && dist < atrVal * 3.5) sl = candidate;
+      if (dist > baseRisk * 0.4 && dist < baseRisk * 2.5) sl = candidate;
     }
   }
 
@@ -329,7 +424,6 @@ export function buildLevels(candles, ind, sr, signal, risk, i = candles.length -
     riskPercent: (r / price) * 100,
     targets,
     srTargets,
-    atr: atrVal,
     rrToTp1: targets.length ? Math.abs(targets[0].price - price) / r : null,
   };
 }
@@ -412,7 +506,7 @@ async function higherTimeframeContext(symbol, interval, strategy) {
   try {
     const raw = await fetchKlines(symbol, htf, 300);
     const candles = closedCandles(raw);
-    if (candles.length < 210) return { interval: htf, note: 'Không đủ lịch sử khung lớn' };
+    if (candles.length < MIN_CANDLES) return { interval: htf, note: 'Không đủ lịch sử khung lớn' };
     const ind = computeIndicators(candles, strategy.indicators);
     const sr = supportResistance(candles);
     const { ruleScore } = scoreSignals(candles, ind, strategy, { sr });
@@ -422,10 +516,8 @@ async function higherTimeframeContext(symbol, interval, strategy) {
       close: candles[i].close,
       ruleScore: round(ruleScore, 1),
       signal: labelForScore(ruleScore, strategy.thresholds).label,
-      rsi: round(ind.rsi[i], 1),
-      adx: round(ind.adx[i], 1),
-      aboveEmaSlow: ind.emaSlow[i] != null ? candles[i].close > ind.emaSlow[i] : null,
-      macdHist: round(ind.macdHist[i], 6),
+      cvdSlope: round(ind.cvdSlope[i], 4),
+      volumeRatio: round(candles[i].volume / (ind.volumeAvg[i] || 1), 2),
     };
   } catch (err) {
     return { interval: htf, error: err.message };
@@ -435,6 +527,18 @@ async function higherTimeframeContext(symbol, interval, strategy) {
 const round = (v, d = 2) => (v == null || !Number.isFinite(v) ? null : Number(v.toFixed(d)));
 
 /**
+ * Làm tròn GIÁ theo độ lớn, không dùng số thập phân cố định: BTC ~60.000 và
+ * SHIB ~0,0000047 khác thang tới 10 chữ số. Dùng cố định 6 chữ số thập phân sẽ
+ * làm mọi mức giá của SHIB bẹt về cùng một con số.
+ */
+const roundPrice = (v) => {
+  if (v == null || !Number.isFinite(v)) return null;
+  const a = Math.abs(v);
+  const d = a === 0 ? 2 : a < 0.001 ? 10 : a < 1 ? 8 : a < 100 ? 6 : 4;
+  return Number(v.toFixed(d));
+};
+
+/**
  * Chuỗi dữ liệu để vẽ biểu đồ (chỉ lấy N nến cuối cho nhẹ payload).
  * Tách riêng khỏi snapshot phân tích vì chỉ giao diện web cần.
  */
@@ -442,8 +546,8 @@ function buildSeries(candles, ind, bars = 180) {
   const from = Math.max(0, candles.length - bars);
   const window = candles.slice(from);
   // `pick` nhận mảng đầy đủ (cùng độ dài với candles) rồi tự cắt.
-  const pick = (arr, d = 6) => arr.slice(from).map((v) => round(v, d));
-  const ohlc = (key, d = 6) => window.map((c) => round(c[key], d));
+  const pick = (arr, d = null) => arr.slice(from).map((v) => (d == null ? roundPrice(v) : round(v, d)));
+  const ohlc = (key, d = null) => window.map((c) => (d == null ? roundPrice(c[key]) : round(c[key], d)));
   return {
     bars: window.length,
     time: window.map((c) => c.openTime),
@@ -452,16 +556,10 @@ function buildSeries(candles, ind, bars = 180) {
     low: ohlc('low'),
     close: ohlc('close'),
     volume: ohlc('volume', 2),
-    emaFast: pick(ind.emaFast),
-    emaMid: pick(ind.emaMid),
-    emaSlow: pick(ind.emaSlow),
-    bbUpper: pick(ind.bbUpper),
-    bbLower: pick(ind.bbLower),
-    rsi: pick(ind.rsi, 2),
-    macdLine: pick(ind.macdLine),
-    macdSignal: pick(ind.macdSignal),
-    macdHist: pick(ind.macdHist),
     volumeAvg: pick(ind.volumeAvg, 2),
+    cvd: pick(ind.cvd, 2),
+    cvdDelta: pick(ind.cvdDelta, 2),
+    cvdSlope: pick(ind.cvdSlope, 4),
   };
 }
 
@@ -480,25 +578,28 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
   const symbol = symbolInput;
   const nCandles = opts.candles ?? strategy.analysis?.candles ?? 400;
 
-  const [raw, ticker, derivatives, orderBook] = await Promise.all([
+  const [raw, ticker, derivatives, orderBook, positioning] = await Promise.all([
     fetchKlines(symbol, interval, nCandles),
     fetchTicker24h(symbol).catch(() => null),
     fetchDerivatives(symbol),
     fetchOrderBookImbalance(symbol),
+    fetchPositioning(symbol, interval),
   ]);
 
   const candles = closedCandles(raw);
-  if (candles.length < 210) {
-    throw new Error(`Chỉ có ${candles.length} nến đã đóng — cần tối thiểu 210 nến cho khung ${interval}. Thử khung nhỏ hơn.`);
+  // Phần chấm điểm chỉ cần volumeAvg (20) + cvdSlope (20) + pivot (7) -> ~30 nến.
+  // ML cần nhiều hơn (features.WARMUP) nhưng nó tự báo thiếu dữ liệu, không chặn
+  // cả phân tích — nhờ vậy token mới list vẫn xem được.
+  if (candles.length < MIN_CANDLES) {
+    throw new Error(`Chỉ có ${candles.length} nến đã đóng — cần tối thiểu ${MIN_CANDLES} nến cho khung ${interval}. Thử khung nhỏ hơn.`);
   }
   const livePrice = raw[raw.length - 1].close;
 
   const ind = computeIndicators(candles, strategy.indicators);
   const sr = supportResistance(candles);
-  const divergence = rsiDivergence(candles, ind.rsi);
 
-  const { ruleScore, breakdown } = scoreSignals(candles, ind, strategy, {
-    sr, divergence, derivatives, orderBook,
+  const { ruleScore, breakdown, consensus } = scoreSignals(candles, ind, strategy, {
+    sr, derivatives, orderBook, positioning,
   });
 
   const ml = mlPrediction(symbol, interval, candles, ind, strategy, opts.storedModel);
@@ -523,8 +624,26 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
       conflicts.push(`Tín hiệu BÁN ở ${interval} nhưng khung ${htf.interval} đang tăng (${htf.ruleScore})`);
     }
   }
-  if (ind.adx[candles.length - 1] != null && ind.adx[candles.length - 1] < strategy.thresholds.minAdxForTrend) {
-    conflicts.push('ADX thấp: thị trường đi ngang, tín hiệu theo xu hướng dễ sai');
+  // Phân kỳ giá vs CVD là cảnh báo xung đột quan trọng nhất còn lại sau khi bỏ ADX.
+  {
+    const iLast = candles.length - 1;
+    const back = ind.params.cvdSlope;
+    const slope = ind.cvdSlope[iLast];
+    if (slope != null) {
+      const priceUp = candles[iLast].close > candles[Math.max(0, iLast - back)].close;
+      if (priceUp !== (slope > 0)) {
+        conflicts.push(priceUp
+          ? `Giá tăng ${back} nến qua nhưng CVD ròng là bán — nhịp tăng thiếu dòng tiền xác nhận`
+          : `Giá giảm ${back} nến qua nhưng CVD ròng là mua — có bên hấp thụ, cẩn thận đảo chiều`);
+      }
+    }
+  }
+  {
+    const iLast = candles.length - 1;
+    const ratio = candles[iLast].volume / (ind.volumeAvg[iLast] || 1);
+    if (ratio < 0.6) {
+      conflicts.push(`Khối lượng chỉ ${ratio.toFixed(2)}x trung bình — tín hiệu giá kém tin cậy`);
+    }
   }
   if (ml.available && ml.confident) {
     const mlSide = ml.probUp > 0.5 ? 'long' : 'short';
@@ -549,38 +668,24 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
     },
     indicatorParams: ind.params,
     indicators: {
-      emaFast: round(ind.emaFast[i], 6),
-      emaMid: round(ind.emaMid[i], 6),
-      emaSlow: round(ind.emaSlow[i], 6),
-      rsi: round(ind.rsi[i], 2),
-      rsi5BarsAgo: round(ind.rsi[i - 5], 2),
-      macdLine: round(ind.macdLine[i], 6),
-      macdSignal: round(ind.macdSignal[i], 6),
-      macdHist: round(ind.macdHist[i], 6),
-      macdHistPrev: round(ind.macdHist[i - 1], 6),
-      bbUpper: round(ind.bbUpper[i], 6),
-      bbMid: round(ind.bbMid[i], 6),
-      bbLower: round(ind.bbLower[i], 6),
-      atr: round(ind.atr[i], 6),
-      atrPercent: round((ind.atr[i] / candles[i].close) * 100, 2),
-      adx: round(ind.adx[i], 2),
-      plusDI: round(ind.plusDI[i], 2),
-      minusDI: round(ind.minusDI[i], 2),
-      stochK: round(ind.stochK[i], 2),
-      stochD: round(ind.stochD[i], 2),
-      vwap: round(ind.vwap[i], 6),
       volume: round(candles[i].volume, 2),
       volumeAvg: round(ind.volumeAvg[i], 2),
       volumeRatio: round(candles[i].volume / (ind.volumeAvg[i] || 1), 2),
+      cvd: round(ind.cvd[i], 2),
+      cvdDelta: round(ind.cvdDelta[i], 2),
+      // Tỉ lệ mua chủ động trong chính nến cuối, [-1, 1]
+      cvdDeltaShare: candles[i].volume
+        ? round(ind.cvdDelta[i] / candles[i].volume, 4) : null,
+      // Mua/bán chủ động ròng trên cvdSlope nến, chuẩn hoá theo volume cùng kỳ
+      cvdSlope: round(ind.cvdSlope[i], 4),
     },
-    divergence,
     structure: {
       support: sr.support.map((l) => ({
-        price: round(l.price, 6), touches: l.touches,
+        price: roundPrice(l.price), touches: l.touches,
         distancePct: round(((l.price - candles[i].close) / candles[i].close) * 100, 2),
       })),
       resistance: sr.resistance.map((l) => ({
-        price: round(l.price, 6), touches: l.touches,
+        price: roundPrice(l.price), touches: l.touches,
         distancePct: round(((l.price - candles[i].close) / candles[i].close) * 100, 2),
       })),
     },
@@ -592,13 +697,49 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
         openInterestChangePct: round(derivatives.openInterestChangePct, 2),
       }
       : null,
-    orderBook: orderBook ? { imbalance: round(orderBook.imbalance, 4) } : null,
+    orderBook: orderBook
+      ? {
+        imbalance: round(orderBook.imbalance, 4),
+        bidValue: round(orderBook.bidValue, 2),
+        askValue: round(orderBook.askValue, 2),
+        spreadPct: round(orderBook.spreadPct, 4),
+        depthSpanPct: round(orderBook.depthSpanPct, 3),
+        levels: orderBook.levels,
+        walls: (orderBook.walls ?? []).map((w) => ({
+          side: w.side,
+          price: roundPrice(w.price),
+          value: round(w.value, 2),
+          ratioToAvg: round(w.ratioToAvg, 2),
+          distancePct: round(w.distancePct, 3),
+        })),
+      }
+      : null,
+    positioning: positioning
+      ? {
+        period: positioning.period,
+        samples: positioning.samples,
+        longAccountPercent: round((positioning.longAccountRatio ?? 0) * 100, 2),
+        longShortRatio: round(positioning.longShortRatio, 3),
+        longAccountChangePoints: round((positioning.longAccountChange ?? 0) * 100, 2),
+        topLongPercent: round((positioning.topLongRatio ?? 0) * 100, 2),
+        topLongShortRatio: round(positioning.topLongShortRatio, 3),
+        takerBuySellRatio: round(positioning.takerBuySellRatio, 3),
+      }
+      : null,
     rules: {
       score: round(ruleScore, 1),
+      consensus: {
+        direction: consensus.direction,
+        agree: consensus.agree,
+        activeGroups: consensus.activeGroups,
+        percent: round(consensus.percent, 1),
+        agreeing: consensus.agreeing,
+      },
       breakdown: Object.fromEntries(Object.entries(breakdown).map(([k, v]) => [k, {
         score: round(v.score, 3),
         weight: v.weight,
         contributionPct: round(v.contributionPct, 2),
+        skipped: !!v.skipped,
         reasons: v.reasons,
       }])),
     },
@@ -632,12 +773,12 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
     },
     levels: {
       side: levels.side,
-      entry: round(levels.entry, 6),
-      stopLoss: round(levels.stopLoss, 6),
+      entry: roundPrice(levels.entry),
+      stopLoss: roundPrice(levels.stopLoss),
       riskPercent: round(levels.riskPercent, 2),
-      targets: levels.targets?.map((t) => ({ label: t.label, r: t.r, price: round(t.price, 6) })),
+      targets: levels.targets?.map((t) => ({ label: t.label, r: t.r, price: roundPrice(t.price) })),
       srTargets: levels.srTargets?.map((t) => ({
-        price: round(t.price, 6), touches: t.touches, distancePct: round(t.distancePct, 2),
+        price: roundPrice(t.price), touches: t.touches, distancePct: round(t.distancePct, 2),
       })),
       note: levels.note,
     },

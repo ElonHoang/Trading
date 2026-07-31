@@ -5,6 +5,9 @@ node_modules/
 .env.*
 !.env.example
 
+# Chat id Telegram đã bật cảnh báo — dữ liệu cá nhân của từng máy
+data/alert-chats.json
+
 # Log & file tạm
 *.log
 npm-debug.log*
