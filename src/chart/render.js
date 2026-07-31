@@ -1,4 +1,4 @@
-﻿// Bộ vẽ chart dùng chung cho giao diện realtime (canvas trình duyệt) và bot
+// Bộ vẽ chart dùng chung cho giao diện realtime (canvas trình duyệt) và bot
 // Telegram (@napi-rs/canvas). Chỉ nhận một context 2D, không chạm tới
 // document/window, nhờ vậy cùng một code chạy được ở cả hai nơi.
 //

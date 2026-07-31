@@ -8,8 +8,18 @@
 //     và khi |điểm| >= alerts.minAbsScore.
 
 import { INTERVAL_MS } from '../data/binance.js';
+import { readOpenCalls, openCall, closeCall, checkCall } from '../data/open-calls.js';
 
 const state = new Map();   // `${symbol}|${interval}` -> { lastCandleTime, lastSignal }
+
+/** Dựng lại mảng nến từ series của snapshot để đối chiếu SL/TP. */
+function candlesOf(snapshot) {
+  const s = snapshot.series;
+  if (!s?.close?.length) return [];
+  return s.close.map((close, i) => ({
+    openTime: s.time[i], high: s.high[i], low: s.low[i], close,
+  }));
+}
 
 /**
  * @param deps.listTargets  () => Promise<[{ symbol, interval }]>
@@ -32,13 +42,36 @@ export function createMonitor({ listTargets, evaluate, notify, loadStrategy, log
       const minAbs = cfg.minAbsScore ?? 35;
       const onlyOnChange = cfg.onlyOnSignalChange !== false;
 
+      const maxHoldBars = cfg.maxHoldBars ?? 96;
       const targets = await listTargets();
+      const open = await readOpenCalls();
+
       for (const target of targets) {
-        const key = `${target.symbol}|${target.interval}`;
+        const key = `${target.symbol}|${target.interval ?? 'auto'}`;
         const prev = state.get(key) ?? {};
         try {
           const { snapshot, setup, projections } = await evaluate(target);
           const candleTime = Date.parse(snapshot.lastClosedCandleTime);
+          const existing = open[snapshot.symbol];
+
+          // --- Kèo đang mở: theo dõi tới khi chốt, KHÔNG call lại token này ---
+          if (existing) {
+            const result = await checkCall(existing, candlesOf(snapshot), { maxHoldBars });
+            if (result.status === 'open') {
+              // Chạm TP trung gian thì báo tiến độ, nhưng kèo vẫn mở.
+              const newTps = result.hitTps.filter((t) => !(existing.tpHit ?? []).includes(t));
+              if (newTps.length) {
+                await notify({ kind: 'progress', call: existing, hitTps: newTps, snapshot });
+              }
+              continue;
+            }
+            await closeCall(snapshot.symbol);
+            delete open[snapshot.symbol];
+            await notify({ kind: 'closed', call: existing, result, snapshot });
+            // Vừa chốt xong thì chờ nến sau mới xét kèo mới, tránh vào lại ngay.
+            state.set(key, { lastCandleTime: candleTime, lastSignal: null });
+            continue;
+          }
 
           // Nến chưa đóng thêm -> không có gì mới để nói.
           if (prev.lastCandleTime === candleTime) continue;
@@ -56,7 +89,18 @@ export function createMonitor({ listTargets, evaluate, notify, loadStrategy, log
           if (Math.abs(score) < minAbs) continue;
           if (onlyOnChange && !changed) continue;
 
+          await openCall(snapshot.symbol, {
+            interval: snapshot.interval,
+            side: setup.side,
+            entry: setup.entry,
+            stopLoss: setup.stopLoss,
+            targets: setup.targets,
+            candleTime,
+          });
+          open[snapshot.symbol] = { symbol: snapshot.symbol };
+
           await notify({
+            kind: 'call',
             target, snapshot, setup, projections,
             changedFrom: prev.lastSignal ?? null,
             interval: snapshot.interval,

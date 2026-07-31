@@ -1,4 +1,4 @@
-node_modules/
+﻿node_modules/
 
 # Biến môi trường / khoá API (Telegram bot token, Anthropic key...)
 .env
@@ -7,6 +7,7 @@ node_modules/
 
 # Chat id Telegram đã bật cảnh báo — dữ liệu cá nhân của từng máy
 data/alert-chats.json
+data/open-calls.json
 
 # Log & file tạm
 *.log

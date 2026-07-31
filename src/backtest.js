@@ -1,4 +1,4 @@
-﻿// Backtest bộ quy tắc + (tuỳ chọn) model ML, có stoploss/take-profit thật.
+// Backtest bộ quy tắc + (tuỳ chọn) model ML, có stoploss/take-profit thật.
 // Chạy: npm run backtest -- BTCUSDT 4h
 //
 // Giả định (nói rõ để không tự lừa mình):

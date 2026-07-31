@@ -1,4 +1,4 @@
-﻿// Bot Telegram phân tích kỹ thuật. Dùng lại đúng tầng dữ liệu, chỉ báo và bộ vẽ
+// Bot Telegram phân tích kỹ thuật. Dùng lại đúng tầng dữ liệu, chỉ báo và bộ vẽ
 // chart của web UI -> số liệu trên bot và trên web luôn khớp nhau.
 //
 // Chạy: npm run bot   (token đọc từ biến môi trường TELEGRAM_BOT_TOKEN)
@@ -313,23 +313,53 @@ const monitor = createMonitor({
       ? evaluateOn(symbol, interval, strategy)
       : evaluateBestInterval(symbol, strategy);
   },
-  notify: async ({ snapshot, setup, projections, changedFrom }) => {
+  notify: async (payload) => {
     const chats = await readSubscribers();
     if (!chats.length) return;
+    const send = async (fn) => {
+      for (const chatId of chats) {
+        await fn(chatId).catch((err) => console.error(`[monitor] gửi ${chatId} lỗi:`, err.message));
+      }
+    };
+
+    // --- Chạm TP trung gian, kèo vẫn mở ---
+    if (payload.kind === 'progress') {
+      const { call, hitTps } = payload;
+      const txt = `✅ <b>${call.symbol} ${call.interval}</b> — ${call.side === 'long' ? 'LONG' : 'SHORT'}`
+        + ` đã chạm ${hitTps.join(', ')}. Kèo vẫn mở, chưa call lại mã này.`;
+      return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML' }));
+    }
+
+    // --- Kèo đã chốt ---
+    if (payload.kind === 'closed') {
+      const { call, result } = payload;
+      const icon = { stopped: '🛑', target: '🎯', expired: '⏱' }[result.status] ?? 'ℹ️';
+      const label = {
+        stopped: 'CHẠM STOPLOSS',
+        target: 'CHẠM TP CUỐI',
+        expired: 'HẾT HẠN GIỮ',
+      }[result.status] ?? result.status;
+      const txt = `${icon} <b>${call.symbol} ${call.interval}</b> — ${label}\n`
+        + `${call.side === 'long' ? 'LONG' : 'SHORT'} từ ${call.entry}`
+        + (result.hitTps.length ? ` · đã chạm ${result.hitTps.join(', ')}` : '')
+        + `\nGiữ ${result.bars} nến. Mã này được call lại từ nến sau.`;
+      return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML' }));
+    }
+
+    // --- Call kèo mới ---
+    const { snapshot, setup, projections, changedFrom } = payload;
     const photo = new InputFile(
       renderAnalysisPng(snapshot, { setup, projections }),
       `${snapshot.symbol}-${snapshot.interval}.png`,
     );
     const head = changedFrom
-      ? `🔔 <b>${snapshot.symbol} ${snapshot.interval}</b>: ${changedFrom} → ${setup.signal}\n`
-      : `🔔 <b>${snapshot.symbol} ${snapshot.interval}</b>: ${setup.signal}\n`;
-    const caption = head + buildCaption(snapshot, { setup, projections });
-    for (const chatId of chats) {
-      await bot.api.sendPhoto(chatId, photo, {
-        caption: caption.length > 1024 ? `${caption.slice(0, 1000)}\n<i>(đã cắt)</i>` : caption,
-        parse_mode: 'HTML',
-      }).catch((err) => console.error(`[monitor] gửi ${chatId} lỗi:`, err.message));
-    }
+      ? `🔔 ${changedFrom} → ${setup.signal}\n`
+      : '🔔 KÈO MỚI\n';
+    const { caption, rest } = splitCaption(head + buildCaption(snapshot, { setup, projections }));
+    await send(async (id) => {
+      await bot.api.sendPhoto(id, photo, { caption, parse_mode: 'HTML' });
+      if (rest) await bot.api.sendMessage(id, rest, { parse_mode: 'HTML' });
+    });
   },
 });
 

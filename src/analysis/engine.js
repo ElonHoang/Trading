@@ -1,4 +1,4 @@
-﻿// Bộ máy phân tích: chỉ báo -> điểm theo quy tắc -> kết hợp xác suất ML -> tín hiệu + mức giá.
+// Bộ máy phân tích: chỉ báo -> điểm theo quy tắc -> kết hợp xác suất ML -> tín hiệu + mức giá.
 // Đây là phần deterministic (không có LLM), luôn chạy được kể cả khi không có API key.
 
 import {

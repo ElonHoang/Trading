@@ -1,4 +1,4 @@
-﻿// Dashboard chạy hoàn toàn trong browser — không cần server.
+// Dashboard chạy hoàn toàn trong browser — không cần server.
 //
 // Import trực tiếp các module lõi trong src/ (cùng code mà bot Telegram dùng):
 // dữ liệu lấy thẳng từ Binance, chỉ báo và model ML tính tại máy người dùng,

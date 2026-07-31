@@ -1,4 +1,4 @@
-﻿// Bot Telegram. Chạy: npm run bot
+// Bot Telegram. Chạy: npm run bot
 //
 // Lệnh:
 //   /a BTC 4h          phân tích đầy đủ (chỉ báo + ML + Claude)

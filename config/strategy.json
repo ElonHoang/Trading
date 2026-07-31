@@ -76,7 +76,8 @@
     "pollSeconds": 60,
     "scanTopVolume": 15,
     "scanTopMovers": 15,
-    "scanMinQuoteVolumeUsd": 3000000
+    "scanMinQuoteVolumeUsd": 3000000,
+    "maxHoldBars": 96
   },
   "analysis": {
     "_note": "candles = số nến nạp về khi phân tích. multiTimeframe = xem thêm khung lớn hơn để xác nhận xu hướng.",

@@ -1,4 +1,4 @@
-﻿// Định dạng snapshot thành văn bản thuần (plain text) — an toàn cho Telegram
+// Định dạng snapshot thành văn bản thuần (plain text) — an toàn cho Telegram
 // mà không phải escape markdown.
 
 import { fmtNum } from './analysis/engine.js';

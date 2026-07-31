@@ -1,4 +1,4 @@
-﻿// Xuất chart ra PNG cho bot Telegram, dùng chung bộ vẽ với giao diện realtime (render.js).
+// Xuất chart ra PNG cho bot Telegram, dùng chung bộ vẽ với giao diện realtime (render.js).
 
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import {
