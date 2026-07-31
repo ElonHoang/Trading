@@ -13,11 +13,29 @@ const MAX_BARS = 90;
 // theo chiều dọc, các mức entry/SL/TP tách nhau rõ thay vì chồng thành một dải.
 const MAX_BARS_WITH_SETUP = 45;
 
-// Font mặc định của @napi-rs/canvas thiếu glyph tiếng Việt (ậ, ỹ, ủ, ộ... ra ô
-// vuông). Nạp font hệ thống rồi chọn họ đầu tiên có sẵn.
+// @napi-rs/canvas KHÔNG kèm font nào, chỉ có binary — nên phải dùng font hệ thống.
+// Font mặc định cũng thiếu glyph tiếng Việt (ậ, ỹ, ủ, ộ... ra ô vuông).
+//
+// Danh sách gồm cả font Windows và font Linux phổ biến, vì VPS thường chỉ có
+// nhóm sau. Nếu host không có font nào thì ảnh sẽ trắng chữ — phải BÁO RA, đừng
+// im lặng rơi về 'sans-serif' (họ font đó có thể không tồn tại trên Linux tối giản).
 GlobalFonts.loadSystemFonts();
-const FONT = ['Segoe UI', 'Arial', 'DejaVu Sans', 'Liberation Sans', 'Helvetica']
-  .find((f) => GlobalFonts.has(f)) ?? 'sans-serif';
+
+const FONT_CANDIDATES = [
+  'Segoe UI', 'Arial',                                  // Windows / macOS
+  'Noto Sans', 'DejaVu Sans', 'Liberation Sans',         // Linux, có tiếng Việt
+  'FreeSans', 'Ubuntu', 'Helvetica',
+];
+const FONT = FONT_CANDIDATES.find((f) => GlobalFonts.has(f)) ?? 'sans-serif';
+
+if (FONT === 'sans-serif') {
+  console.error(
+    '[chart] CẢNH BÁO: không tìm thấy font nào trong '
+    + `${FONT_CANDIDATES.join(', ')} (hệ thống báo ${GlobalFonts.families.length} họ font).\n`
+    + '        Ảnh chart sẽ mất chữ hoặc ra ô vuông. Trên Debian/Ubuntu cài:\n'
+    + '        apt-get install -y fonts-noto-core   (hoặc fonts-dejavu-core)',
+  );
+}
 
 /**
  * Vẽ snapshot từ engine.analyze() (cần opts.includeSeries) thành ảnh PNG.
