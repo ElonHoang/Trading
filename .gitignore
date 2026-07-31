@@ -1,0 +1,12 @@
+node_modules/
+
+# Biến môi trường / khoá API (Telegram bot token, Anthropic key...)
+.env
+.env.*
+!.env.example
+
+# Log & file tạm
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

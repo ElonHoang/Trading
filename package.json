@@ -1,0 +1,14 @@
+{
+  "name": "trading",
+  "version": "0.1.0",
+  "description": "Bot phân tích kỹ thuật crypto: dữ liệu Binance + Claude, gửi qua Telegram",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "grammy": "^1.45.1"
+  }
+}
