@@ -117,7 +117,7 @@ function crosshair(ctx, hover, top, height, xOf) {
  * của TradingView). Panel CVD phải dùng CÙNG tỉ lệ này, nếu không trục thời gian
  * của hai panel sẽ lệch nhau.
  */
-export const FORWARD_RATIO = 0.22;
+export const FORWARD_RATIO = 0.34;
 
 export function renderPricePanel(ctx, {
   candles, volumeAvg = [], interval, width, height, levels = null, walls = [],
@@ -139,25 +139,31 @@ export function renderPricePanel(ctx, {
     lo = Math.min(lo, c.low);
     hi = Math.max(hi, c.high);
   }
-  // Bao cả các mức S/R gần giá để chúng không bị cắt ngoài khung.
-  for (const lv of [...(levels?.support ?? []), ...(levels?.resistance ?? [])]) {
-    if (lv.price > lo * 0.85 && lv.price < hi * 1.15) {
-      lo = Math.min(lo, lv.price);
-      hi = Math.max(hi, lv.price);
-    }
-  }
   // Entry/SL/TP phải nằm trong khung, nếu không người xem không thấy kèo.
-  // Chỉ nới trong ±20% để nến không bị bẹt khi TP xa.
-  const setupPrices = setup
+  const setupPrices = hasSetup
     ? [setup.entry, setup.stopLoss, ...(setup.targets ?? []).map((t) => t.price)]
       .filter((p) => p != null)
     : [];
-  const anchor = candles[candles.length - 1].close;
-  for (const p of setupPrices) {
-    if (p > anchor * 0.8 && p < anchor * 1.2) {
-      lo = Math.min(lo, p);
-      hi = Math.max(hi, p);
+  const setupLo = setupPrices.length ? Math.min(...setupPrices) : null;
+  const setupHi = setupPrices.length ? Math.max(...setupPrices) : null;
+  if (setupLo != null) {
+    lo = Math.min(lo, setupLo);
+    hi = Math.max(hi, setupHi);
+  }
+
+  // Có kèo thì CHỈ lấy các mức S/R nằm trong vùng kèo (nới 60%). Mức S/R xa sẽ
+  // kéo giãn thang giá làm hộp kèo bị bẹt thành một dải mỏng, không đọc được.
+  const bandPad = setupLo != null ? (setupHi - setupLo) * 0.6 : null;
+  const keepLo = setupLo != null ? setupLo - bandPad : lo;
+  const keepHi = setupHi != null ? setupHi + bandPad : hi;
+  for (const lv of [...(levels?.support ?? []), ...(levels?.resistance ?? [])]) {
+    if (hasSetup) {
+      if (lv.price < keepLo || lv.price > keepHi) continue;
+    } else if (lv.price <= lo * 0.85 || lv.price >= hi * 1.15) {
+      continue;
     }
+    lo = Math.min(lo, lv.price);
+    hi = Math.max(hi, lv.price);
   }
   const pad = (hi - lo) * 0.06 || hi * 0.01;
   lo -= pad;
@@ -292,18 +298,36 @@ export function renderPricePanel(ctx, {
     const profit = box(lastTp?.price, '#26a69a33', '#26a69a99');
     const risk = box(setup.stopLoss, '#ef535033', '#ef535099');
 
-    // Vạch TP trung gian trong hộp lợi nhuận.
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = '#26a69a77';
+    // Vạch + nhãn cho TỪNG mức TP, không chỉ mức cuối — để đọc được cả lộ trình.
+    const usedBox = [];
+    const claimBox = (y) => {
+      if (usedBox.some((v) => Math.abs(v - y) < 15)) return false;
+      usedBox.push(y);
+      return true;
+    };
     ctx.lineWidth = 1;
-    for (const tp of (setup.targets ?? []).slice(0, -1)) {
+    for (const tp of setup.targets ?? []) {
       const y = clampY(yOf(tp.price));
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = '#26a69aaa';
       ctx.beginPath();
       ctx.moveTo(zoneX, y);
       ctx.lineTo(zoneX + zoneW, y);
       ctx.stroke();
+      ctx.setLineDash([]);
+      if (claimBox(y)) {
+        const movePct = ((tp.price - setup.entry) / setup.entry) * 100;
+        const text = `${tp.label} ${fmt(tp.price, priceDec)} (${pct(movePct)})`;
+        ctx.font = font;
+        const w = ctx.measureText(text).width + 10;
+        ctx.fillStyle = '#26a69a';
+        ctx.fillRect(zoneX + 3, y - 8, w, 16);
+        ctx.fillStyle = COLORS.accentInk;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, zoneX + 8, y);
+      }
     }
-    ctx.setLineDash([]);
 
     // Đường entry kẻ mảnh qua phần nến để thấy mức so với quá khứ.
     ctx.strokeStyle = COLORS.entry;
@@ -329,13 +353,9 @@ export function renderPricePanel(ctx, {
     };
 
     const movePct = (p) => ((p - setup.entry) / setup.entry) * 100;
-    if (profit && lastTp) {
-      tag(`Mục tiêu ${fmt(lastTp.price, priceDec)} (${pct(movePct(lastTp.price))})`,
-        clampY(yOf(lastTp.price)) + (setup.side === 'long' ? 9 : -9), '#26a69a');
-    }
     if (risk && setup.stopLoss != null) {
       tag(`Cắt lỗ ${fmt(setup.stopLoss, priceDec)} (${pct(movePct(setup.stopLoss))})`,
-        clampY(yOf(setup.stopLoss)) + (setup.side === 'long' ? -9 : 9), '#ef5350');
+        clampY(yOf(setup.stopLoss)), '#ef5350');
     }
     tag(`${setup.side === 'long' ? 'LONG' : 'SHORT'} vào ${fmt(setup.entry, priceDec)}`
       + (setup.rrToTp1 ? ` · R:R ${fmt(setup.rrToTp1, 2)}` : ''),

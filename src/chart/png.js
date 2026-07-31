@@ -9,6 +9,9 @@ const HEADER_H = 58;
 // Số nến vẽ. Ít nến -> mỗi nến to và dễ đọc hơn; Telegram nén ảnh nên chart dày
 // đặc 180-300 nến gần như không xem được trên điện thoại.
 const MAX_BARS = 90;
+// Khi CÓ kèo thì vẽ ít nến hơn nữa: thang giá co lại nên hộp Long/Short giãn ra
+// theo chiều dọc, các mức entry/SL/TP tách nhau rõ thay vì chồng thành một dải.
+const MAX_BARS_WITH_SETUP = 45;
 
 // Font mặc định của @napi-rs/canvas thiếu glyph tiếng Việt (ậ, ỹ, ủ, ộ... ra ô
 // vuông). Nạp font hệ thống rồi chọn họ đầu tiên có sẵn.
@@ -22,14 +25,17 @@ const FONT = ['Segoe UI', 'Arial', 'DejaVu Sans', 'Liberation Sans', 'Helvetica'
  */
 export function renderAnalysisPng(snap, {
   width = 1280, priceHeight = 560, cvdHeight = 210, scale = 2, setup = null,
-  maxBars = MAX_BARS,
+  maxBars = null,
 } = {}) {
   const s = snap.series;
   if (!s || !s.close?.length) throw new Error('Snapshot thiếu series — gọi analyze với includeSeries');
 
-  // Chỉ lấy `maxBars` nến cuối cho dễ đọc. Cắt đồng bộ mọi mảng song song, nếu
+  const hasSetup = setup && setup.side && setup.side !== 'none' && setup.entry != null;
+  const bars = maxBars ?? (hasSetup ? MAX_BARS_WITH_SETUP : MAX_BARS);
+
+  // Chỉ lấy `bars` nến cuối cho dễ đọc. Cắt đồng bộ mọi mảng song song, nếu
   // lệch index thì CVD sẽ không khớp nến.
-  const from = Math.max(0, s.close.length - maxBars);
+  const from = Math.max(0, s.close.length - bars);
   const cut = (arr) => (Array.isArray(arr) ? arr.slice(from) : arr);
 
   // series là các mảng song song; dựng lại thành mảng nến cho bộ vẽ.
@@ -60,7 +66,6 @@ export function renderAnalysisPng(snap, {
 
   ctx.save();
   ctx.translate(0, HEADER_H);
-  const hasSetup = setup && setup.side && setup.side !== 'none' && setup.entry != null;
   renderPricePanel(ctx, {
     candles,
     volumeAvg: cut(s.volumeAvg),
