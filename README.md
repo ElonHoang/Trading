@@ -15,7 +15,7 @@ Có ba mặt sử dụng, tất cả dùng **cùng một engine** nên số li�
 
 ## Bộ chỉ báo bị giới hạn cố ý
 
-Repo **chỉ** dùng 6 nhóm dữ liệu, mô tả chi tiết trong
+Repo dùng 7 nhóm dữ liệu, mô tả chi tiết trong
 [`.claude/skills/chi-bao/SKILL.md`](.claude/skills/chi-bao/SKILL.md):
 
 | Nhóm | Trọng số | Nguồn |
@@ -26,6 +26,7 @@ Repo **chỉ** dùng 6 nhóm dữ liệu, mô tả chi tiết trong
 | Định vị đám đông | 14 | tỉ lệ long/short tài khoản, vị thế top trader, taker ratio |
 | Hỗ trợ / kháng cự | 12 | pivot gom cụm, kèm số lần chạm |
 | Sổ lệnh | 6 | lệch mua/bán, tường lệnh, độ mỏng |
+| Mẫu hình lịch sử | 10 | so đường giá + biên độ với tối đa 6 tháng nến Binance; chỉ cộng điểm nếu các mẫu giống có diễn biến sau đó đồng thuận |
 
 **EMA, RSI, MACD, Bollinger, ATR, ADX, Stochastic, VWAP, OBV và phân kỳ RSI đã bị xoá
 khỏi codebase.** Đây là quyết định có chủ ý, không phải thiếu sót. Lấy lại từ commit
@@ -69,6 +70,8 @@ Các lệnh khác:
 npm run analyze -- BTC 1h --no-ai   # phân tích trong terminal
 npm run train -- BTC 4h             # train model, lưu vào models/
 npm run backtest -- BTC 4h 3000     # backtest có SL/TP
+npm run diagnose:sl -- BTC 4h 3000  # tìm đặc điểm chung của lệnh bị SL
+npm run validate:filters -- BTC 4h 3000 # kiểm chứng bộ lọc theo thời gian
 npm run models:index                # BẮT BUỘC chạy sau khi thêm/xoá file trong models/
 npm run bot:ai                      # bot Telegram bản có Claude (xem phần chi phí)
 ```
@@ -116,12 +119,14 @@ một mã tốn 56 weight — riêng `depth limit=1000` đã 50 — nên quét c
 
 ### Điều kiện call kèo
 
-Ba cửa phải qua hết:
+Bốn cửa phải qua hết:
 
 1. `|điểm| ≥ thresholds.buy` (30) để có hướng long/short.
 2. **Cổng đồng thuận**: ≥ `thresholds.consensusPercent` (60%) số nhóm **có dữ liệu** phải
    cùng hướng. Khác ngưỡng điểm — điểm 40 có thể chỉ đến từ 2 nhóm rất mạnh.
-3. Bối cảnh cơ bản không phủ quyết (xem Kĩ năng 2).
+3. **Chất lượng vào lệnh**: CVD phải cùng chiều đủ mạnh (mặc định độ dốc ≥3%) và volume
+   không thấp hơn trung bình 20 nến. Cổng nội bộ này không hiển thị riêng trên Telegram.
+4. Bối cảnh cơ bản không phủ quyết (xem Kĩ năng 2).
 
 Rồi mới tới ngưỡng báo `alerts.minAbsScore` (35). Bot **không** bắn tin "đứng ngoài" hay
 "chờ tín hiệu" — điểm cao mà bị chặn thì không phải một kèo.
@@ -149,7 +154,7 @@ Mọi phân tích đều phải đi qua chúng, không ước lượng bằng m�
 
 | # | Kĩ năng | Việc | Tài liệu |
 |---|---|---|---|
-| 1 | Chỉ báo | 6 nhóm ở trên → điểm và setup | [`chi-bao`](.claude/skills/chi-bao/SKILL.md) |
+| 1 | Chỉ báo | 7 nhóm ở trên → điểm và setup | [`chi-bao`](.claude/skills/chi-bao/SKILL.md) |
 | 2 | Tin tức & tokenomics | Tokenomics, rủi ro delist, tin tức → **xác nhận hoặc phủ quyết** setup | [`tin-tuc-tokenomics`](.claude/skills/tin-tuc-tokenomics/SKILL.md) |
 
 **Kĩ năng 2 không cộng điểm.** Dòng tiền tính bằng giây đến giờ, tokenomics tính bằng ngày
@@ -195,6 +200,8 @@ Mọi tham số ở `config/strategy.json`, không hardcode trong code. `setStra
 | `indicators.*` | Chu kỳ `volumeAvg` và `cvdSlope` (đều 20) |
 | `risk.*` | `slPercent` 2,5% (thay cho bội số ATR trước đây), mốc TP theo R, `displayLeverage` chỉ để quy đổi hiển thị |
 | `alerts.*` | Chu kỳ quét, ngưỡng báo, phạm vi sàng lọc, hạn giữ kèo |
+| `historicalPattern.*` | Số nến so mẫu, tối đa 6 tháng lịch sử, ngưỡng giống nhau và mức đồng thuận của diễn biến sau mẫu |
+| `entryQuality.*` | Cổng bỏ qua lệnh khi CVD không đủ mạnh/cùng chiều hoặc volume dưới mức xác nhận; không tạo thêm nội dung Telegram |
 | `ml.*` | Horizon, cách gán nhãn (`triple-barrier` theo % giá), siêu tham số. Sửa xong **phải train lại**. |
 | `llm.*` | Chỉ ảnh hưởng bot AI |
 
@@ -224,25 +231,30 @@ viết null-safe nên xuống cấp êm, không sập.
 
 ## Kết quả kiểm chứng
 
-Backtest BTCUSDT 4h, 3000 nến (~2025-03 → 2026-07), phí 0,06%/chiều, chốt 50% ở TP1 rồi
-kéo SL về entry:
+Backtest BTCUSDT 4h, 3000 nến (2025-03-20 → 2026-08-02), phí 0,06%/chiều, chốt 50% ở TP1 rồi
+kéo SL về entry. ML bị loại tự động do AUC chưa đạt ngưỡng; kết quả dưới đây chỉ dùng các quy tắc.
 
 | Cổng đồng thuận | Lệnh | Long/Short | Win rate | Profit factor | Lợi nhuận |
 |---|---|---|---|---|---|
-| tắt / 50% / **60%** (đang dùng) | 60 | 14/46 | 50% | 1,05 | **+1,03%** |
-| **70% / 90% / 100%** | 41 | 11/30 | 61% | 1,63 | **+26,76%** |
+| **60% + cổng CVD/volume** (đang dùng) | 82 | 16/66 | 62,2% | 1,30 | **+23,49%** |
 
-Mua & giữ cùng kỳ: **−30,6%**.
+Mua & giữ cùng kỳ: **−33,05%**.
 
-**Đọc thẳng:** ở mức 60% đang dùng, hệ thống về cơ bản **hoà vốn** — profit factor 1,05.
-Mức 70% cho kết quả tốt hơn nhiều nhưng có hai lý do chưa thể tin ngay:
+**Đọc thẳng:** khi tách 75% dữ liệu BTC để chọn cổng và giữ lại 25% cuối để xác nhận, cổng CVD cùng
+chiều ≥3% + volume ≥1x trung bình đã đi từ 44 lệnh, win rate 45,5%, profit factor 0,64 thành 18 lệnh,
+61,1%, profit factor 1,05. Đây là bằng chứng vừa phải, không phải bảo đảm lợi nhuận: cần tiếp tục theo
+dõi ngoài mẫu; không tăng trọng số `weights.historicalPattern` từ kết quả này.
 
-1. 41 lệnh chỉ vừa qua ngưỡng 40 mà chính README này coi là quá ít để kết luận, và đây là
-   **một token, một giai đoạn**.
-2. **Backtest chỉ có 3 nhóm có lịch sử** (volume, cvd, structure). `orderBook`,
-   `derivatives`, `positioning` không có dữ liệu theo từng nến nên bị loại. Chạy thật có 6
-   nhóm, nên cùng một % sẽ nghiêm khắc hơn nhiều: 70% = 3/3 khi backtest nhưng 5/6 khi chạy
-   thật. **Luật này không kiểm chứng đầy đủ được bằng backtest.**
+Trên 25% cuối của ETH và SOL cùng khung, **đúng cổng cố định này** lần lượt có 24 lệnh / win rate
+62,5% / profit factor 1,91 và 13 lệnh / 69,2% / 2,14 (so với baseline 1,23 và 1,05). Mẫu SOL còn
+nhỏ, nên đây chỉ là kiểm tra chéo tích cực chứ không phải cơ sở để tối ưu tiếp ngưỡng.
+
+**Lưu ý về cổng đồng thuận:** backtest có volume, CVD, cấu trúc và mẫu hình lịch sử khi tìm được đủ
+mẫu. `orderBook`,
+   `derivatives`, `positioning` không có dữ liệu theo từng nến nên bị loại. Chạy thật còn có
+   ba nhóm này, còn mẫu hình lịch sử có thể bị loại khi các lần giống nhau cho kết quả lẫn lộn;
+   vì vậy cùng một % đồng thuận không hoàn toàn tương đương. **Luật này không kiểm chứng đầy đủ
+   được bằng backtest.**
 
 Ngưỡng `buy`/`sell` ±30 cũng là mức kế thừa từ bộ chỉ báo cũ, **chưa tinh chỉnh lại** cho
 bộ dòng tiền.
@@ -272,7 +284,7 @@ Kết luận: dùng tool để đọc thị trường có hệ thống, không p
 ## Cấu trúc code
 
 Điểm quan trọng: **module lõi không phụ thuộc Node**, nên browser và Node dùng đúng một bộ
-code. CI chặn cứng bằng `grep` trên 8 file cụ thể (xem `deploy-pages.yml`).
+code. CI chặn cứng bằng `grep` trên 10 file cụ thể (xem `deploy-pages.yml`).
 
 ```
 index.html               Dashboard tĩnh (GitHub Pages phục vụ từ đây)
@@ -286,7 +298,7 @@ src/                     LÕI — dùng chung browser & Node
   features.js            16 feature cho ML
   ml/gbdt.js             Gradient boosting + AUC/logloss + hiệu chuẩn xác suất
   ml/dataset.js          Gán nhãn (triple-barrier / fixed theo % giá) + chia theo thời gian
-  analysis/engine.js     6 nhóm chấm điểm, đồng thuận, kết hợp ML, sinh mức giá
+  analysis/engine.js     7 nhóm chấm điểm, đồng thuận, kết hợp ML, sinh mức giá
   backtest.js            Backtest có SL/TP, chốt lời từng phần
   ---- chỉ chạy ở Node ----
   analysis/context.js    Kĩ năng 2: gộp tokenomics + delist + tin tức, luật cứng
@@ -315,11 +327,12 @@ và `@napi-rs/canvas` — cùng một bộ vẽ, không có bản sao lệch nha
 ### Ràng buộc: lõi phải chạy được trong browser
 
 Bản web là trang tĩnh **không có bước build** — browser `import` trực tiếp file trong `src/`
-qua HTTP. Vì vậy 8 file này không được `import` từ `node:*` hay package npm:
+qua HTTP. Vì vậy 10 file này không được `import` từ `node:*` hay package npm:
 
 ```
 src/indicators/index.js   src/features.js         src/ml/gbdt.js   src/ml/dataset.js
-src/data/binance.js       src/analysis/engine.js  src/ml/train.js  src/backtest.js
+src/data/binance.js       src/analysis/engine.js  src/analysis/historical-pattern.js
+src/analysis/entry-quality.js  src/ml/train.js     src/backtest.js
 ```
 
 Đây là lý do `web/claude.js` gọi Claude bằng `fetch` thay vì SDK.

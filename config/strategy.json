@@ -5,13 +5,14 @@
     "cvdSlope": 20
   },
   "weights": {
-    "_note": "Trọng số cho từng nhóm tín hiệu (0 = tắt hẳn tín hiệu đó). Tổng không cần bằng 100, hệ thống tự chuẩn hoá. Nhóm nào thiếu dữ liệu bị LOẠI khỏi chuẩn hoá thay vì tính 0 điểm. Sáu nhóm này khớp đúng danh sách chỉ báo trong skill.",
+    "_note": "Trọng số cho từng nhóm tín hiệu (0 = tắt hẳn tín hiệu đó). Tổng không cần bằng 100, hệ thống tự chuẩn hoá. Nhóm nào thiếu dữ liệu bị LOẠI khỏi chuẩn hoá thay vì tính 0 điểm. Các nhóm này khớp đúng danh sách trong skill.",
     "cvd": 28,
     "volume": 22,
     "derivatives": 18,
     "positioning": 14,
     "structure": 12,
-    "orderBook": 6
+    "orderBook": 6,
+    "historicalPattern": 10
   },
   "thresholds": {
     "_note": "Ngưỡng phân loại tín hiệu trên thang -100..100. buy/sell càng cao càng ít lệnh nhưng chất lượng hơn. CHÚ Ý: các mức dưới đây được kế thừa từ bộ chỉ báo cũ và CHƯA được backtest lại với bộ chỉ báo dòng tiền — chạy npm run backtest trước khi tin.",
@@ -23,7 +24,7 @@
     "fundingExtreme": 0.0004,
     "sidewaysPercent": 1.5,
     "crowdSkew": 0.12,
-    "_consensusNote": "Cổng đồng thuận: bao nhiêu % nhóm CÓ DỮ LIỆU phải cùng hướng mới gọi kèo. Khác ngưỡng buy/sell — |điểm| cao có thể chỉ đến từ 2 nhóm rất mạnh. CHÚ Ý: chạy thật có 6 nhóm, backtest chỉ có 3 (orderBook/derivatives/positioning không có lịch sử), nên cùng một % sẽ nghiêm khắc hơn nhiều khi chạy thật.",
+    "_consensusNote": "Cổng đồng thuận: bao nhiêu % nhóm CÓ DỮ LIỆU phải cùng hướng mới gọi kèo. Khác ngưỡng buy/sell — |điểm| cao có thể chỉ đến từ 2 nhóm rất mạnh. CHÚ Ý: chạy thật có thêm phái sinh, định vị và sổ lệnh; backtest dùng volume/CVD/cấu trúc và mẫu hình lịch sử khi đủ mẫu, nên cùng một % sẽ khác.",
     "consensusPercent": 60,
     "consensusMinGroupScore": 0.15
   },
@@ -47,6 +48,26 @@
     "earlyStoppingRounds": 40,
     "minTestAuc": 0.52,
     "confidenceMargin": 0.12
+  },
+  "historicalPattern": {
+    "_note": "So mẫu đường giá + biên độ hiện tại với lịch sử tối đa 6 tháng. Chỉ cộng điểm khi các mẫu giống có diễn biến sau đó đủ đồng thuận; không phải dự báo độc lập.",
+    "enabled": true,
+    "maxMonths": 6,
+    "requiredHistoryMonths": 6,
+    "lookbackBars": 24,
+    "futureBars": 12,
+    "minSimilarity": 0.82,
+    "topMatches": 5,
+    "minMatches": 3,
+    "minDirectionalAgreement": 0.6,
+    "minForwardMovePct": 0.75,
+    "candidateStepBars": 3
+  },
+  "entryQuality": {
+    "_note": "Cổng vào lệnh đã được chọn trên 75% BTC 4h và xác nhận ở 25% dữ liệu mới hơn. Chỉ gọi kèo khi CVD cùng hướng đủ mạnh và volume xác nhận. Đây là cổng nội bộ, không hiển thị riêng trên Telegram.",
+    "enabled": true,
+    "minAbsCvdSlope": 0.03,
+    "minVolumeRatio": 1
   },
   "risk": {
     "_note": "Sinh mức entry / stoploss / take-profit. slPercent = SL cách entry bao nhiêu % giá (thay cho bội số ATR trước đây). exitStrategy: scaled | tp1 | tp2 (dùng cho backtest).",

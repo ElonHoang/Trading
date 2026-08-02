@@ -1,11 +1,11 @@
 ---
 name: chi-bao
-description: Bộ chỉ báo DUY NHẤT được dùng trong repo — Open Interest, Funding Rate, CVD, Volume, Order Book, hỗ trợ/kháng cự. Dùng BẮT BUỘC trước khi đưa ra bất kỳ phân tích hay nhận định thị trường nào. Gồm bản chất từng chỉ báo, tác động tới giá, cách lấy số trong code, thứ tự tin cậy và giới hạn thật.
+description: Bộ tín hiệu DUY NHẤT được dùng trong repo — Open Interest, Funding Rate, CVD, Volume, Order Book, hỗ trợ/kháng cự và mẫu hình lịch sử. Dùng BẮT BUỘC trước khi đưa ra bất kỳ phân tích hay nhận định thị trường nào. Gồm bản chất từng tín hiệu, tác động tới giá, cách lấy số trong code, thứ tự tin cậy và giới hạn thật.
 ---
 
 # Kĩ năng 1 — Chỉ báo
 
-Đây là **toàn bộ** chỉ báo được phép dùng. Các chỉ báo giá thuần (EMA, RSI, MACD, Bollinger, ATR, ADX, Stochastic, VWAP, OBV, phân kỳ RSI) đã bị xoá khỏi hệ thống — đừng dùng, đừng tự tính lại, đừng đề xuất thêm vào.
+Đây là toàn bộ tín hiệu được phép dùng: 6 nhóm chỉ báo/dữ liệu hiện có và mẫu hình lịch sử. Các chỉ báo giá thuần (EMA, RSI, MACD, Bollinger, ATR, ADX, Stochastic, VWAP, OBV, phân kỳ RSI) đã bị xoá khỏi hệ thống — đừng dùng, đừng tự tính lại, đừng đề xuất thêm vào.
 
 Không ước lượng bằng mắt, không bịa số. Mọi con số phải lấy từ code.
 
@@ -139,6 +139,16 @@ Top trader long nhiều hơn đám đông thì nghiêng tăng, và ngược lạ
 
 Đối chiếu với sổ lệnh: một mức S/R có `touches` cao **và** có tường lệnh ở đó là xác nhận mạnh nhất.
 
+## 8. Mẫu hình lịch sử
+
+**Bản chất:** chỉ chạy khi token có đủ `historicalPattern.requiredHistoryMonths` tháng lịch sử liên tục (mặc định 6 tháng). Khi đủ điều kiện, bot so đường giá đóng nến đã chuẩn hoá và biên độ high/low của `historicalPattern.lookbackBars` nến gần nhất với các đoạn nến trong tối đa `historicalPattern.maxMonths` tháng. Giá tuyệt đối không được dùng để so, nên BTC ở hai mức giá khác nhau vẫn có thể có cùng hình dạng/biên độ tương đối. Token mới list dưới 6 tháng thì nhóm này bị loại hoàn toàn, không cộng/trừ điểm.
+
+**Điều kiện cộng điểm:** chỉ lấy tối đa `topMatches` mẫu không chồng lấp, có độ giống tối thiểu `minSimilarity`. Bot nhìn tiếp `futureBars` nến sau từng mẫu cũ; chỉ cộng điểm long hoặc short khi có ít nhất `minMatches` mẫu, tỷ lệ cùng hướng đạt `minDirectionalAgreement`, và mức đi trung bình đạt `minForwardMovePct`. Mẫu giống nhưng kết quả sau đó lẫn lộn **không được cộng điểm**.
+
+**Lấy ở đâu:** `fetchKlinesHistory()` và `analyzeHistoricalPattern()` trong `src/analysis/historical-pattern.js`. Luôn dùng nến đã đóng. Khi backtest, matcher nhận `endIndex = i`, vì vậy mọi nến dùng để đánh giá mẫu cũ đều phải tồn tại trước nến mô phỏng hiện tại — không look-ahead.
+
+**Giới hạn:** đây là thống kê mẫu nhỏ trên riêng một token/khung, không phải xác suất chắc chắn và không phải lý do vào lệnh độc lập. Cache lịch sử chỉ giảm request; nến mới nhất vẫn được tải riêng ở mỗi lần phân tích.
+
 ---
 
 ## Thứ tự tin cậy khi xung đột
@@ -164,7 +174,7 @@ Xung đột thì **nói rõ là xung đột**, đừng ép ra kết luận dứt
 
 ## Vào điểm tổng như thế nào
 
-`scoreSignals()` trong `src/analysis/engine.js` có 6 nhóm khớp đúng danh sách trên: `cvd`, `volume`, `derivatives` (OI + funding), `positioning` (định vị đám đông), `structure` (S/R), `orderBook`. Trọng số ở `config/strategy.json` → `weights`; đặt `0` là tắt hẳn một nhóm.
+`scoreSignals()` trong `src/analysis/engine.js` có 7 nhóm: `cvd`, `volume`, `derivatives` (OI + funding), `positioning` (định vị đám đông), `structure` (S/R), `orderBook`, `historicalPattern`. Trọng số ở `config/strategy.json` → `weights`; đặt `0` là tắt hẳn một nhóm.
 
 **Nhóm thiếu dữ liệu bị LOẠI khỏi phép chuẩn hoá**, không tính là 0 điểm. Điều này quan trọng: order book không có lịch sử nên trong backtest nó luôn thiếu; nếu tính là 0 thì điểm tổng bị pha loãng và gần như không bao giờ vượt ngưỡng (đã từng làm backtest chỉ ra 9 lệnh thay vì 60).
 
@@ -178,7 +188,7 @@ Xung đột thì **nói rõ là xung đột**, đừng ép ra kết luận dứt
 
 `buildSetup(snapshot, context, { consensusPercent })` sẽ đặt `side = 'none'` nếu chưa đạt, và ghi lý do vào `blockers`.
 
-**Cảnh báo phải nêu khi bàn về ngưỡng này:** số nhóm có dữ liệu khác nhau giữa chạy thật và backtest — chạy thật có 6, backtest chỉ có 3 (`orderBook`, `derivatives`, `positioning` không có lịch sử theo nến). Nên `70%` = 3/3 khi backtest nhưng = 5/6 khi chạy thật. **Không kiểm chứng đầy đủ được bằng backtest.**
+**Cảnh báo phải nêu khi bàn về ngưỡng này:** số nhóm có dữ liệu khác nhau giữa chạy thật và backtest — chạy thật có thêm `orderBook`, `derivatives`, `positioning`; backtest có `volume`, `cvd`, `structure` và `historicalPattern` khi đủ mẫu. Vì vậy cùng một % đồng thuận không hoàn toàn tương đương. **Không kiểm chứng đầy đủ được bằng backtest.**
 
 Đo thật trên BTC 4h, 3000 nến: mức 60% (đang dùng) không loại tín hiệu nào, cho 60 lệnh / PF 1,05 / +1,03%. Mức 70% loại 41 tín hiệu, còn 41 lệnh / PF 1,63 / +26,76%. Nhưng 41 lệnh chỉ vừa qua ngưỡng 40 mà `README.md` coi là quá ít để kết luận.
 

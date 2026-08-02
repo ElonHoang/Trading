@@ -45,6 +45,7 @@ export async function generateReport(snapshot, strategy, extra = {}) {
     '- `rules.score` và `combined.score` nằm trong thang -100 (rất giảm) đến +100 (rất tăng).',
     '- `ml.probUp` là xác suất giá tăng vượt ngưỡng biến động sau `ml.horizonCandles` nến, do model gradient boosting train trên chính token này dự đoán.',
     '- `ml.testAuc` là AUC trên tập kiểm tra out-of-sample: 0.5 = vô dụng, >0.58 = khá tốt cho dữ liệu giá.',
+    '- `historicalPattern` chỉ là xác nhận phụ khi `available: true`: nó nêu các đoạn giá/biên độ tương tự trong tối đa 6 tháng và diễn biến sau các đoạn đó; không diễn giải là xác suất chắc chắn.',
     '- `levels` là mức giá do công thức ATR/S-R sinh ra, bạn có thể điều chỉnh và giải thích lý do nếu thấy chưa hợp lý.',
     '- `conflicts` là các xung đột tín hiệu mà hệ thống đã tự phát hiện — bắt buộc phải đề cập nếu không rỗng.',
   ].filter(Boolean).join('\n');

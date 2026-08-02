@@ -69,7 +69,6 @@ export function buildCaption(snap, { setup = null, projections = null } = {}) {
   L.push(`• Tâm lý đám đông : Funding ${der?.fundingRatePercent != null ? pct(der.fundingRatePercent, 4) : '—'}`
     + ` | OI ${der?.openInterestChangePct != null ? pct(der.openInterestChangePct) : '—'}`
     + ` | ${p?.longAccountPercent != null ? `${fmt(p.longAccountPercent, 1)}% Đang Long` : '—'}`);
-
   // Tường lệnh không vẽ trên ảnh nữa (rối mắt) -> nêu ở đây, mỗi bên mức lớn nhất.
   const bidWall = (ob?.walls ?? []).find((w) => w.side === 'bid');
   const askWall = (ob?.walls ?? []).find((w) => w.side === 'ask');
@@ -79,7 +78,8 @@ export function buildCaption(snap, { setup = null, projections = null } = {}) {
   }
 
   // ---- Lý do ----
-  const reasons = (setup?.reasons ?? []).slice(0, 3);
+  // Mẫu hình lịch sử vẫn góp điểm nội bộ, nhưng theo yêu cầu không nêu trong tin Telegram.
+  const reasons = (setup?.reasons ?? []).filter((r) => r.group !== 'Mẫu hình lịch sử').slice(0, 3);
   const cautions = (setup?.cautions ?? []).slice(0, 2);
   if (reasons.length || cautions.length || setup?.blockers?.length) {
     L.push(HR);

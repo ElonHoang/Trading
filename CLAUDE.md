@@ -16,6 +16,8 @@ npm run bot:ai                       # bot Telegram bản AI/ML (src/bot.js) —
 npm run analyze -- BTC 1h --no-ai    # phân tích trong terminal
 npm run train -- BTC 4h              # train model, lưu vào models/
 npm run backtest -- BTC 4h 3000      # backtest có SL/TP
+npm run diagnose:sl -- BTC 4h 3000   # đối chiếu đặc điểm lệnh SL với lệnh có lãi
+npm run validate:filters -- BTC 4h 3000 # chọn trên 75% lịch sử, xác nhận trên 25% cuối
 npm run models:index                 # bắt buộc chạy sau khi thêm/xoá file trong models/
 ```
 
@@ -32,7 +34,7 @@ Cần Node ≥ 20. Các script dùng `--env-file-if-exists=.env`, nên không c�
 
 ## Bộ chỉ báo bị giới hạn cố ý
 
-Repo **chỉ** dùng 6 nhóm: CVD, volume, phái sinh (funding + OI), định vị đám đông, hỗ trợ/kháng cự, order book. Chi tiết bản chất và cách diễn giải từng cái nằm ở [`.claude/skills/chi-bao/SKILL.md`](.claude/skills/chi-bao/SKILL.md) — đọc trước khi làm bất cứ gì liên quan phân tích.
+Repo dùng 7 nhóm: CVD, volume, phái sinh (funding + OI), định vị đám đông, hỗ trợ/kháng cự, order book và mẫu hình lịch sử. Mẫu hình lịch sử so đường giá + biên độ hiện tại với tối đa 6 tháng dữ liệu; chỉ được cộng điểm nếu diễn biến sau các mẫu cũ đủ đồng thuận. Chi tiết bản chất và cách diễn giải từng cái nằm ở [`.claude/skills/chi-bao/SKILL.md`](.claude/skills/chi-bao/SKILL.md) — đọc trước khi làm bất cứ gì liên quan phân tích.
 
 EMA, RSI, MACD, Bollinger, ATR, ADX, Stochastic, VWAP, OBV, phân kỳ RSI **đã bị xoá khỏi codebase** theo yêu cầu. Đừng thêm lại, đừng tự tính, đừng đề xuất. Lấy lại từ git commit `2155bd4` nếu thật sự cần.
 
@@ -51,13 +53,13 @@ Ba tầng xếp lên nhau, mô tả chi tiết trong `README.md`:
 2. **Engine chấm điểm + ML** (`src/analysis/engine.js`, `src/ml/`, `src/features.js`) — gộp điểm theo quy tắc với xác suất từ gradient boosting tự viết.
 3. **Claude** (`src/llm/claude.js` ở Node, `web/claude.js` ở browser) — đọc số liệu tầng dưới rồi viết nhận định.
 
-`src/analysis/engine.js` là trung tâm: `analyze()` của nó trả về payload mà **mọi** giao diện đều dùng — CLI, cả hai bot, dashboard tĩnh và giao diện realtime. Sáu nhóm chấm điểm trong `scoreSignals()` khớp đúng danh sách chỉ báo: `cvd` 28, `volume` 22, `derivatives` 18, `positioning` 14, `structure` 12, `orderBook` 6.
+`src/analysis/engine.js` là trung tâm: `analyze()` của nó trả về payload mà **mọi** giao diện đều dùng — CLI, cả hai bot, dashboard tĩnh và giao diện realtime. Bảy nhóm chấm điểm trong `scoreSignals()` khớp đúng danh sách tín hiệu: `cvd` 28, `volume` 22, `derivatives` 18, `positioning` 14, `structure` 12, `orderBook` 6, `historicalPattern` 10.
 
 ### Hai bất biến của phần chấm điểm — đừng phá
 
 **1. Nhóm thiếu dữ liệu bị LOẠI khỏi chuẩn hoá trọng số**, không tính là 0 điểm. Order book và positioning không có lịch sử theo nến nên trong backtest chúng luôn thiếu; tính là 0 sẽ pha loãng điểm và gần như không bao giờ vượt ngưỡng. Lỗi này từng khiến backtest ra 9 lệnh (toàn short) thay vì 60 lệnh (14 long / 46 short).
 
-**2. Cổng đồng thuận khác ngưỡng điểm.** `consensus.percent` đếm bao nhiêu nhóm *có dữ liệu* cùng hướng; `|điểm| ≥ 30` có thể chỉ đến từ 2 nhóm rất mạnh. Số nhóm có dữ liệu **khác nhau giữa chạy thật (6) và backtest (3)**, nên cùng một % sẽ nghiêm khắc hơn nhiều khi chạy thật. Luật này không kiểm chứng đầy đủ được bằng backtest.
+**2. Cổng đồng thuận khác ngưỡng điểm.** `consensus.percent` đếm bao nhiêu nhóm *có dữ liệu* cùng hướng; `|điểm| ≥ 30` có thể chỉ đến từ 2 nhóm rất mạnh. Số nhóm có dữ liệu khác nhau giữa chạy thật (có thêm phái sinh, định vị và sổ lệnh) và backtest (volume/CVD/cấu trúc, cộng mẫu hình lịch sử khi đủ bằng chứng), nên cùng một % không hoàn toàn tương đương. Luật này không kiểm chứng đầy đủ được bằng backtest.
 
 ### Lớp trên engine
 
@@ -70,11 +72,12 @@ Ba tầng xếp lên nhau, mô tả chi tiết trong `README.md`:
 
 ### Ràng buộc quan trọng nhất: lõi phải chạy được trong browser
 
-Bản web là **trang tĩnh, không có bước build** — browser `import` trực tiếp các file trong `src/` qua HTTP. Vì vậy 8 file này **không được** `import` từ `node:*` hay package npm (`@...`):
+Bản web là **trang tĩnh, không có bước build** — browser `import` trực tiếp các file trong `src/` qua HTTP. Vì vậy 10 file này **không được** `import` từ `node:*` hay package npm (`@...`):
 
 ```
 src/indicators/index.js   src/features.js      src/ml/gbdt.js    src/ml/dataset.js
-src/data/binance.js       src/analysis/engine.js  src/ml/train.js  src/backtest.js
+src/data/binance.js       src/analysis/engine.js  src/analysis/historical-pattern.js
+src/analysis/entry-quality.js  src/ml/train.js     src/backtest.js
 ```
 
 CI chặn cứng bằng `grep` trên đúng danh sách này (`deploy-pages.yml`, bước "Kiểm tra các module lõi không phụ thuộc Node").
@@ -97,7 +100,7 @@ Thêm file mới vào `src/` thì phải quyết ngay nó thuộc nhóm nào: n�
 
 ### Cấu hình là dữ liệu, không phải code
 
-`config/strategy.json` chứa toàn bộ tham số: `indicators`, `weights`, `thresholds`, `ml`, `risk`, `llm`, `alerts`, `analysis`. `config/prompt.md` là system prompt của Claude.
+`config/strategy.json` chứa toàn bộ tham số: `indicators`, `weights`, `thresholds`, `ml`, `historicalPattern`, `entryQuality`, `risk`, `llm`, `alerts`, `analysis`. `config/prompt.md` là system prompt của Claude.
 
 Không hardcode ngưỡng hay trọng số vào code — thêm khoá vào `strategy.json` rồi đọc qua `loadStrategy()`. `setStrategyValue()` cố tình **chỉ cho ghi vào khoá đã tồn tại** để gõ sai không tạo khoá rác. Khoá bắt đầu bằng `_` (như `_note`) bị bỏ khi liệt kê.
 
@@ -170,7 +173,7 @@ Trước khi đưa ra bất kỳ phân tích thị trường nào, **phải** d�
 
 | # | Kĩ năng | Nội dung | Đường dẫn |
 |---|---|---|---|
-| 1 | Chỉ báo | Order book, volume, OI, funding, CVD, định vị đám đông, hỗ trợ/kháng cự — cho ra điểm và setup | [`.claude/skills/chi-bao/SKILL.md`](.claude/skills/chi-bao/SKILL.md) |
+| 1 | Chỉ báo | Order book, volume, OI, funding, CVD, định vị đám đông, hỗ trợ/kháng cự, mẫu hình lịch sử — cho ra điểm và setup | [`.claude/skills/chi-bao/SKILL.md`](.claude/skills/chi-bao/SKILL.md) |
 | 2 | Tin tức & tokenomics | Tokenomics, rủi ro delist, tin tức — xác nhận hoặc **phủ quyết** setup của Kĩ năng 1 | [`.claude/skills/tin-tuc-tokenomics/SKILL.md`](.claude/skills/tin-tuc-tokenomics/SKILL.md) |
 
 Kĩ năng 2 **không cộng điểm** — dòng tiền tính bằng giây/giờ còn tokenomics tính bằng ngày/tuần, trộn vào một thang sẽ làm méo điểm và mất khả năng backtest.

@@ -11,6 +11,7 @@ const GROUP_LABELS = {
   positioning: 'Định vị đám đông',
   structure: 'Hỗ trợ/kháng cự',
   orderBook: 'Sổ lệnh',
+  historicalPattern: 'Mẫu hình lịch sử',
 };
 
 /**
@@ -33,6 +34,14 @@ export function buildSetup(snapshot, context = null, {
   const lv = snapshot.levels;
   const blockers = [];
   const cons = snapshot.rules?.consensus ?? null;
+
+  // Cổng chất lượng đã được kiểm chứng độc lập trong backtest: CVD cùng hướng
+  // phải đủ mạnh và volume phải đạt tối thiểu mức cấu hình trước khi gọi kèo.
+  const quality = snapshot.entryQuality;
+  if (side !== 'none' && quality?.enabled && !quality.met) {
+    side = 'none';
+    blockers.push(...quality.reasons);
+  }
 
   // --- Cổng đồng thuận: yêu cầu bao nhiêu % nhóm CÓ DỮ LIỆU phải cùng hướng ---
   // Khác ngưỡng điểm: |điểm| cao có thể đến từ ít nhóm rất mạnh. Cổng này đảm bảo

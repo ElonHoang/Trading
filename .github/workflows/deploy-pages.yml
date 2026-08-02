@@ -59,7 +59,8 @@ jobs:
           set -e
           # Những file này được browser import trực tiếp nên không được dùng node:*
           for f in src/indicators/index.js src/features.js src/ml/gbdt.js src/ml/dataset.js \
-                   src/data/binance.js src/analysis/engine.js src/ml/train.js src/backtest.js; do
+                   src/data/binance.js src/analysis/engine.js src/analysis/historical-pattern.js src/analysis/entry-quality.js \
+                   src/ml/train.js src/backtest.js; do
             if grep -qE "^import .*from '(node:|@)" "$f"; then
               echo "::error file=$f::$f import module chỉ có ở Node — bản web sẽ vỡ"
               grep -nE "^import .*from '(node:|@)" "$f"

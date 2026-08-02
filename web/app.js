@@ -484,7 +484,7 @@ function drawFlow(snap) {
 
 const GROUP_LABELS = {
   cvd: 'CVD', volume: 'Khối lượng', derivatives: 'Phái sinh (OI + funding)', positioning: 'Định vị đám đông',
-  structure: 'Hỗ trợ/kháng cự', orderBook: 'Sổ lệnh',
+  structure: 'Hỗ trợ/kháng cự', orderBook: 'Sổ lệnh', historicalPattern: 'Mẫu hình lịch sử',
 };
 
 function drawBreakdown(snap) {
@@ -792,6 +792,11 @@ function renderIndicators(snap) {
       rows.push([`Tường ${w.side === 'bid' ? 'mua' : 'bán'}`,
         `${fmtNum(w.price)} (${fmtSigned(w.distancePct)}%, ${w.ratioToAvg.toFixed(1)}x TB)`]);
     }
+  }
+  if (snap.historicalPattern?.available) {
+    const hp = snap.historicalPattern;
+    rows.push(['Mẫu hình lịch sử', `${hp.matched} mẫu, giống TB ${hp.avgSimilarity}%`]);
+    rows.push(['Diễn biến sau mẫu', `${hp.side === 'long' ? 'Tăng' : 'Giảm'} TB ${fmtSigned(hp.avgForwardReturnPct)}% sau ${hp.futureBars} nến`]);
   }
   for (const [k, v] of rows) {
     const dt = document.createElement('dt'); dt.textContent = k;

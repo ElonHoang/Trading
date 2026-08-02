@@ -12,8 +12,58 @@ import { computeIndicators, supportResistance } from './indicators/index.js';
 import { featureVector } from './features.js';
 import { predictProba } from './ml/gbdt.js';
 import { scoreSignals, labelForScore, buildLevels, closedCandles } from './analysis/engine.js';
+import { analyzeHistoricalPattern } from './analysis/historical-pattern.js';
+import { evaluateEntryQuality } from './analysis/entry-quality.js';
 
 const round = (v, d = 2) => (v == null || !Number.isFinite(v) ? null : Number(v.toFixed(d)));
+
+/** Đồng bộ điều kiện dùng ML của backtest với engine chạy thật. */
+function reliableModelWeight(stored, strategy) {
+  if (!stored || !strategy.ml?.enabled) return 0;
+  const testAuc = stored.metrics?.test?.auc ?? null;
+  const walkForwardAuc = stored.metrics?.walkForward?.meanAuc ?? null;
+  const minAuc = strategy.ml.minTestAuc ?? 0.52;
+  const reliable = testAuc != null && (
+    walkForwardAuc != null
+      ? (testAuc >= minAuc && walkForwardAuc >= minAuc - 0.02)
+      : testAuc >= minAuc
+  );
+  return reliable ? (strategy.ml.weightVsRules ?? 0.4) : 0;
+}
+
+/** Dữ liệu tại lúc vào lệnh để truy nguyên các lệnh bị SL, không dùng nến tương lai. */
+function entryDiagnostics(candles, ind, i, ruleScore, score, consensus, breakdown, historicalPattern) {
+  const from = Math.max(0, i - 19);
+  let high = -Infinity;
+  let low = Infinity;
+  for (let j = Math.max(0, i - 49); j <= i; j++) {
+    high = Math.max(high, candles[j].high);
+    low = Math.min(low, candles[j].low);
+  }
+  const groupScores = Object.fromEntries(Object.entries(breakdown)
+    .filter(([, group]) => !group.skipped)
+    .map(([key, group]) => [key, round(group.score, 3)]));
+  return {
+    ruleScore: round(ruleScore, 2),
+    combinedScore: round(score, 2),
+    consensusPercent: round(consensus.percent, 1),
+    activeGroups: consensus.activeGroups,
+    agreeingGroups: consensus.agree,
+    volumeRatio: round(candles[i].volume / (ind.volumeAvg[i] || 1), 3),
+    cvdSlope: round(ind.cvdSlope[i], 4),
+    priceChange20Pct: round(((candles[i].close - candles[from].close) / candles[from].close) * 100, 2),
+    rangePosition50: round(high > low ? (candles[i].close - low) / (high - low) : 0.5, 3),
+    groupScores,
+    historicalPattern: historicalPattern?.available
+      ? {
+        side: historicalPattern.side,
+        score: round(historicalPattern.score, 3),
+        matched: historicalPattern.matched,
+        agreementPercent: historicalPattern.agreementPercent,
+      }
+      : null,
+  };
+}
 
 /**
  * @param {object} opts
@@ -36,28 +86,38 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
     // (đúng như khuyến nghị mà tool xuất ra). 'tp1'/'tp2' = thoát toàn bộ ở một mức.
     exitStrategy = strategy.risk?.exitStrategy ?? 'scaled',
     partialFraction = strategy.risk?.partialFraction ?? 0.5,
+    includeAllTrades = false,
+    // Dùng cho nghiên cứu/kiểm chứng bộ lọc: chỉ nhận dữ liệu có tại thời điểm vào lệnh.
+    entryFilter = null,
+    startIndex = 220,
+    candlesData = null,
     onProgress = () => {},
   } = opts;
 
   onProgress(`Đang tải ${wantCandles} nến ${symbol} ${interval}...`);
-  const raw = await fetchKlinesHistory(symbol, interval, wantCandles);
+  const raw = candlesData ?? await fetchKlinesHistory(symbol, interval, wantCandles);
   const candles = closedCandles(raw);
   if (candles.length < 400) throw new Error(`Chỉ tải được ${candles.length} nến — cần tối thiểu 400.`);
 
   const ind = computeIndicators(candles, strategy.indicators);
   const stored = storedModel;
-  const mlWeight = stored && strategy.ml?.enabled ? (strategy.ml.weightVsRules ?? 0.4) : 0;
+  const mlWeight = reliableModelWeight(stored, strategy);
 
   const t = strategy.thresholds;
+  const entryQualityCfg = strategy.entryQuality ?? {};
+  const historicalPatternCfg = strategy.historicalPattern ?? {};
+  const useHistoricalPattern = historicalPatternCfg.enabled !== false;
   const trades = [];
   let position = null;
   let skippedConsensus = 0;
+  let skippedByEntryQuality = 0;
+  let skippedByEntryFilter = 0;
   let srCache = null;
   let srCacheIndex = -999;
 
-  onProgress(`Đang mô phỏng trên ${candles.length} nến${stored ? ' (có model ML)' : ' (chỉ quy tắc)'}...`);
+  onProgress(`Đang mô phỏng trên ${candles.length} nến${mlWeight > 0 ? ' (có model ML)' : ' (chỉ quy tắc)'}...`);
 
-  for (let i = 220; i < candles.length; i++) {
+  for (let i = Math.max(220, startIndex); i < candles.length; i++) {
     const c = candles[i];
 
     // --- Quản lý vị thế đang mở ---
@@ -114,6 +174,7 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
           netPercent: round(net, 3),
           score: position.score,
           mlProb: position.mlProb,
+          entryDiagnostics: position.entryDiagnostics,
         });
         position = null;
       }
@@ -125,7 +186,15 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
       srCache = supportResistance(candles.slice(Math.max(0, i - 200), i + 1));
       srCacheIndex = i;
     }
-    const { ruleScore, consensus } = scoreSignals(candles, ind, strategy, { sr: srCache }, i);
+    // `endIndex: i` bảo đảm matcher chỉ biết các nến đã đóng tại thời điểm
+    // mô phỏng này. Phần diễn biến sau của một mẫu cũ cũng phải nằm trước i.
+    const historicalPattern = useHistoricalPattern
+      ? analyzeHistoricalPattern(candles, historicalPatternCfg, { endIndex: i })
+      : null;
+    const { ruleScore, consensus, breakdown } = scoreSignals(candles, ind, strategy, {
+      sr: srCache,
+      historicalPattern,
+    }, i);
 
     let mlProb = null;
     let score = ruleScore;
@@ -140,10 +209,20 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
     const signal = labelForScore(score, t);
     if (signal.side === 'none') continue;
 
+    const quality = evaluateEntryQuality({
+      side: signal.side,
+      cvdSlope: ind.cvdSlope[i],
+      volumeRatio: candles[i].volume / (ind.volumeAvg[i] || 1),
+    }, entryQualityCfg);
+    if (quality.enabled && !quality.met) {
+      skippedByEntryQuality++;
+      continue;
+    }
+
     // Cùng cổng đồng thuận với lúc chạy thật, nếu không backtest sẽ đo một luật
     // khác với luật thực tế bắn kèo.
-    // LƯU Ý: ở đây chỉ có 3 nhóm có lịch sử (volume/cvd/structure) — chạy thật có
-    // 6 nhóm, nên cùng một % sẽ nghiêm khắc hơn khi chạy thật.
+    // LƯU Ý: ở đây có volume/cvd/structure và mẫu hình lịch sử khi tìm được đủ
+    // mẫu; chạy thật còn có phái sinh, định vị và sổ lệnh nên cùng % sẽ khác.
     if (t.consensusPercent != null && consensus.percent < t.consensusPercent) {
       skippedConsensus++;
       continue;
@@ -153,6 +232,19 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
     if (!levels.stopLoss || !levels.targets?.length) continue;
     const riskPct = Math.abs(c.close - levels.stopLoss) / c.close * 100;
     if (riskPct < 0.1 || riskPct > 20) continue; // SL vô lý -> bỏ qua
+
+    const diagnostics = entryDiagnostics(
+      candles, ind, i, ruleScore, score, consensus, breakdown, historicalPattern,
+    );
+    if (entryFilter && !entryFilter({
+      side: signal.side,
+      score,
+      ruleScore,
+      diagnostics,
+    })) {
+      skippedByEntryFilter++;
+      continue;
+    }
 
     position = {
       side: signal.side,
@@ -168,6 +260,7 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
       partialFraction,
       score: round(score, 1),
       mlProb: mlProb != null ? round(mlProb, 4) : null,
+      entryDiagnostics: diagnostics,
     };
   }
 
@@ -182,17 +275,21 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
       candles: candles.length,
     },
     settings: {
-      feePercent, maxHoldBars, mlWeight, usedModel: Boolean(stored), srEvery,
+      feePercent, maxHoldBars, mlWeight, usedModel: mlWeight > 0, storedModelAvailable: Boolean(stored), srEvery,
       exitStrategy, partialFraction: exitStrategy === 'scaled' ? partialFraction : null,
       consensusPercent: t.consensusPercent ?? null,
+      historicalPatternEnabled: useHistoricalPattern,
+      entryQualityEnabled: entryQualityCfg.enabled === true,
+      skippedByEntryQuality,
+      skippedByEntryFilter,
       // Nói rõ số tín hiệu bị cổng đồng thuận loại — không im lặng cắt bớt.
       skippedByConsensus: skippedConsensus,
       consensusNote: t.consensusPercent != null
-        ? 'Backtest chỉ có 3 nhóm có lịch sử (volume/cvd/structure); chạy thật có 6 nhóm nên cùng % sẽ nghiêm khắc hơn'
+        ? 'Backtest có volume/cvd/structure và mẫu hình lịch sử khi tìm được đủ mẫu; chạy thật còn có phái sinh, định vị và sổ lệnh nên cùng % sẽ khác'
         : null,
     },
     stats,
-    trades: trades.slice(-40),
+    trades: includeAllTrades ? trades : trades.slice(-40),
     allTradeCount: trades.length,
   };
 }

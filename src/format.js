@@ -85,6 +85,7 @@ export function formatIndicators(s) {
     }
     if (ob.walls?.length) L.push('   (tường lệnh có thể là spoofing — đối chiếu CVD/volume)');
   }
+
   return L.join('\n');
 }
 
@@ -93,9 +94,11 @@ export function formatBreakdown(s) {
   const names = {
     cvd: 'CVD', volume: 'Khối lượng', derivatives: 'Phái sinh (OI + funding)',
     positioning: 'Định vị đám đông', structure: 'Hỗ trợ/kháng cự', orderBook: 'Sổ lệnh',
+    historicalPattern: 'Mẫu hình lịch sử',
   };
   const entries = Object.entries(s.rules.breakdown)
-    .filter(([, v]) => v.weight > 0)
+    // /detail cũng là tin Telegram trong bot AI, nên ẩn riêng nhóm này.
+    .filter(([key, v]) => key !== 'historicalPattern' && v.weight > 0)
     .sort((a, b) => Math.abs(b[1].contributionPct) - Math.abs(a[1].contributionPct));
   for (const [key, v] of entries) {
     const sign = v.contributionPct > 0 ? '+' : '';

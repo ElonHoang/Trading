@@ -14,6 +14,8 @@
     "analyze": "node --env-file-if-exists=.env src/cli.js",
     "train": "node --env-file-if-exists=.env bin/train.js",
     "backtest": "node --env-file-if-exists=.env bin/backtest.js",
+    "diagnose:sl": "node --env-file-if-exists=.env bin/diagnose-stoploss.js",
+    "validate:filters": "node --env-file-if-exists=.env bin/validate-entry-filters.js",
     "models:index": "node bin/build-model-index.js"
   },
   "dependencies": {

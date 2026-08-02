@@ -2,11 +2,14 @@
 // Đây là phần deterministic (không có LLM), luôn chạy được kể cả khi không có API key.
 
 import {
-  fetchKlines, fetchTicker24h, fetchDerivatives, fetchOrderBookImbalance, fetchPositioning,
+  fetchKlines, fetchKlinesHistory, fetchTicker24h, fetchDerivatives, fetchOrderBookImbalance,
+  fetchPositioning, INTERVAL_MS,
 } from '../data/binance.js';
 import { computeIndicators, supportResistance } from '../indicators/index.js';
 import { featureVector, FEATURE_NAMES } from '../features.js';
 import { predictProba } from '../ml/gbdt.js';
+import { analyzeHistoricalPattern, historicalPatternCandleCount } from './historical-pattern.js';
+import { evaluateEntryQuality } from './entry-quality.js';
 
 const clamp = (v, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
 
@@ -17,6 +20,32 @@ export const MIN_CANDLES = 30;
 export function closedCandles(candles) {
   const out = candles.filter((c) => c.closed);
   return out.length ? out : candles.slice(0, -1);
+}
+
+// Nến lịch sử 6 tháng thay đổi rất ít. Cache riêng phần này để vòng quét Telegram
+// không tải lại hàng nghìn nến cho cùng một mã/khung ở mỗi lần poll. Nến mới nhất
+// vẫn luôn lấy bằng fetchKlines() bên dưới, nên tín hiệu hiện tại không bị cũ.
+const patternHistoryCache = new Map();
+const PATTERN_HISTORY_TTL_MS = 30 * 60e3;
+
+async function fetchPatternHistory(symbol, interval, total) {
+  const key = `${symbol}|${interval}`;
+  const cached = patternHistoryCache.get(key);
+  if (cached && Date.now() - cached.at < PATTERN_HISTORY_TTL_MS
+    && cached.candles.length >= total) {
+    return cached.candles;
+  }
+  const candles = await fetchKlinesHistory(symbol, interval, total);
+  patternHistoryCache.set(key, { at: Date.now(), candles });
+  return candles;
+}
+
+/** Ghép phần lịch sử đã cache với nến mới vừa tải; nến mới được ưu tiên. */
+function mergeCandles(history, current) {
+  const byOpenTime = new Map();
+  for (const candle of history ?? []) byOpenTime.set(candle.openTime, candle);
+  for (const candle of current ?? []) byOpenTime.set(candle.openTime, candle);
+  return [...byOpenTime.values()].sort((a, b) => a.openTime - b.openTime);
 }
 
 // ---------------- Tính điểm theo quy tắc ----------------
@@ -307,6 +336,18 @@ export function scoreSignals(candles, ind, strategy, extras = {}, i = candles.le
     groups.positioning = { score: clamp(s), reasons, available: !!p };
   }
 
+  // --- Mẫu hình lịch sử: chỉ cộng điểm khi các đoạn giá/biên độ giống nhau
+  //     có diễn biến sau đó đủ đồng thuận. Không có bằng chứng rõ thì loại hẳn
+  //     khỏi chuẩn hoá thay vì dùng điểm 0 để làm loãng các tín hiệu khác.
+  {
+    const hp = extras.historicalPattern;
+    groups.historicalPattern = {
+      score: clamp(hp?.score ?? 0),
+      reasons: hp?.reasons ?? ['Chưa có dữ liệu mẫu hình lịch sử'],
+      available: hp?.available === true,
+    };
+  }
+
   // --- Tổng hợp có trọng số ---
   const weights = strategy.weights;
   let weighted = 0, totalWeight = 0;
@@ -332,7 +373,7 @@ export function scoreSignals(candles, ind, strategy, extras = {}, i = candles.le
 
   // Đồng thuận: bao nhiêu nhóm CÓ DỮ LIỆU thực sự cùng hướng với điểm tổng.
   // Khác hẳn ngưỡng điểm: |điểm| >= 35 có thể đến từ 2 nhóm mạnh + 4 nhóm trung
-  // tính, tức chỉ 2/6 nhóm đồng thuận.
+  // tính, tức chỉ một vài nhóm đồng thuận.
   //
   // CẢNH BÁO: số nhóm có dữ liệu khác nhau giữa chạy thật (6) và backtest (3) —
   // orderBook/derivatives/positioning không có lịch sử theo nến. Vì vậy cùng một
@@ -577,13 +618,26 @@ function buildSeries(candles, ind, bars = 180) {
 export async function analyze(symbolInput, interval, strategy, opts = {}) {
   const symbol = symbolInput;
   const nCandles = opts.candles ?? strategy.analysis?.candles ?? 400;
+  const patternCfg = strategy.historicalPattern ?? {};
+  const patternEnabled = patternCfg.enabled !== false;
+  const historicalTotal = patternEnabled
+    ? Math.max(nCandles, historicalPatternCandleCount(INTERVAL_MS[interval], patternCfg))
+    : 0;
+  // Lỗi phần lịch sử không được làm hỏng phân tích chính; chỉ bỏ bonus này và
+  // trả trạng thái rõ ràng cho người dùng thay vì giả vờ là không có mẫu.
+  const patternHistory = patternEnabled
+    ? fetchPatternHistory(symbol, interval, historicalTotal)
+      .then((candles) => ({ candles }))
+      .catch((error) => ({ error }))
+    : Promise.resolve(null);
 
-  const [raw, ticker, derivatives, orderBook, positioning] = await Promise.all([
+  const [raw, ticker, derivatives, orderBook, positioning, historicalResult] = await Promise.all([
     fetchKlines(symbol, interval, nCandles),
     fetchTicker24h(symbol).catch(() => null),
     fetchDerivatives(symbol),
     fetchOrderBookImbalance(symbol),
     fetchPositioning(symbol, interval),
+    patternHistory,
   ]);
 
   const candles = closedCandles(raw);
@@ -597,9 +651,19 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
 
   const ind = computeIndicators(candles, strategy.indicators);
   const sr = supportResistance(candles);
+  const historicalPattern = !patternEnabled
+    ? { available: false, score: 0, side: 'none', reasons: ['So khớp mẫu hình lịch sử đang tắt'] }
+    : historicalResult?.error
+      ? {
+        available: false,
+        score: 0,
+        side: 'none',
+        reasons: [`Không tải được dữ liệu mẫu hình lịch sử: ${historicalResult.error.message}`],
+      }
+      : analyzeHistoricalPattern(mergeCandles(historicalResult?.candles, raw), patternCfg);
 
   const { ruleScore, breakdown, consensus } = scoreSignals(candles, ind, strategy, {
-    sr, derivatives, orderBook, positioning,
+    sr, derivatives, orderBook, positioning, historicalPattern,
   });
 
   const ml = mlPrediction(symbol, interval, candles, ind, strategy, opts.storedModel);
@@ -611,6 +675,11 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
     : ruleScore;
 
   const signal = labelForScore(combinedScore, strategy.thresholds);
+  const entryQuality = evaluateEntryQuality({
+    side: signal.side,
+    cvdSlope: ind.cvdSlope[candles.length - 1],
+    volumeRatio: candles[candles.length - 1].volume / (ind.volumeAvg[candles.length - 1] || 1),
+  }, strategy.entryQuality);
   const levels = buildLevels(candles, ind, sr, signal, strategy.risk);
   const htf = await higherTimeframeContext(symbol, interval, strategy);
 
@@ -667,6 +736,10 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
       quoteVolume24h: ticker?.quoteVolume ?? null,
     },
     indicatorParams: ind.params,
+    historicalPattern: {
+      ...historicalPattern,
+      score: round(historicalPattern.score, 3),
+    },
     indicators: {
       volume: round(candles[i].volume, 2),
       volumeAvg: round(ind.volumeAvg[i], 2),
@@ -679,6 +752,7 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
       // Mua/bán chủ động ròng trên cvdSlope nến, chuẩn hoá theo volume cùng kỳ
       cvdSlope: round(ind.cvdSlope[i], 4),
     },
+    entryQuality,
     structure: {
       support: sr.support.map((l) => ({
         price: roundPrice(l.price), touches: l.touches,
