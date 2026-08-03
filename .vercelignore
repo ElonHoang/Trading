@@ -1,0 +1,10 @@
+# Never upload local secrets, runtime state, or generated files.
+.env
+.env.*
+node_modules/
+data/
+.claude/
+.agents/
+.github/
+dist/
+*.log

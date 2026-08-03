@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "build:vercel": "node scripts/build-static.mjs",
     "start": "node --env-file-if-exists=.env src/server.js",
     "bot": "node --env-file-if-exists=.env src/telegram/bot.js",
     "bot:ai": "node --env-file-if-exists=.env src/bot.js",
