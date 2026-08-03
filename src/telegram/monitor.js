@@ -10,8 +10,6 @@
 import { INTERVAL_MS } from '../data/binance.js';
 import { readOpenCalls, openCall, closeCall, checkCall } from '../data/open-calls.js';
 
-const state = new Map();   // `${symbol}|${interval}` -> { lastCandleTime, lastSignal }
-
 /** Dựng lại mảng nến từ series của snapshot để đối chiếu SL/TP. */
 function candlesOf(snapshot) {
   const s = snapshot.series;
@@ -28,7 +26,13 @@ function candlesOf(snapshot) {
  * @param deps.loadStrategy () => Promise<strategy>
  * @param deps.log          (msg) => void
  */
-export function createMonitor({ listTargets, evaluate, notify, loadStrategy, log = () => {} }) {
+export function createMonitor({
+  listTargets, evaluate, notify, loadStrategy, log = () => {}, initialState = {},
+}) {
+  // `${symbol}|${interval}` -> { lastCandleTime, lastSignal }
+  // Với GitHub Actions, initialState được nạp từ repo trạng thái private để
+  // lần chạy mới không coi lại cùng một cây nến là tín hiệu mới.
+  const state = new Map(Object.entries(initialState ?? {}));
   let timer = null;
   let running = false;
 
@@ -127,6 +131,7 @@ export function createMonitor({ listTargets, evaluate, notify, loadStrategy, log
     },
     stop() { if (timer) clearInterval(timer); timer = null; },
     tick,
+    snapshotState: () => Object.fromEntries(state),
     /** Chu kỳ nến, dùng để chọn pollSeconds hợp lý cho khung đang theo dõi. */
     intervalMs: (interval) => INTERVAL_MS[interval] ?? null,
   };

@@ -1,7 +1,7 @@
 // Server cho UI local. Không cần API key: mọi dữ liệu lấy từ REST công khai của Binance.
 //
 // Phục vụ hai giao diện:
-//   /            dashboard tĩnh (index.html + web/) — giống hệt bản trên GitHub Pages,
+//   /            dashboard tĩnh local (index.html + web/) —
 //                mọi tính toán chạy trong browser bằng chính các module trong src/
 //   /realtime/   giao diện realtime (public/index.html) — nến cập nhật qua WebSocket
 //                Binance, số liệu phân tích lấy từ /api/analyze

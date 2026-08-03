@@ -1,7 +1,7 @@
 // Huấn luyện model cho một cặp (symbol, interval).
 //
 // Module này KHÔNG ghi đĩa và không import gì của Node — nhờ vậy chạy được cả
-// trong Node (bot, CLI) lẫn trong browser (Web Worker trên GitHub Pages).
+// trong Node (bot, CLI) lẫn trong browser (Web Worker).
 // Phía gọi tự quyết định lưu payload trả về ở đâu.
 //
 // CLI nằm ở bin/train.js

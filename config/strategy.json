@@ -96,7 +96,7 @@
     "_note": "Cảnh báo tự động. Vòng quét sàng lọc rẻ trước (1 request ticker toàn sàn, 80 weight) rồi mới phân tích sâu số ít mã. Phân tích đầy đủ 1 mã tốn 56 weight (riêng depth limit=1000 đã 50), nên quét cả 479 cặp sẽ tốn ~26.800 weight/lượt — vượt giới hạn 6.000/phút của Binance.",
     "minAbsScore": 35,
     "onlyOnSignalChange": true,
-    "pollSeconds": 60,
+    "pollSeconds": 300,
     "scanTopVolume": 15,
     "scanTopMovers": 15,
     "scanMinQuoteVolumeUsd": 3000000,

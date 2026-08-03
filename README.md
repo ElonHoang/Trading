@@ -79,8 +79,16 @@ npm run bot:ai                      # bot Telegram bản có Claude (xem phần 
 **Hai bot không chạy đồng thời được.** Telegram chỉ cho một tiến trình long-poll trên mỗi
 token; chạy cả `npm run bot` và `npm run bot:ai` sẽ làm cả hai lỗi 409.
 
-**Bot chạy từ máy này.** Tắt máy là bot ngừng — nó dùng long polling, không có webhook.
-Muốn 24/7 thì cần host thường trú (Oracle Cloud Always Free chạy được nguyên code này).
+### Cảnh báo 5 phút qua GitHub Actions
+
+Khi dùng `Trading-runner`, GitHub Actions chạy `npm run scan:github` một lần mỗi 5 phút rồi
+tự thoát. `Trading` vẫn là repo private; repo public `Trading-runner` chỉ chứa workflow, còn
+`Trading-state` private giữ `open-calls.json` và trạng thái chống gửi trùng.
+
+Chế độ này **chỉ gửi cảnh báo**. Các lệnh Telegram như `/ta`, `/gia`, `/add` không phản hồi khi
+máy local tắt, vì không có tiến trình long-poll đang chạy. Workflow cần bốn repository secrets:
+`SOURCE_REPO_TOKEN`, `STATE_REPO_TOKEN`, `TELEGRAM_BOT_TOKEN`, và
+`TELEGRAM_ALERT_CHAT_IDS`.
 
 ---
 
@@ -104,7 +112,7 @@ dùng chung. Gửi `/id` cho bot để lấy user id của mình.
 
 ### Theo dõi liên tục
 
-Bật bằng `/canhbao`. Mỗi `alerts.pollSeconds` (60s) bot quét lại, nhưng **chỉ đánh giá lại
+Bật bằng `/canhbao`. Mỗi `alerts.pollSeconds` (300s / 5 phút) bot quét lại, nhưng **chỉ đánh giá lại
 khi có nến mới đóng** — chỉ báo tính trên nến đã đóng nên poll dày hơn nến chỉ tốn request.
 
 Cách chọn mã để quét:
@@ -284,10 +292,10 @@ Kết luận: dùng tool để đọc thị trường có hệ thống, không p
 ## Cấu trúc code
 
 Điểm quan trọng: **module lõi không phụ thuộc Node**, nên browser và Node dùng đúng một bộ
-code. CI chặn cứng bằng `grep` trên 10 file cụ thể (xem `deploy-pages.yml`).
+code.
 
 ```
-index.html               Dashboard tĩnh (GitHub Pages phục vụ từ đây)
+index.html               Dashboard tĩnh dùng khi chạy local
 web/                     Lớp riêng của browser: app.js, style.css, store.js,
                          model-store.js, claude.js, worker.js
 public/index.html        Giao diện realtime (WebSocket Binance)

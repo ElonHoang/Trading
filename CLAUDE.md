@@ -23,7 +23,7 @@ npm run models:index                 # bắt buộc chạy sau khi thêm/xoá fi
 
 Hai bot **không chạy đồng thời được** — Telegram chỉ cho một tiến trình long-poll trên mỗi token, chạy cả hai sẽ lỗi 409.
 
-Không có test suite và không có script `test`. Thứ gần nhất với CI là job `verify` trong `.github/workflows/deploy-pages.yml`; chạy tay tương đương:
+Không có test suite và không có script `test`. Có thể chạy kiểm tra thủ công:
 
 ```bash
 find src web bin -name '*.js' -print0 | xargs -0 -n1 node --check
@@ -80,7 +80,7 @@ src/data/binance.js       src/analysis/engine.js  src/analysis/historical-patter
 src/analysis/entry-quality.js  src/ml/train.js     src/backtest.js
 ```
 
-CI chặn cứng bằng `grep` trên đúng danh sách này (`deploy-pages.yml`, bước "Kiểm tra các module lõi không phụ thuộc Node").
+Khi sửa các module này, hãy chạy kiểm tra `grep` tương tự để bảo đảm chúng không phụ thuộc Node.
 
 Các file *chỉ chạy ở Node* được phép dùng `node:*` và package npm (đường dẫn tính từ `src/`):
 
@@ -125,7 +125,7 @@ Browser giữ bản ghi đè riêng trong localStorage (`web/store.js`), mặc �
 - Funding, OI và định vị đám đông **chỉ có với token có futures** — trả `null` chứ không lỗi. Cổ phiếu token hoá (bStocks) không có, nên chỉ còn 4 nhóm và cổng đồng thuận dễ đạt hơn một cách giả tạo.
 - **Chi phí request-weight**: phân tích đầy đủ 1 mã = 56 (riêng `depth limit=1000` đã 50). Giới hạn Binance 6.000/phút. Vì vậy vòng quét sàng lọc bằng 1 request ticker toàn sàn (80 weight) rồi chỉ đào sâu ~24 mã.
 
-`models/` **được commit** để người mở trang GitHub Pages có model sẵn. `models/index.json` là manifest cho browser và CI sẽ fail nếu nó lệch với thư mục.
+`models/` **được commit** để giao diện browser có model sẵn. `models/index.json` là manifest cho browser và phải khớp với thư mục.
 
 ### Cạm bẫy đã gặp
 
@@ -162,7 +162,7 @@ File trạng thái, đều gitignored: `data/alert-chats.json` (chat đã bật 
 
 `src/server.js` phục vụ cả hai, và mở `web/ src/ config/ models/` để browser import module trực tiếp:
 
-- `/` — dashboard tĩnh (`index.html` + `web/`), giống hệt bản GitHub Pages, mọi tính toán chạy trong browser.
+- `/` — dashboard tĩnh local (`index.html` + `web/`), mọi tính toán chạy trong browser.
 - `/realtime/` — `public/index.html`, nến cập nhật qua WebSocket Binance; **điểm và chỉ báo lấy từ `/api/analyze`**, không tính ở client, vì chỉ báo chỉ được tính trên nến đã đóng. Khi nến đóng, trang tự gọi lại snapshot.
 
 `src/chart/render.js` chỉ nhận một context 2D nên dùng được cả cho canvas trình duyệt và `@napi-rs/canvas` khi bot xuất PNG — cùng một bộ vẽ, không có bản sao lệch nhau.

@@ -12,6 +12,7 @@ import { loadStrategy } from '../config.js';
 import { loadModel } from '../ml/model-store.js';
 import { readWatchlist, addSymbol, removeSymbol } from '../data/watchlist.js';
 import { readSubscribers, addSubscriber, removeSubscriber } from '../data/subscribers.js';
+import { readMonitorState, saveMonitorState } from '../data/monitor-state.js';
 import { createMonitor } from './monitor.js';
 import { buildContext } from '../analysis/context.js';
 import { buildSetup, buildProjections } from '../analysis/setup.js';
@@ -48,6 +49,17 @@ const QUICK_INTERVALS = ['15m', '1h', '4h', '1d', '1w'];
 // group và ai cũng sửa được watchlist dùng chung.
 const OWNER_IDS = (process.env.TELEGRAM_OWNER_IDS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
+
+// GitHub Actions chỉ quét một lượt, không long-poll update Telegram.  Vì file
+// alert-chats.json là trạng thái local, lượt quét dùng danh sách chat từ secret
+// TELEGRAM_ALERT_CHAT_IDS (các chat id ngăn cách bằng dấu phẩy).
+const SCAN_ONCE = process.env.BOT_SCAN_ONCE === '1';
+const SCAN_CHAT_IDS = [...new Set((process.env.TELEGRAM_ALERT_CHAT_IDS ?? '')
+  .split(',').map((s) => s.trim()).filter((id) => /^-?\d+$/.test(id)))];
+if (SCAN_ONCE && !SCAN_CHAT_IDS.length) {
+  throw new Error('BOT_SCAN_ONCE=1 cần TELEGRAM_ALERT_CHAT_IDS');
+}
+const alertChats = async () => (SCAN_ONCE ? SCAN_CHAT_IDS : readSubscribers());
 
 const bot = new Bot(token);
 
@@ -283,8 +295,9 @@ bot.command('tatcanhbao', async (ctx) => {
 const monitor = createMonitor({
   loadStrategy,
   log: (m) => console.error(m),
+  initialState: SCAN_ONCE ? await readMonitorState() : {},
   listTargets: async () => {
-    const chats = await readSubscribers();
+    const chats = await alertChats();
     // Không có ai bật cảnh báo thì khỏi gọi Binance.
     if (!chats.length) return [];
 
@@ -315,7 +328,7 @@ const monitor = createMonitor({
       : evaluateBestInterval(symbol, strategy);
   },
   notify: async (payload) => {
-    const chats = await readSubscribers();
+    const chats = await alertChats();
     if (!chats.length) return;
     const send = async (fn) => {
       for (const chatId of chats) {
@@ -390,26 +403,32 @@ bot.catch((err) => {
   console.error('Lỗi xử lý update:', err.error?.message ?? err.message);
 });
 
-await bot.api.setMyCommands([
-  { command: 'ta', description: 'Call kèo, tự chọn khung 1h/15m (vd: /ta btc)' },
-  { command: 'id', description: 'Xem user id và quyền của bạn' },
-  { command: 'gia', description: 'Giá nhanh (vd: /gia eth)' },
-  { command: 'canhbao', description: 'Bật theo dõi liên tục, tự báo khi có kèo' },
-  { command: 'tatcanhbao', description: 'Tắt theo dõi liên tục' },
-  { command: 'list', description: 'Danh sách theo dõi' },
-  { command: 'add', description: 'Thêm mã vào danh sách' },
-  { command: 'del', description: 'Bỏ mã khỏi danh sách' },
-  { command: 'help', description: 'Hướng dẫn' },
-]);
+if (SCAN_ONCE) {
+  await monitor.tick();
+  await saveMonitorState(monitor.snapshotState());
+  console.log('Đã quét một lượt và lưu trạng thái theo dõi.');
+} else {
+  await bot.api.setMyCommands([
+    { command: 'ta', description: 'Call kèo, tự chọn khung 1h/15m (vd: /ta btc)' },
+    { command: 'id', description: 'Xem user id và quyền của bạn' },
+    { command: 'gia', description: 'Giá nhanh (vd: /gia eth)' },
+    { command: 'canhbao', description: 'Bật theo dõi liên tục, tự báo khi có kèo' },
+    { command: 'tatcanhbao', description: 'Tắt theo dõi liên tục' },
+    { command: 'list', description: 'Danh sách theo dõi' },
+    { command: 'add', description: 'Thêm mã vào danh sách' },
+    { command: 'del', description: 'Bỏ mã khỏi danh sách' },
+    { command: 'help', description: 'Hướng dẫn' },
+  ]);
 
-const strategy0 = await loadStrategy();
-const poll = monitor.start(strategy0.alerts?.pollSeconds ?? 60);
+  const strategy0 = await loadStrategy();
+  const poll = monitor.start(strategy0.alerts?.pollSeconds ?? 300);
 
-const me = await bot.api.getMe();
-console.log(`Bot @${me.username} đã sẵn sàng. Ctrl+C để dừng.`);
-console.log(`Theo dõi liên tục: quét mỗi ${poll}s, chỉ đánh giá lại khi có nến mới đóng.`);
-console.log('Bật cảnh báo trong Telegram bằng /canhbao.');
+  const me = await bot.api.getMe();
+  console.log(`Bot @${me.username} đã sẵn sàng. Ctrl+C để dừng.`);
+  console.log(`Theo dõi liên tục: quét mỗi ${poll}s, chỉ đánh giá lại khi có nến mới đóng.`);
+  console.log('Bật cảnh báo trong Telegram bằng /canhbao.');
 
-process.once('SIGINT', () => { monitor.stop(); bot.stop(); });
-process.once('SIGTERM', () => { monitor.stop(); bot.stop(); });
-bot.start();
+  process.once('SIGINT', () => { monitor.stop(); bot.stop(); });
+  process.once('SIGTERM', () => { monitor.stop(); bot.stop(); });
+  bot.start();
+}

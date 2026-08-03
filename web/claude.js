@@ -1,6 +1,6 @@
 // Gọi Claude trực tiếp từ browser.
 //
-// Vì trang này là tĩnh (GitHub Pages) nên không có backend để giữ key; API key do
+// Vì trang này là tĩnh nên không có backend để giữ key; API key do
 // người dùng tự nhập, nằm trong localStorage của chính họ và chỉ được gửi tới
 // api.anthropic.com. Anthropic yêu cầu header `anthropic-dangerous-direct-browser-access`
 // để bật CORS cho trường hợp này.
