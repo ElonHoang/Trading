@@ -31,7 +31,9 @@ async function save(map) {
   return map;
 }
 
-export async function openCall(symbol, { interval, side, entry, stopLoss, targets, candleTime }) {
+export async function openCall(symbol, {
+  interval, side, entry, stopLoss, targets, candleTime, evidence = null,
+}) {
   const map = await readOpenCalls();
   map[symbol] = {
     symbol,
@@ -43,6 +45,9 @@ export async function openCall(symbol, { interval, side, entry, stopLoss, target
     openedAtCandle: candleTime,
     openedAt: new Date(candleTime).toISOString(),
     tpHit: [],
+    // Bằng chứng được chụp đúng lúc call để phân tích chuỗi SL sau này, không
+    // dùng số liệu mới hơn rồi gán ngược cho quyết định cũ.
+    evidence,
   };
   return save(map);
 }

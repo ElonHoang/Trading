@@ -69,6 +69,26 @@
     "minAbsCvdSlope": 0.03,
     "minVolumeRatio": 1
   },
+  "autoRetune": {
+    "_note": "Sau 3 SL LIÊN TIẾP, bot lưu bằng chứng lúc vào lệnh, kiểm chứng các cấu hình nghiêm ngặt hơn trên 75% lịch sử và xác nhận ở 25% mới hơn. Chỉ tự áp dụng khi mọi cặp vừa SL đều có PF dương, đủ mẫu và drawdown giảm ít nhất mức bên dưới. Cấu hình cũ luôn được sao lưu local trước khi đổi.",
+    "enabled": true,
+    "stopLossStreak": 3,
+    "historyLimit": 200,
+    "cooldownHours": 168,
+    "maxSymbols": 3,
+    "backtestCandles": 3000,
+    "trainingRatio": 0.75,
+    "minTradesPerSegment": 8,
+    "minProfitFactor": 1.05,
+    "minDrawdownReductionPercent": 10,
+    "cvdStep": 0.01,
+    "volumeStep": 0.1,
+    "scoreStep": 5,
+    "slPercentStep": 0.25,
+    "maxCvdSlope": 0.06,
+    "maxVolumeRatio": 1.3,
+    "minSlPercent": 1.5
+  },
   "risk": {
     "_note": "Sinh mức entry / stoploss / take-profit. slPercent = SL cách entry bao nhiêu % giá (thay cho bội số ATR trước đây). exitStrategy: scaled | tp1 | tp2 (dùng cho backtest).",
     "slPercent": 2.5,

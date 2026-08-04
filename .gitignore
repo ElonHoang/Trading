@@ -9,6 +9,8 @@
 data/alert-chats.json
 data/open-calls.json
 data/monitor-state.json
+data/auto-retune.json
+data/strategy-backups/
 
 # Log & file tạm
 *.log
@@ -16,6 +18,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# models/ ĐƯỢC commit để giao diện browser dùng model đóng gói sẵn mà không
-# phải tự train.
+# models/ ĐƯỢC commit: dashboard chạy trong browser cần model đóng gói sẵn để
+# người mở trang có dự đoán ML ngay mà không phải tự train.
 # Nhớ chạy `npm run models:index` sau khi thêm/xoá model.
