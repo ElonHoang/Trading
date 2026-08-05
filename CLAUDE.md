@@ -23,7 +23,7 @@ npm run models:index                 # bắt buộc chạy sau khi thêm/xoá fi
 
 Hai bot **không chạy đồng thời được** — Telegram chỉ cho một tiến trình long-poll trên mỗi token, chạy cả hai sẽ lỗi 409.
 
-Không có test suite và không có script `test`. Có thể chạy kiểm tra thủ công:
+Không có test suite và không có script `test`; có thể chạy kiểm tra thủ công:
 
 ```bash
 find src web bin -name '*.js' -print0 | xargs -0 -n1 node --check
@@ -64,6 +64,7 @@ Ba tầng xếp lên nhau, mô tả chi tiết trong `README.md`:
 ### Lớp trên engine
 
 - `src/analysis/context.js` — Kĩ năng 2. Không cộng điểm, chỉ xác nhận hoặc phủ quyết. Mọi nguồn null-safe: lỗi mạng thì phần đó là `null` kèm `warnings`, không được chặn phần kỹ thuật.
+- `src/analysis/auto-retune.js` — sau 3 SL liên tiếp, lưu bằng chứng lúc vào lệnh rồi kiểm chứng candidate bằng chia lịch sử theo thời gian; chỉ tự ghi cấu hình khi PF dương, đủ mẫu và drawdown giảm.
 - `src/analysis/setup.js` — gộp kỹ thuật + bối cảnh thành setup (entry/SL/TP + lý do xếp theo đóng góp thật), và `buildProjections()` cho hai kịch bản lên/xuống neo vào mức S/R thật.
 - `src/telegram/monitor.js` — vòng quét. Chỉ đánh giá lại **khi có nến mới đóng**; chỉ bắn khi có kèo thật (không bắn "đứng ngoài"/"chờ tín hiệu").
 - `src/data/open-calls.js` — kèo đang mở. Một mã đã call thì không call lại tới khi chạm SL, TP cuối, hoặc quá `alerts.maxHoldBars`.
@@ -80,7 +81,7 @@ src/data/binance.js       src/analysis/engine.js  src/analysis/historical-patter
 src/analysis/entry-quality.js  src/ml/train.js     src/backtest.js
 ```
 
-Khi sửa các module này, hãy chạy kiểm tra `grep` tương tự để bảo đảm chúng không phụ thuộc Node.
+Khi sửa các module này, hãy kiểm tra thủ công rằng chúng không import module chỉ có ở Node.
 
 Các file *chỉ chạy ở Node* được phép dùng `node:*` và package npm (đường dẫn tính từ `src/`):
 
@@ -88,6 +89,7 @@ Các file *chỉ chạy ở Node* được phép dùng `node:*` và package npm 
 bot.js  server.js  cli.js  config.js  format.js
 llm/claude.js  ml/model-store.js
 analysis/context.js  analysis/setup.js
+analysis/auto-retune.js
 chart/png.js
 data/watchlist.js  data/subscribers.js  data/open-calls.js
 data/fundamentals.js  data/announcements.js  data/news.js
@@ -100,7 +102,7 @@ Thêm file mới vào `src/` thì phải quyết ngay nó thuộc nhóm nào: n�
 
 ### Cấu hình là dữ liệu, không phải code
 
-`config/strategy.json` chứa toàn bộ tham số: `indicators`, `weights`, `thresholds`, `ml`, `historicalPattern`, `entryQuality`, `risk`, `llm`, `alerts`, `analysis`. `config/prompt.md` là system prompt của Claude.
+`config/strategy.json` chứa toàn bộ tham số: `indicators`, `weights`, `thresholds`, `ml`, `historicalPattern`, `entryQuality`, `autoRetune`, `risk`, `llm`, `alerts`, `analysis`. `config/prompt.md` là system prompt của Claude.
 
 Không hardcode ngưỡng hay trọng số vào code — thêm khoá vào `strategy.json` rồi đọc qua `loadStrategy()`. `setStrategyValue()` cố tình **chỉ cho ghi vào khoá đã tồn tại** để gõ sai không tạo khoá rác. Khoá bắt đầu bằng `_` (như `_note`) bị bỏ khi liệt kê.
 
@@ -125,7 +127,7 @@ Browser giữ bản ghi đè riêng trong localStorage (`web/store.js`), mặc �
 - Funding, OI và định vị đám đông **chỉ có với token có futures** — trả `null` chứ không lỗi. Cổ phiếu token hoá (bStocks) không có, nên chỉ còn 4 nhóm và cổng đồng thuận dễ đạt hơn một cách giả tạo.
 - **Chi phí request-weight**: phân tích đầy đủ 1 mã = 56 (riêng `depth limit=1000` đã 50). Giới hạn Binance 6.000/phút. Vì vậy vòng quét sàng lọc bằng 1 request ticker toàn sàn (80 weight) rồi chỉ đào sâu ~24 mã.
 
-`models/` **được commit** để giao diện browser có model sẵn. `models/index.json` là manifest cho browser và phải khớp với thư mục.
+`models/` **được commit** để dashboard browser có model sẵn. `models/index.json` là manifest cho browser; chạy `npm run models:index` sau khi thêm hoặc xoá model để giữ khớp với thư mục.
 
 ### Cạm bẫy đã gặp
 
@@ -162,7 +164,7 @@ File trạng thái, đều gitignored: `data/alert-chats.json` (chat đã bật 
 
 `src/server.js` phục vụ cả hai, và mở `web/ src/ config/ models/` để browser import module trực tiếp:
 
-- `/` — dashboard tĩnh local (`index.html` + `web/`), mọi tính toán chạy trong browser.
+- `/` — dashboard tĩnh cục bộ (`index.html` + `web/`), mọi tính toán chạy trong browser.
 - `/realtime/` — `public/index.html`, nến cập nhật qua WebSocket Binance; **điểm và chỉ báo lấy từ `/api/analyze`**, không tính ở client, vì chỉ báo chỉ được tính trên nến đã đóng. Khi nến đóng, trang tự gọi lại snapshot.
 
 `src/chart/render.js` chỉ nhận một context 2D nên dùng được cả cho canvas trình duyệt và `@napi-rs/canvas` khi bot xuất PNG — cùng một bộ vẽ, không có bản sao lệch nhau.
@@ -175,8 +177,11 @@ Trước khi đưa ra bất kỳ phân tích thị trường nào, **phải** d�
 |---|---|---|---|
 | 1 | Chỉ báo | Order book, volume, OI, funding, CVD, định vị đám đông, hỗ trợ/kháng cự, mẫu hình lịch sử — cho ra điểm và setup | [`.claude/skills/chi-bao/SKILL.md`](.claude/skills/chi-bao/SKILL.md) |
 | 2 | Tin tức & tokenomics | Tokenomics, rủi ro delist, tin tức — xác nhận hoặc **phủ quyết** setup của Kĩ năng 1 | [`.claude/skills/tin-tuc-tokenomics/SKILL.md`](.claude/skills/tin-tuc-tokenomics/SKILL.md) |
+| 3 | Trading in the Zone | Kỷ luật thực thi: tư duy xác suất, SL/R:R, không FOMO/revenge trade và kiểm chứng sau chuỗi SL; không tạo tín hiệu hay cộng điểm | [`.claude/skills/trading-in-the-zone/SKILL.md`](.claude/skills/trading-in-the-zone/SKILL.md) |
 
 Kĩ năng 2 **không cộng điểm** — dòng tiền tính bằng giây/giờ còn tokenomics tính bằng ngày/tuần, trộn vào một thang sẽ làm méo điểm và mất khả năng backtest.
+
+Kĩ năng 3 cũng **không cộng điểm và không tự đổi cấu hình theo vài lệnh đơn lẻ**. Sau chuỗi SL, chỉ `auto-retune` đã kiểm chứng theo thời gian mới được áp dụng thay đổi an toàn.
 
 Hai mẫu tin nhắn: mẫu **call kèo** ở ngay dưới đây; mẫu **cập nhật khi chạm TP** ở cuối `README.md`. Cả hai được `src/telegram/caption.js` sinh ra (`buildCaption` và `buildTpUpdate`) — sửa mẫu thì phải sửa cả hàm tương ứng.
 
