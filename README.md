@@ -104,7 +104,7 @@ dùng chung. Gửi `/id` cho bot để lấy user id của mình.
 
 ### Theo dõi liên tục
 
-Bật bằng `/canhbao`. Mỗi `alerts.pollSeconds` (60s) bot quét lại, nhưng **chỉ đánh giá lại
+Bật bằng `/canhbao`. Mỗi `alerts.pollSeconds` (300s / 5 phút) bot quét lại, nhưng **chỉ đánh giá lại
 khi có nến mới đóng** — chỉ báo tính trên nến đã đóng nên poll dày hơn nến chỉ tốn request.
 
 Cách chọn mã để quét:
@@ -148,7 +148,7 @@ cái nào xảy ra trước trong nến.
 
 ---
 
-## Hai kĩ năng
+## Ba kĩ năng
 
 Mọi phân tích đều phải đi qua chúng, không ước lượng bằng mắt, không bịa số.
 
@@ -156,11 +156,16 @@ Mọi phân tích đều phải đi qua chúng, không ước lượng bằng m�
 |---|---|---|---|
 | 1 | Chỉ báo | 7 nhóm ở trên → điểm và setup | [`chi-bao`](.claude/skills/chi-bao/SKILL.md) |
 | 2 | Tin tức & tokenomics | Tokenomics, rủi ro delist, tin tức → **xác nhận hoặc phủ quyết** setup | [`tin-tuc-tokenomics`](.claude/skills/tin-tuc-tokenomics/SKILL.md) |
+| 3 | Trading in the Zone | Kỷ luật thực thi: xác suất, SL/R:R, tránh FOMO/revenge trade và tự kiểm chứng sau chuỗi SL | [`trading-in-the-zone`](.claude/skills/trading-in-the-zone/SKILL.md) |
 
 **Kĩ năng 2 không cộng điểm.** Dòng tiền tính bằng giây đến giờ, tokenomics tính bằng ngày
 đến tuần; trộn vào cùng thang `-100..100` sẽ làm méo điểm và mất khả năng backtest
 (tokenomics không có lịch sử theo nến). Nó chỉ chặn: cặp không TRADING → chặn cả hai chiều;
 có thông báo delist nhắc token → chặn long.
+
+**Kĩ năng 3 không tạo tín hiệu hay sửa điểm.** Nó buộc call phải được diễn giải như một giả thuyết có
+invalidation và không được đuổi giá, gồng lỗ hay thay đổi chiến lược vì vài kết quả ngắn hạn. Sau 3 SL
+liên tiếp, bot chỉ đổi tham số khi cơ chế kiểm chứng theo thời gian có đủ mẫu và giảm rủi ro.
 
 Nguồn dữ liệu của Kĩ năng 2, kèm mức độ tin được:
 
@@ -202,10 +207,33 @@ Mọi tham số ở `config/strategy.json`, không hardcode trong code. `setStra
 | `alerts.*` | Chu kỳ quét, ngưỡng báo, phạm vi sàng lọc, hạn giữ kèo |
 | `historicalPattern.*` | Số nến so mẫu, tối đa 6 tháng lịch sử, ngưỡng giống nhau và mức đồng thuận của diễn biến sau mẫu |
 | `entryQuality.*` | Cổng bỏ qua lệnh khi CVD không đủ mạnh/cùng chiều hoặc volume dưới mức xác nhận; không tạo thêm nội dung Telegram |
+| `autoRetune.*` | Sau chuỗi SL, tự kiểm chứng cấu hình nghiêm ngặt hơn bằng chia dữ liệu theo thời gian; chỉ áp dụng nếu giảm drawdown và vẫn có PF dương |
 | `ml.*` | Horizon, cách gán nhãn (`triple-barrier` theo % giá), siêu tham số. Sửa xong **phải train lại**. |
 | `llm.*` | Chỉ ảnh hưởng bot AI |
 
 Bản web giữ bản ghi đè riêng trong localStorage; nút "Về mặc định" xoá mọi thay đổi.
+
+---
+
+### Tự kiểm chứng sau chuỗi SL
+
+Bot chart lưu bằng chứng kỹ thuật đúng tại lúc call kèo. Khi **3 kèo liên tiếp** chạm SL,
+bot sẽ tự làm các việc sau:
+
+1. Ghi nhóm tín hiệu nào đã ủng hộ hướng vào lệnh trong cả chuỗi; đây chỉ là dấu hiệu liên
+   quan, không kết luận một nhóm là nguyên nhân.
+2. Với tối đa 3 cặp vừa SL, chạy lại cấu hình hiện tại và các cấu hình chặt hơn trên 75% dữ
+   liệu cũ, rồi xác nhận trên 25% dữ liệu mới hơn.
+3. Chỉ tự đổi `strategy.json` nếu candidate có đủ tối thiểu 8 lệnh ở **mỗi** phần, PF ≥ 1,05,
+   expectancy dương, và drawdown giảm ít nhất 10% trên mọi cặp đang xét. Trong các candidate
+   đạt điều kiện, bot chọn drawdown thấp nhất.
+
+Bot thử siết CVD/volume, tăng ngưỡng điểm, kết hợp hai điều kiện đó, hoặc giảm khoảng SL cơ sở.
+Các nhóm không có dữ liệu lịch sử theo nến như order book, phái sinh và định vị chỉ được nêu
+trong chẩn đoán live, không bị tự sửa trọng số bằng backtest. Cấu hình cũ được sao lưu ở
+`data/strategy-backups/`; nhật ký nằm ở `data/auto-retune.json`; cả hai chỉ ở máy chạy bot và
+không được commit. `autoRetune.cooldownHours` mặc định 168 giờ để bot không liên tục chỉnh theo
+một giai đoạn nhiễu.
 
 ---
 
@@ -284,10 +312,10 @@ Kết luận: dùng tool để đọc thị trường có hệ thống, không p
 ## Cấu trúc code
 
 Điểm quan trọng: **module lõi không phụ thuộc Node**, nên browser và Node dùng đúng một bộ
-code. CI chặn cứng bằng `grep` trên 10 file cụ thể (xem `deploy-pages.yml`).
+code. Khi sửa các module dùng chung, hãy kiểm tra chúng không import `node:*` hoặc package npm.
 
 ```
-index.html               Dashboard tĩnh (GitHub Pages phục vụ từ đây)
+index.html               Dashboard tĩnh (chạy cục bộ khi cần)
 web/                     Lớp riêng của browser: app.js, style.css, store.js,
                          model-store.js, claude.js, worker.js
 public/index.html        Giao diện realtime (WebSocket Binance)
@@ -302,6 +330,7 @@ src/                     LÕI — dùng chung browser & Node
   backtest.js            Backtest có SL/TP, chốt lời từng phần
   ---- chỉ chạy ở Node ----
   analysis/context.js    Kĩ năng 2: gộp tokenomics + delist + tin tức, luật cứng
+  analysis/auto-retune.js Tự kiểm chứng và tinh chỉnh an toàn sau chuỗi SL
   analysis/setup.js      Gộp kỹ thuật + bối cảnh → setup, lý do, phép chiếu hai chiều
   chart/render.js        Bộ vẽ dùng chung (canvas browser + @napi-rs/canvas)
   chart/png.js           Xuất PNG cho bot
@@ -317,7 +346,7 @@ bin/                     CLI: train, backtest, build-model-index
 config/strategy.json     Toàn bộ tham số
 config/prompt.md         System prompt của Claude (chỉ bot AI dùng)
 models/                  Model đóng gói sẵn + index.json
-.claude/skills/          Hai kĩ năng
+.claude/skills/          Ba kĩ năng
 ```
 
 `src/analysis/engine.js` là trung tâm: `analyze()` trả về payload mà **mọi** giao diện đều

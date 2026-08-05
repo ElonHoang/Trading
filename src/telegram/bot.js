@@ -264,9 +264,11 @@ bot.command('canhbao', async (ctx) => {
   const list = await addSubscriber(ctx.chat.id);
   const strategy = await loadStrategy();
   const watch = await readWatchlist();
+  const pollSeconds = Math.max(30, strategy.alerts?.pollSeconds ?? 300);
+  const pollLabel = pollSeconds % 60 === 0 ? `${pollSeconds / 60} phút` : `${pollSeconds} giây`;
   await ctx.reply(
     `🔔 Đã bật cảnh báo tự động cho chat này (${list.length} chat đang bật).\n`
-    + `Quét mỗi ${Math.max(30, strategy.alerts?.pollSeconds ?? 60)} giây, `
+    + `Quét mỗi ${pollLabel}, `
     + `chỉ đánh giá lại khi có nến mới đóng.\n`
     + `Báo khi |điểm| ≥ ${strategy.alerts?.minAbsScore ?? 35} hoặc khi bối cảnh phủ quyết.\n`
     + `Đang theo dõi ${watch.length} mã (khung ${DEFAULT_INTERVAL}) — thêm bằng /add.\n`
@@ -322,6 +324,14 @@ const monitor = createMonitor({
         await fn(chatId).catch((err) => console.error(`[monitor] gửi ${chatId} lỗi:`, err.message));
       }
     };
+
+    // Báo hiếm khi có 3 SL liên tiếp: bot đã kiểm chứng và chỉ đổi cấu hình khi
+    // giảm drawdown trong cả tập cũ lẫn tập dữ liệu mới hơn.
+    if (payload.kind === 'auto-retune') {
+      return send((id) => bot.api.sendMessage(id, payload.text, {
+        link_preview_options: { is_disabled: true },
+      }));
+    }
 
     // --- Chạm TP: theo template "cấu trúc sau khi done tp call kèo" ---
     if (payload.kind === 'progress' || payload.kind === 'tp') {
@@ -403,7 +413,7 @@ await bot.api.setMyCommands([
 ]);
 
 const strategy0 = await loadStrategy();
-const poll = monitor.start(strategy0.alerts?.pollSeconds ?? 60);
+const poll = monitor.start(strategy0.alerts?.pollSeconds ?? 300);
 
 const me = await bot.api.getMe();
 console.log(`Bot @${me.username} đã sẵn sàng. Ctrl+C để dừng.`);

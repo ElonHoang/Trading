@@ -386,7 +386,7 @@ bot.catch((err) => {
 });
 
 const strategy0 = await loadStrategy();
-const pollSeconds = Math.max(30, strategy0.alerts?.pollSeconds ?? 60);
+const pollSeconds = Math.max(30, strategy0.alerts?.pollSeconds ?? 300);
 const alertTimer = setInterval(() => { checkAlerts().catch(console.error); }, pollSeconds * 1000);
 
 await bot.api.setMyCommands([
