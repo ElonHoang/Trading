@@ -154,7 +154,32 @@ Còn lại hai bot, dùng cùng engine nhưng khác lớp vào/ra:
 
 Bot chart phân quyền fail-closed: `/canhbao`, `/tatcanhbao`, `/add`, `/del` yêu cầu user id nằm trong `TELEGRAM_OWNER_IDS`. Lệnh chỉ đọc mở cho tất cả. Cần thiết vì bot có thể ở trong group, nơi ai cũng sửa được watchlist dùng chung. `/id` trả về user id để chủ bot tự cấu hình.
 
-Khung call kèo là `CALL_INTERVALS = ['1h', '15m']` — xét 1h trước (ít nhiễu hơn), rơi xuống 15m khi 1h chưa đủ điều kiện. **Không dùng 4h để call**, nhưng `/ta btc 4h` vẫn xem được.
+Khung call kèo là `CALL_INTERVALS = ['4h', '1h']` — xét 4h trước, rơi xuống 1h khi 4h chưa đủ điều kiện. Định nghĩa ở cả `src/telegram/alerts-once.js` và `src/telegram/bot.js`; **sửa thì phải sửa cả hai**.
+
+**4h là khung duy nhất có lợi thế đo được.** Trên 7 cặp, chia 75% để chọn / 25% mới hơn để xác nhận, cấu hình hiện tại cho 4h: win 56,6% · PF 1,29 · kỳ vọng +0,314%/lệnh · +45,08% ở đoạn giữ lại. Cùng phép đo trên 1h/15m: PF 0,64 và kỳ vọng **âm**. Nặng hơn nữa, win rate trên 1h/15m khớp gần đúng `1/(1+k)` với TP = k·R (đo 52,0% / 61,4% / 75,8% / 79,2% ở k = 1 / 0,5 / 0,33 / 0,25) — tức là **kết quả của rào cản, không phải của lợi thế**. Đã quét 21 vùng điều kiện ở R:R 1R trên 1h/15m: không vùng nào đạt 70% ở cả hai đoạn, kể cả nới xuống 60%.
+
+Vì vậy 15m **đã bị bỏ** khỏi danh sách call. 1h giữ lại làm phương án rơi, nhưng kèo sinh từ 1h là phần **kéo win rate xuống** — không phải phần đã kiểm chứng. `/ta btc 15m` vẫn xem được.
+
+### Những núm đã đo và KHÔNG được siết
+
+Bản năng "nhiều SL thì siết điều kiện vào lệnh cho chắc" đã được kiểm chứng và **sai**. Đo trên 6 cặp, chia 75/25 theo thời gian, đoạn giữ lại:
+
+| Siết cái gì | Tỉ lệ SL thật | PF |
+|---|---|---|
+| không siết (gốc) | 49,0% | 0,45 |
+| `consensusPercent` ≥ 70/75/80 | 54,2% | 0,25 |
+| `thresholds.buy` ≥ 35 | 53,3% | 0,33 |
+| `thresholds.buy` ≥ 40 | 55,0% | 0,33 |
+
+`diagnose:sl` nói cùng chuyện: lệnh SL có đồng thuận **cao hơn** lệnh có lãi ở cả 4 cặp đo được, và trên BTC 15m còn có volume cao hơn (2,08 vs 1,49).
+
+Hệ quả cần biết: **3 trong 4 candidate của `autoRetune` đang siết đúng những núm này** — `score-threshold`, `flow-confirmation` (CVD+volume), `flow-and-score`. Nếu chuỗi SL kích hoạt và một trong số đó được áp, khả năng cao là làm xấu thêm. Riêng `smaller-stop` thì siết **sai chiều**: dữ liệu nói `slPercent` phải NỚI ra, không phải thu vào (2,5 → 3,5 giảm SL thật từ 48,7% xuống 28,6% trên 1h/15m).
+
+Ba thứ khác đang chết lặng, biết để khỏi mất thời gian:
+
+- `historicalPattern` có trọng số 10 nhưng đóng góp **đúng 0** trong mọi backtest — `requiredHistoryMonths: 6` không đạt được trên cửa sổ 3000 nến của 1h/15m.
+- `models/` chỉ có `BTCUSDT_4h`, nên `ml.weightVsRules` vô hiệu ở phần lớn mã. Model đó cũng dưới `ml.minTestAuc`.
+- `autoRetune.enabled` bị `loadActionStrategy()` đặt `false` ở production (GitHub Actions) — toàn bộ cơ chế tự kiểm chứng sau 3 SL **chưa từng chạy thật**.
 
 Watchlist vẫn có hai đường ghi vào `data/watchlist.json`: `loadWatchlist`/`saveWatchlist` trong `src/config.js` (bot AI dùng) và `src/data/watchlist.js` (server + bot chart dùng). Ghi từ hai phía sẽ đè lẫn nhau — chưa hợp nhất.
 

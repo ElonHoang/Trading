@@ -34,7 +34,17 @@ if (!chatIds.length) {
 }
 
 const bot = new Bot(token);
-const CALL_INTERVALS = ['1h', '15m'];
+// 4h trước, rơi xuống 1h khi 4h chưa đủ điều kiện.
+//
+// Đo trên 7 cặp, chia 75% chọn / 25% mới hơn để xác nhận: 4h có lợi thế thật và
+// giữ được ở đoạn giữ lại (win 56,6% · PF 1,29 · kỳ vọng +0,314%/lệnh). Cùng phép
+// đo trên 1h/15m cho PF 0,64 và kỳ vọng ÂM, và win rate ở đó khớp gần đúng
+// 1/(1+k) của bước giá ngẫu nhiên — tức không có lợi thế đo được.
+//
+// 15m đã bị bỏ khỏi danh sách vì vậy. 1h giữ lại làm phương án rơi theo yêu cầu,
+// nhưng kèo sinh từ 1h KÉO win rate xuống dưới mục tiêu 70% — phần đóng góp của
+// nó là điểm yếu đã biết, không phải phần đã kiểm chứng.
+const CALL_INTERVALS = ['4h', '1h'];
 const CANDLES = 300;
 
 /**
@@ -149,8 +159,16 @@ const monitor = createMonitor({
         return send((id) => bot.api.sendMessage(id, text, { parse_mode: 'HTML', ...reply(id) }));
       }
 
-      const icon = result.status === 'stopped' ? '🛑' : '⏱';
-      const label = result.status === 'stopped' ? 'CHẠM STOPLOSS' : 'HẾT HẠN GIỮ';
+      // 'breakeven' = đã chốt một phần ở TP1 rồi giá quay về entry. Không phải SL:
+      // gọi nó là SL sẽ báo sai kết quả và làm lệch cả chuỗi SL của auto-retune.
+      const ICONS = { stopped: '🛑', breakeven: '🛡', expired: '⏱' };
+      const LABELS = {
+        stopped: 'CHẠM STOPLOSS',
+        breakeven: 'VỀ HOÀ VỐN (SL đã kéo về entry sau TP1)',
+        expired: 'HẾT HẠN GIỮ',
+      };
+      const icon = ICONS[result.status] ?? '⏱';
+      const label = LABELS[result.status] ?? 'HẾT HẠN GIỮ';
       const change = result.lastPrice != null && call.entry
         ? ((result.lastPrice - call.entry) / call.entry) * 100 * (call.side === 'long' ? 1 : -1) : null;
       const text = `${icon} <b>${call.symbol} ${call.interval}</b> — ${label}\n`

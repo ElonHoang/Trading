@@ -37,7 +37,10 @@ Rồi chạy lại: npm run bot`);
 // Khung dùng để CALL KÈO. Xét theo thứ tự này: 1h trước vì ít nhiễu hơn, chỉ
 // rơi xuống 15m khi 1h chưa đủ điều kiện. Không dùng 4h để call nữa — nhưng vẫn
 // xem được 4h/1d/1w bằng nút bấm hoặc /ta btc 4h.
-const CALL_INTERVALS = ['1h', '15m'];
+// 4h trước, rơi xuống 1h. Lý do đầy đủ ở src/telegram/alerts-once.js — tóm lại:
+// 4h là khung duy nhất có lợi thế giữ được trên đoạn dữ liệu giữ lại (PF 1,29),
+// còn 1h/15m cho PF 0,64 và kỳ vọng âm. Hai file phải giữ cùng danh sách.
+const CALL_INTERVALS = ['4h', '1h'];
 const DEFAULT_INTERVAL = CALL_INTERVALS[0];
 const CANDLES = 300;
 // Các khung hay dùng, hiện thành hàng nút dưới ảnh chart.
@@ -359,8 +362,16 @@ const monitor = createMonitor({
         return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML', ...reply(id) }));
       }
 
-      const icon = result.status === 'stopped' ? '🛑' : '⏱';
-      const label = result.status === 'stopped' ? 'CHẠM STOPLOSS' : 'HẾT HẠN GIỮ';
+      // 'breakeven' = đã chốt một phần ở TP1 rồi giá quay về entry. Không phải SL:
+      // gọi nó là SL sẽ báo sai kết quả và làm lệch cả chuỗi SL của auto-retune.
+      const ICONS = { stopped: '🛑', breakeven: '🛡', expired: '⏱' };
+      const LABELS = {
+        stopped: 'CHẠM STOPLOSS',
+        breakeven: 'VỀ HOÀ VỐN (SL đã kéo về entry sau TP1)',
+        expired: 'HẾT HẠN GIỮ',
+      };
+      const icon = ICONS[result.status] ?? '⏱';
+      const label = LABELS[result.status] ?? 'HẾT HẠN GIỮ';
       const d = call.entry;
       const loss = result.lastPrice != null && d
         ? ((result.lastPrice - d) / d) * 100 * (call.side === 'long' ? 1 : -1) : null;

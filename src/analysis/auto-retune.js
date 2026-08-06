@@ -66,6 +66,11 @@ export function buildCallEvidence(snapshot, setup) {
   };
 }
 
+/**
+ * Chỉ trạng thái 'stopped' mới tính là SL. Kèo 'breakeven' (đã chốt một phần ở
+ * TP1 rồi về entry) làm ĐỨT chuỗi — nó không phải một lần vào lệnh sai, và tính
+ * nó vào chuỗi sẽ kích hoạt siết cấu hình dựa trên những kèo thực ra có lãi.
+ */
 export function stopLossStreak(trades) {
   let streak = 0;
   for (let i = trades.length - 1; i >= 0; i--) {

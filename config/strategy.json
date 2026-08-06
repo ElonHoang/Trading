@@ -91,11 +91,12 @@
   },
   "risk": {
     "_note": "Sinh mức entry / stoploss / take-profit. slPercent = SL cách entry bao nhiêu % giá (thay cho bội số ATR trước đây). exitStrategy: scaled | tp1 | tp2 (dùng cho backtest).",
+    "_noteTakeProfitR": "TP1 = 0,5R (không phải 1R) là để đạt mục tiêu win rate ~70%. Đo trên 7 cặp khung 4h, chia 75% chọn / 25% mới hơn xác nhận: TP1 ở 0,5R + chốt 50% + kéo SL về entry cho win 70,7% (train) và 68,8% (giữ lại), kỳ vọng dương ở cả hai đoạn. Nới lên 1R cho win 56,7%/54,9% nhưng lãi mỗi lệnh thắng lớn hơn; siết xuống 0,4R làm SẬP kỳ vọng ở đoạn giữ lại (-0,045%). Đừng đổi mà không chạy lại npm run backtest trên khung 4h.",
     "slPercent": 2.5,
     "takeProfitR": [
+      0.5,
       1,
-      2,
-      3
+      1.5
     ],
     "maxRiskPercent": 2,
     "preferSrLevels": true,

@@ -83,46 +83,93 @@ async function updateCall(symbol, patch) {
  * Quy ước bảo thủ giống backtest: nếu một nến chạm CẢ SL và TP thì tính là SL —
  * không biết cái nào xảy ra trước trong nến, giả định xấu cho mình.
  *
- * @returns { status: 'open'|'stopped'|'target'|'expired', hitTps, lastPrice }
+ * CHẠM TP1 -> KÉO SL VỀ ENTRY. Đây là luật `exitStrategy: 'scaled'` mà
+ * `src/backtest.js` dùng để kiểm chứng chiến lược, và cũng đúng hướng dẫn đã gửi
+ * cho người dùng trong tin cập nhật TP ("Dời Stoploss về Entry"). Trước đây phần
+ * theo dõi giữ nguyên SL gốc nên một kèo đã đủ TP1 rồi quay đầu vẫn bị ghi là SL
+ * đầy đủ — sổ sách nội bộ khác cả backtest lẫn tin đã gửi đi.
+ *
+ * Vì vậy có thêm trạng thái `breakeven`: thoát ở entry sau khi đã chốt một phần
+ * ở TP1. Nó KHÁC `stopped` và không được tính vào chuỗi SL của auto-retune.
+ *
+ * @returns { status: 'open'|'stopped'|'breakeven'|'target'|'expired',
+ *            hitTps, lastPrice, bars, slMovedToEntry }
  */
 export async function checkCall(call, candles, { maxHoldBars = 96 } = {}) {
   const isLong = call.side === 'long';
   const after = candles.filter((c) => c.openTime > call.openedAtCandle);
-  const hitTps = [...(call.tpHit ?? [])];
-  const finalTp = call.targets?.[call.targets.length - 1];
+  const targets = call.targets ?? [];
+  const firstTp = targets[0];
+  const finalTp = targets[targets.length - 1];
+  const known = [...(call.tpHit ?? [])];
+
+  // SL-về-entry HẸP HƠN SL gốc, nên không được suy `movedSl` từ `tpHit` đã lưu:
+  // làm vậy sẽ áp stop entry cho cả những nến TRƯỚC khi TP1 thật sự chạm và sinh
+  // ra lần chạm BE giả. Thứ tự phải được phát lại từ nến mở kèo.
+  const replayable = candles.length > 0 && candles[0].openTime <= call.openedAtCandle;
+  const hitTps = replayable ? [] : [...known];
+  let movedSl = Boolean(firstTp && !replayable && hitTps.includes(firstTp.label));
+  let stop = movedSl ? call.entry : call.stopLoss;
+
+  // Cửa sổ nến có thể đã trượt qua lúc mở kèo (bot chỉ nạp một số nến gần nhất);
+  // khi đó không phát lại được thứ tự, đành lấy `tpHit` đã lưu làm căn cứ.
+  const merge = () => [...new Set([...known, ...hitTps])];
 
   for (const c of after) {
-    const hitSl = isLong ? c.low <= call.stopLoss : c.high >= call.stopLoss;
+    const hitSl = isLong ? c.low <= stop : c.high >= stop;
     if (hitSl) {
-      return { status: 'stopped', hitTps, lastPrice: call.stopLoss, bars: after.length };
+      return {
+        status: movedSl ? 'breakeven' : 'stopped',
+        hitTps: merge(),
+        lastPrice: stop,
+        bars: after.length,
+        slMovedToEntry: movedSl,
+      };
     }
-    for (const tp of call.targets ?? []) {
+    for (const tp of targets) {
       if (hitTps.includes(tp.label)) continue;
       const hit = isLong ? c.high >= tp.price : c.low <= tp.price;
       if (hit) hitTps.push(tp.label);
     }
+    // Kéo SL về entry ngay trong nến chạm TP1; từ nến sau trở đi stop là entry.
+    if (!movedSl && firstTp && hitTps.includes(firstTp.label)) {
+      movedSl = true;
+      stop = call.entry;
+    }
     if (finalTp && hitTps.includes(finalTp.label)) {
-      return { status: 'target', hitTps, lastPrice: finalTp.price, bars: after.length };
+      return {
+        status: 'target',
+        hitTps: merge(),
+        lastPrice: finalTp.price,
+        bars: after.length,
+        slMovedToEntry: movedSl,
+      };
     }
   }
+
+  const merged = merge();
 
   // Hết hạn giữ: nếu không có mốc này thì một kèo lửng lơ sẽ chặn token mãi mãi.
   if (after.length >= maxHoldBars) {
     return {
       status: 'expired',
-      hitTps,
+      hitTps: merged,
       lastPrice: candles[candles.length - 1]?.close ?? null,
       bars: after.length,
+      slMovedToEntry: movedSl,
     };
   }
 
-  if (hitTps.length !== (call.tpHit ?? []).length) {
-    await updateCall(call.symbol, { tpHit: hitTps });
+  if (merged.length !== known.length || movedSl !== Boolean(call.slMovedToEntry)) {
+    // `slMovedToEntry` chỉ để hiển thị và tra lại về sau; `stopLoss` gốc được giữ
+    // nguyên để lần quét sau còn phát lại được thứ tự nến.
+    await updateCall(call.symbol, { tpHit: merged, slMovedToEntry: movedSl });
   }
   return {
     status: 'open',
-    hitTps,
+    hitTps: merged,
     lastPrice: candles[candles.length - 1]?.close ?? null,
     bars: after.length,
+    slMovedToEntry: movedSl,
   };
 }

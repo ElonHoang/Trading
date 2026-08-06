@@ -190,7 +190,20 @@ Xung đột thì **nói rõ là xung đột**, đừng ép ra kết luận dứt
 
 **Cảnh báo phải nêu khi bàn về ngưỡng này:** số nhóm có dữ liệu khác nhau giữa chạy thật và backtest — chạy thật có thêm `orderBook`, `derivatives`, `positioning`; backtest có `volume`, `cvd`, `structure` và `historicalPattern` khi đủ mẫu. Vì vậy cùng một % đồng thuận không hoàn toàn tương đương. **Không kiểm chứng đầy đủ được bằng backtest.**
 
-Đo thật trên BTC 4h, 3000 nến: mức 60% (đang dùng) không loại tín hiệu nào, cho 60 lệnh / PF 1,05 / +1,03%. Mức 70% loại 41 tín hiệu, còn 41 lệnh / PF 1,63 / +26,76%. Nhưng 41 lệnh chỉ vừa qua ngưỡng 40 mà `README.md` coi là quá ít để kết luận.
+**Nâng cổng này lên 70% làm KẾT QUẢ XẤU ĐI. Đã đo, đừng thử lại.**
+
+Đo lại trên BTC 4h, 3000 nến, với cấu hình hiện tại:
+
+| Cổng | Lệnh | Win | PF | Tổng | Tín hiệu bị loại |
+|---|---|---|---|---|---|
+| 60% (đang dùng) | 103 | 70,9% | 1,04 | +1,57% | 6 |
+| 70% | 73 | 65,8% | 1,01 | −0,85% | 94 |
+
+Trên 7 cặp khung 4h chia 75/25 theo thời gian, cổng 70% cũng kém hơn ở đoạn giữ lại: PF 0,94 và kỳ vọng −0,081% so với PF 1,29 và +0,314% của cổng 60%. Trên 1h/15m còn tệ hơn (PF 0,25 so với 0,45).
+
+Ngoài ra cổng này **gần như không có độ phân giải** ở khung call: chỉ 3–4 nhóm hoạt động nên `consensus.percent` chỉ nhận vài giá trị rời rạc (67%, 75%, 100%) — đặt 70%, 75% hay 80% cho kết quả **giống hệt nhau**.
+
+> Bản trước của mục này ghi "mức 70% cho 41 lệnh / PF 1,63 / +26,76%" và mô tả 60% là "không loại tín hiệu nào". Cả hai đều **không tái lập được** trên code và dữ liệu hiện tại — số liệu đó đã lạc hậu và từng dẫn tới kết luận sai rằng siết cổng thì tốt hơn.
 
 ## Setup và phép chiếu
 
