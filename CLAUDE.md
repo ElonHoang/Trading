@@ -185,6 +185,22 @@ Watchlist vẫn có hai đường ghi vào `data/watchlist.json`: `loadWatchlist
 
 File trạng thái, đều gitignored: `data/alert-chats.json` (chat đã bật cảnh báo), `data/open-calls.json` (kèo đang mở).
 
+### Triển khai: bản chạy thật nằm ở repo KHÁC
+
+Kèo tự động **không** chạy từ repo này. Ba repo, chia theo quyền:
+
+| Repo | Vai trò |
+|---|---|
+| `ElonHoang/Trading` (repo này, public) | mã nguồn. Runner checkout nhánh `production` |
+| `ElonHoang/Trading-runner` (public) | chạy cron 5 phút, gọi `npm run scan:github` |
+| `ElonHoang/Trading-state` (private) | `open-calls.json`, `monitor-state.json`, `auto-retune.json` dạng plaintext |
+
+`npm run scan:github` **trùng lệnh với `alerts:once`** — runner gọi tên đó, giữ hai tên cho khớp và đừng để lệch nhau.
+
+`.github/workflows/telegram-alerts.yml` trong repo này là bản **fallback, chỉ chạy tay**. Schedule đã bị bỏ có chủ đích: nó lưu trạng thái ở nhánh `bot-state` mã hoá, còn runner lưu ở `Trading-state` — hai nguồn riêng biệt, nên bật cả hai sẽ khiến mỗi kèo bị bắn hai lần rồi SL/TP được theo dõi trên hai bản lệch nhau. **Đừng bật lại schedule ở đây** khi runner còn sống.
+
+Nhịp cron thực tế của GitHub Actions là **~3 tiếng, không phải 5 phút** — scheduled workflow trên runner công khai bị throttle nặng. Đây là một lý do nữa khiến khung 15m không bao giờ hoạt động như thiết kế (96 nến/ngày mà quét 8 lần), còn 4h (6 nến/ngày) thì vừa. Muốn nhịp đáng tin thì chạy `Dockerfile` ở máy riêng, tăng tần suất cron không giúp gì.
+
 ### Giao diện
 
 `src/server.js` phục vụ cả hai, và mở `web/ src/ config/ models/` để browser import module trực tiếp:
