@@ -102,6 +102,24 @@ export async function fetchAllTickers() {
   return tickerCache;
 }
 
+// Danh sách cặp có hợp đồng vĩnh cửu, cache cùng nhịp với danh sách spot. Chỉ
+// những mã này mới có funding, open interest và định vị đám đông; mã không có
+// futures chỉ còn 4/7 nhóm tín hiệu nên điểm và cổng đồng thuận không so sánh
+// được với phần còn lại.
+let futuresSymbols = null;
+let futuresSymbolsAt = 0;
+
+export async function fetchFuturesSymbols() {
+  const now = Date.now();
+  if (futuresSymbols && now - futuresSymbolsAt < SYMBOL_TTL_MS) return futuresSymbols;
+  const j = await getJson(FUTURES_HOSTS, '/fapi/v1/exchangeInfo');
+  futuresSymbols = new Set(j.symbols
+    .filter((s) => s.status === 'TRADING' && s.contractType === 'PERPETUAL')
+    .map((s) => s.symbol));
+  futuresSymbolsAt = now;
+  return futuresSymbols;
+}
+
 // Cặp stablecoin/stablecoin gần như không bao giờ có xu hướng — loại để không
 // chiếm chỗ trong danh sách đào sâu.
 const STABLE_BASES = new Set([
@@ -114,21 +132,30 @@ const STABLE_BASES = new Set([
  *  - thanh khoản cao nhất (majors, luôn cần theo)
  *  - biến động mạnh nhất mà vẫn đủ thanh khoản (altcoin đang chạy)
  *
- * Trả về mảng symbol, đã loại cặp không TRADING và cặp stablecoin.
+ * Trả về mảng symbol, đã loại cặp không TRADING, cặp stablecoin, và (mặc định)
+ * cặp không có futures.
  */
 export async function screenSymbols({
   topVolume = 15,
   topMovers = 15,
   minQuoteVolumeUsd = 3e6,
   quote = 'USDT',
+  requireFutures = true,
 } = {}) {
-  const [tickers, info] = await Promise.all([fetchAllTickers(), fetchSymbolInfo()]);
+  const [tickers, info, futures] = await Promise.all([
+    fetchAllTickers(),
+    fetchSymbolInfo(),
+    // Mất mạng tới fapi thì bỏ qua bộ lọc chứ không làm hỏng cả vòng quét; phần
+    // `futuresFiltered` bên dưới cho biết bộ lọc có thật sự được áp hay không.
+    requireFutures ? fetchFuturesSymbols().catch(() => null) : null,
+  ]);
 
   const rows = [];
   for (const t of tickers) {
     const meta = info.get(t.symbol);
     if (!meta || meta.status !== 'TRADING' || meta.quoteAsset !== quote) continue;
     if (STABLE_BASES.has(meta.baseAsset)) continue;
+    if (futures && !futures.has(t.symbol)) continue;
     const quoteVolume = +t.quoteVolume;
     if (!(quoteVolume >= minQuoteVolumeUsd)) continue;
     rows.push({
@@ -147,6 +174,7 @@ export async function screenSymbols({
     symbols: [...new Set([...byVolume, ...byMovers])],
     scanned: rows.length,
     totalPairs: tickers.length,
+    futuresFiltered: Boolean(futures),
   };
 }
 

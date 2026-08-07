@@ -112,6 +112,7 @@ const monitor = createMonitor({
         topVolume: cfg.scanTopVolume ?? 15,
         topMovers: cfg.scanTopMovers ?? 15,
         minQuoteVolumeUsd: cfg.scanMinQuoteVolumeUsd ?? 3e6,
+        requireFutures: cfg.requireFutures !== false,
       }).catch(() => ({ symbols: [] })),
       readWatchlist(),
     ]);

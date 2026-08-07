@@ -78,6 +78,7 @@ export function createMonitor({
       const cfg = strategy.alerts ?? {};
       const minAbs = cfg.minAbsScore ?? 35;
       const onlyOnChange = cfg.onlyOnSignalChange !== false;
+      const maxDrift = cfg.maxEntryDriftPercent ?? null;
 
       const maxHoldBars = cfg.maxHoldBars ?? 96;
       const targets = await listTargets();
@@ -147,6 +148,19 @@ export function createMonitor({
           if (setup.side === 'none') continue;
           if (Math.abs(score) < minAbs) continue;
           if (onlyOnChange && !changed) continue;
+
+          // Entry, SL và TP đều neo vào giá ĐÓNG của nến đã đóng, còn vòng quét
+          // thật cách nhau hàng giờ. Giá đã trôi xa thì người vào theo giá thị
+          // trường có khoảng cách tới SL khác hẳn con số in trong tin, nên kèo
+          // không còn là kèo đã được chấm điểm nữa — bỏ, chờ nến sau.
+          if (maxDrift != null && snapshot.price?.live != null && setup.entry) {
+            const drift = ((snapshot.price.live - setup.entry) / setup.entry) * 100;
+            if (Math.abs(drift) > maxDrift) {
+              log(`[monitor] bỏ ${snapshot.symbol} ${snapshot.interval}: giá đã lệch `
+                + `${drift > 0 ? '+' : ''}${drift.toFixed(2)}% khỏi entry (tối đa ${maxDrift}%)`);
+              continue;
+            }
+          }
 
           await openCall(snapshot.symbol, {
             interval: snapshot.interval,
