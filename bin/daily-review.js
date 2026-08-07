@@ -75,10 +75,18 @@ if (has('--telegram')) {
     }
     const { Bot } = await import('grammy');
     const bot = new Bot(token);
+    let delivered = 0;
     for (const chatId of chatIds) {
-      await bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' })
-        .catch((error) => console.error(`Gửi ${chatId} lỗi: ${error.message}`));
+      try {
+        await bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' });
+        delivered++;
+      } catch (error) {
+        console.error(`Gửi ${chatId} lỗi: ${error.message}`);
+      }
     }
-    console.error(`Đã gửi báo cáo tới ${chatIds.length} chat.`);
+    console.error(`Đã gửi báo cáo tới ${delivered}/${chatIds.length} chat.`);
+    // Hỏng hết mà job vẫn xanh thì lượt chạy trông như thành công trong khi
+    // không ai nhận được gì — đúng lúc cần biết nhất thì lại không biết.
+    if (!delivered) process.exit(1);
   }
 }
