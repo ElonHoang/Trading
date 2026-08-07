@@ -1,0 +1,113 @@
+name: Daily loss review (fallback, manual only)
+
+# THE LIVE DEPLOYMENT IS ElonHoang/Trading-runner, NOT THIS WORKFLOW.
+#
+# Same reason the alert workflow here has no schedule: the runner keeps the real
+# state in ElonHoang/Trading-state, while this repository can only read its own
+# `bot-state` branch. Scheduling here would review STALE trade history and report
+# a loss rate that never matches the calls actually sent.
+#
+# To run this every 24 hours for real, add the job below to Trading-runner, where
+# `data/auto-retune.json` is already restored from Trading-state:
+#
+#   - run: npm run review:daily -- --telegram --force --no-write
+#
+# `--force` because the cron already provides the 24-hour cadence, and
+# `--no-write` because the review only reads history — it must never become a
+# second writer of the shared state.
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Bỏ qua cửa 24h'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-loss-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Validate required secrets
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_IDS: ${{ secrets.TELEGRAM_ALERT_CHAT_IDS }}
+          STATE_ENCRYPTION_KEY: ${{ secrets.STATE_ENCRYPTION_KEY }}
+          STATE_HMAC_KEY: ${{ secrets.STATE_HMAC_KEY }}
+        run: |
+          test -n "$TELEGRAM_BOT_TOKEN" || { echo 'Missing TELEGRAM_BOT_TOKEN.'; exit 1; }
+          test -n "$TELEGRAM_ALERT_CHAT_IDS" || { echo 'Missing TELEGRAM_ALERT_CHAT_IDS.'; exit 1; }
+          [[ "$STATE_ENCRYPTION_KEY" =~ ^[[:xdigit:]]{64}$ ]] || { echo 'STATE_ENCRYPTION_KEY must be 64 hexadecimal characters.'; exit 1; }
+          [[ "$STATE_HMAC_KEY" =~ ^[[:xdigit:]]{64}$ ]] || { echo 'STATE_HMAC_KEY must be 64 hexadecimal characters.'; exit 1; }
+
+      - name: Check out the application
+        uses: actions/checkout@v4
+        with:
+          path: app
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Check out persistent monitor state
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: bot-state
+          path: state
+          persist-credentials: false
+
+      # Read-only on purpose: this job never writes state back, so it can never
+      # diverge from whichever scanner owns the history.
+      - name: Restore trade history
+        shell: bash
+        env:
+          STATE_ENCRYPTION_KEY: ${{ secrets.STATE_ENCRYPTION_KEY }}
+          STATE_HMAC_KEY: ${{ secrets.STATE_HMAC_KEY }}
+        run: |
+          set -euo pipefail
+          file='data/auto-retune.json'
+          ciphertext="state/.encrypted-state/v1/$file.enc"
+          tag="$ciphertext.hmac"
+          if [[ ! -f "$ciphertext" || ! -f "$tag" ]]; then
+            echo 'No stored trade history yet — the review will report "not enough data".'
+            exit 0
+          fi
+          expected="$(tr -d '\r\n' < "$tag")"
+          actual="$({ printf '%s\0' "$file"; cat -- "$ciphertext"; } \
+            | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${STATE_HMAC_KEY}" -binary \
+            | base64 | tr -d '\n')"
+          [[ "$expected" == "$actual" ]] || { echo "State authentication failed: $file"; exit 1; }
+
+          plaintext="$(mktemp "$RUNNER_TEMP/auto-retune.XXXXXX")"
+          openssl enc -d -aes-256-cbc -md sha256 -pbkdf2 -iter 600000 \
+            -in "$ciphertext" -out "$plaintext" -pass env:STATE_ENCRYPTION_KEY
+          node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$plaintext"
+          mkdir -p "app/$(dirname "$file")"
+          chmod 600 "$plaintext"
+          mv "$plaintext" "app/$file"
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Review and report
+        working-directory: app
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_IDS: ${{ secrets.TELEGRAM_ALERT_CHAT_IDS }}
+        run: |
+          npm run review:daily -- --telegram --no-write \
+            ${{ inputs.force && '--force' || '' }}

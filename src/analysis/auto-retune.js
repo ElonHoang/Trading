@@ -48,6 +48,9 @@ async function saveState(state) {
   await writeFile(STATE_FILE, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
 }
 
+/** Rà soát định kỳ dùng chung file trạng thái này nên cần ghi được từ ngoài. */
+export { saveState as saveAutoRetuneState };
+
 /** Chỉ lưu số liệu tại thời điểm call để sau này không suy diễn từ dữ liệu tương lai. */
 export function buildCallEvidence(snapshot, setup) {
   const groups = Object.fromEntries(Object.entries(snapshot.rules?.breakdown ?? {}).map(([name, group]) => [name, {
