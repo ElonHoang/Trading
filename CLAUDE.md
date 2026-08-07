@@ -16,6 +16,7 @@ npm run bot:ai                       # bot Telegram bản AI/ML (src/bot.js) —
 npm run analyze -- BTC 1h --no-ai    # phân tích trong terminal
 npm run train -- BTC 4h              # train model, lưu vào models/
 npm run backtest -- BTC 4h 3000      # backtest có SL/TP
+npm run review:daily                 # rà soát 24h: tỉ lệ thua, truy nguyên, đề xuất chỉnh
 npm run diagnose:sl -- BTC 4h 3000   # đối chiếu đặc điểm lệnh SL với lệnh có lãi
 npm run validate:filters -- BTC 4h 3000 # chọn trên 75% lịch sử, xác nhận trên 25% cuối
 npm run models:index                 # bắt buộc chạy sau khi thêm/xoá file trong models/
@@ -65,6 +66,7 @@ Ba tầng xếp lên nhau, mô tả chi tiết trong `README.md`:
 
 - `src/analysis/context.js` — Kĩ năng 2. Không cộng điểm, chỉ xác nhận hoặc phủ quyết. Mọi nguồn null-safe: lỗi mạng thì phần đó là `null` kèm `warnings`, không được chặn phần kỹ thuật.
 - `src/analysis/auto-retune.js` — sau 3 SL liên tiếp, lưu bằng chứng lúc vào lệnh rồi kiểm chứng candidate bằng chia lịch sử theo thời gian; chỉ tự ghi cấu hình khi PF dương, đủ mẫu và drawdown giảm.
+- `src/analysis/daily-review.js` — rà soát theo **thời gian** (mặc định 24h), khác `auto-retune` ở ba điểm: kích hoạt theo lịch chứ không theo chuỗi SL; kèo `breakeven` **không** tính là thua; candidate sinh từ chẩn đoán và đi theo chiều đã đo (nới SL, bỏ bám cấu trúc, kéo TP1 gần lại) thay vì luôn siết chặt. Mỗi candidate bị đo **hai lần**: trên các cặp vừa thua phải giảm tỉ lệ SL mà không làm tiền xấu đi, trên bộ canh gác `dailyReview.guardSymbols` ở khung 4h phải giữ kỳ vọng dương tuyệt đối. Mặc định `autoApply: false` — chỉ đề xuất, vì runner bị huỷ sau mỗi lượt nên cấu hình tự ghi sẽ mất.
 - `src/analysis/setup.js` — gộp kỹ thuật + bối cảnh thành setup (entry/SL/TP + lý do xếp theo đóng góp thật), và `buildProjections()` cho hai kịch bản lên/xuống neo vào mức S/R thật.
 - `src/telegram/monitor.js` — vòng quét. Chỉ đánh giá lại **khi có nến mới đóng**; chỉ bắn khi có kèo thật (không bắn "đứng ngoài"/"chờ tín hiệu").
 - `src/data/open-calls.js` — kèo đang mở. Một mã đã call thì không call lại tới khi chạm SL, TP cuối, hoặc quá `alerts.maxHoldBars`.
@@ -175,6 +177,24 @@ Bản năng "nhiều SL thì siết điều kiện vào lệnh cho chắc" đã 
 
 Hệ quả cần biết: **3 trong 4 candidate của `autoRetune` đang siết đúng những núm này** — `score-threshold`, `flow-confirmation` (CVD+volume), `flow-and-score`. Nếu chuỗi SL kích hoạt và một trong số đó được áp, khả năng cao là làm xấu thêm. Riêng `smaller-stop` thì siết **sai chiều**: dữ liệu nói `slPercent` phải NỚI ra, không phải thu vào (2,5 → 3,5 giảm SL thật từ 48,7% xuống 28,6% trên 1h/15m).
 
+### Ba khoá `risk` phải đổi cùng nhau
+
+`slPercent 4` · `takeProfitR [0,75; 1,5; 2,25]` · `preferSrLevels false` là **một gói**, không tách rời được. Đo trên 8 cặp khung 4h, 3000 nến, chia 75% chọn / 25% mới hơn xác nhận, có áp cổng `alerts.minAbsScore` 35 như production:
+
+| | trước (2,5 · 0,5R · bám cấu trúc) | sau |
+|---|---|---|
+| Tỉ lệ dính SL | 36,3% | 32,8% |
+| PF | 1,084 | 1,43 |
+| Kỳ vọng/lệnh | +0,063% | +0,580% |
+| Tổng đoạn giữ lại | +13,3% | +67,3% |
+
+Hai cạm bẫy đã đo, đừng lặp lại:
+
+- **Nới `slPercent` mà vẫn để `preferSrLevels: true` thì vô ích.** `buildLevels` bám SL vào S/R khi khoảng cách nằm trong `0,4×`–`2,5×` mức cơ sở, nên nới `slPercent` chỉ nới luôn vùng chấp nhận — khoảng cách thật vẫn neo vào mức S/R. Đo được: 2,5 → 3 → 3,5 → 4 cho tỉ lệ SL 35,8% → 35,9% → 35,8% → 35,4%, tức đứng yên. Tắt bám cấu trúc rồi thì cả tỉ lệ SL lẫn kỳ vọng mới cải thiện **đơn điệu** theo `slPercent` ở cả hai đoạn dữ liệu.
+- **Đẩy TP ra xa làm TĂNG tỉ lệ dính SL**, vì TP1 chính là cái kích hoạt kéo SL về entry. Giữ SL 2,5%, chỉ đổi TP1: 0,5R → SL 35,8%; 0,75R → 45,3%; 1R → 51,5%; 1,5R → 57,9%. Muốn vừa ít SL vừa lãi hơn thì phải nới SL trước rồi mới đẩy TP.
+
+`autoRetune` có candidate `smaller-stop` siết `slPercent` và `autoRetune.minSlPercent` vẫn là 1,5 — tức nếu cơ chế đó được bật thật, nó có quyền kéo 4 xuống 1,5 và xoá sạch thay đổi này.
+
 Ba thứ khác đang chết lặng, biết để khỏi mất thời gian:
 
 - `historicalPattern` có trọng số 10 nhưng đóng góp **đúng 0** trong mọi backtest — `requiredHistoryMonths: 6` không đạt được trên cửa sổ 3000 nến của 1h/15m.
@@ -198,6 +218,14 @@ Kèo tự động **không** chạy từ repo này. Ba repo, chia theo quyền:
 `npm run scan:github` **trùng lệnh với `alerts:once`** — runner gọi tên đó, giữ hai tên cho khớp và đừng để lệch nhau.
 
 `.github/workflows/telegram-alerts.yml` trong repo này là bản **fallback, chỉ chạy tay**. Schedule đã bị bỏ có chủ đích: nó lưu trạng thái ở nhánh `bot-state` mã hoá, còn runner lưu ở `Trading-state` — hai nguồn riêng biệt, nên bật cả hai sẽ khiến mỗi kèo bị bắn hai lần rồi SL/TP được theo dõi trên hai bản lệch nhau. **Đừng bật lại schedule ở đây** khi runner còn sống.
+
+`.github/workflows/daily-review.yml` cũng **chỉ chạy tay**, cùng một lý do: trạng thái thật nằm ở `Trading-state`, còn workflow trong repo này chỉ đọc được nhánh `bot-state` của chính nó, nên đặt lịch ở đây sẽ rà soát lịch sử **cũ** và báo tỉ lệ thua không khớp kèo đã bắn. Muốn chạy 24h thật thì thêm job này vào `Trading-runner`:
+
+```yaml
+- run: npm run review:daily -- --telegram --force --no-write
+```
+
+`--force` vì cron đã lo nhịp 24h, `--no-write` vì bản rà soát chỉ đọc lịch sử — nó **không được** trở thành nguồn ghi thứ hai vào trạng thái dùng chung.
 
 Nhịp cron thực tế của GitHub Actions là **~3 tiếng, không phải 5 phút** — scheduled workflow trên runner công khai bị throttle nặng. Đây là một lý do nữa khiến khung 15m không bao giờ hoạt động như thiết kế (96 nến/ngày mà quét 8 lần), còn 4h (6 nến/ngày) thì vừa. Muốn nhịp đáng tin thì chạy `Dockerfile` ở máy riêng, tăng tần suất cron không giúp gì.
 
