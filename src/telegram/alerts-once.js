@@ -139,9 +139,9 @@ const monitor = createMonitor({
     }
 
     if (payload.kind === 'progress' || payload.kind === 'tp') {
-      const { call, hitTps, snapshot } = payload;
+      const { call, hitTps } = payload;
       const strategy = await loadActionStrategy();
-      const text = buildTpUpdate(call, hitTps, snapshot, strategy.risk);
+      const text = buildTpUpdate(call, hitTps, strategy.risk);
       return send((id) => bot.api.sendMessage(id, text, {
         parse_mode: 'HTML',
         ...(call.messages?.[id] ? { reply_to_message_id: call.messages[id] } : {}),
@@ -149,13 +149,13 @@ const monitor = createMonitor({
     }
 
     if (payload.kind === 'closed') {
-      const { call, result, snapshot } = payload;
+      const { call, result } = payload;
       const strategy = await loadActionStrategy();
       const reply = (id) => (call.messages?.[id]
         ? { reply_to_message_id: call.messages[id] } : {});
 
       if (result.status === 'target') {
-        const text = `${buildTpUpdate(call, result.hitTps, snapshot, strategy.risk)}\n`
+        const text = `${buildTpUpdate(call, result.hitTps, strategy.risk)}\n`
           + `\n<i>Giữ ${result.bars} nến. Mã này được call lại từ nến sau.</i>`;
         return send((id) => bot.api.sendMessage(id, text, { parse_mode: 'HTML', ...reply(id) }));
       }

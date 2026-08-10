@@ -411,13 +411,8 @@ src/analysis/entry-quality.js  src/ml/train.js     src/backtest.js
 ✅ Chốt lời: Đóng [X]% khối lượng lệnh tại đây.
 🛡 Quản lý rủi ro: Dời Stoploss về Entry (hoà vốn).
 👀 Mục tiêu tiếp: TP [2/3] tại giá [GIÁ_TP_TIẾP].
-
-━━━━━━━━━━━━━━━━━━
-💡 NHẬN ĐỊNH NGẮN
-💬 [Nhận định dựa trên CVD hiện tại: còn thuận hay đã đảo chiều]
 ```
 
 Các con số không tự đặt ra: `%` chốt lời lấy từ `risk.partialFraction` (cùng con số backtest
-dùng cho chiến lược `scaled`), đòn bẩy quy đổi lấy từ `risk.displayLeverage`, và nhận định
-suy từ `cvdSlope` hiện tại. Tin cập nhật **reply vào đúng tin call gốc** nhờ message id lưu
+dùng cho chiến lược `scaled`) và đòn bẩy quy đổi lấy từ `risk.displayLeverage`. Tin cập nhật **reply vào đúng tin call gốc** nhờ message id lưu
 trong `data/open-calls.json`.

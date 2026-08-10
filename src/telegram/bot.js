@@ -339,9 +339,9 @@ const monitor = createMonitor({
 
     // --- Chạm TP: theo template "cấu trúc sau khi done tp call kèo" ---
     if (payload.kind === 'progress' || payload.kind === 'tp') {
-      const { call, hitTps, snapshot } = payload;
+      const { call, hitTps } = payload;
       const strategy = await loadStrategy();
-      const txt = buildTpUpdate(call, hitTps, snapshot, strategy.risk);
+      const txt = buildTpUpdate(call, hitTps, strategy.risk);
       return send((id) => bot.api.sendMessage(id, txt, {
         parse_mode: 'HTML',
         // Trích dẫn lại kèo gốc nếu còn lưu được message id.
@@ -351,14 +351,14 @@ const monitor = createMonitor({
 
     // --- Kèo đã chốt ---
     if (payload.kind === 'closed') {
-      const { call, result, snapshot } = payload;
+      const { call, result } = payload;
       const strategy = await loadStrategy();
       const reply = (id) => (call.messages?.[id]
         ? { reply_to_message_id: call.messages[id] } : {});
 
       // Chốt vì chạm TP cuối -> dùng đúng template cập nhật TP.
       if (result.status === 'target') {
-        const txt = `${buildTpUpdate(call, result.hitTps, snapshot, strategy.risk)}\n`
+        const txt = `${buildTpUpdate(call, result.hitTps, strategy.risk)}\n`
           + `\n<i>Giữ ${result.bars} nến. Mã này được call lại từ nến sau.</i>`;
         return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML', ...reply(id) }));
       }

@@ -261,7 +261,7 @@ Hai mẫu tin nhắn: mẫu **call kèo** ở ngay dưới đây; mẫu **cập 
 
 🔥 [CẶP_GIAO_DỊCH] | Khung [KHUNG_TG]
 💰 Giá hiện tại: [GIÁ_HIỆN_TẠI] ([+/- %])
-🚨 KHUYẾN NGHỊ: 🔴 [SHORT/BÁN] hoặc 🟢 [LONG/MUA] (Điểm: [ĐIỂM]/100)
+🚨 KHUYẾN NGHỊ: 🔴 [SHORT/BÁN] hoặc 🟢 [LONG/MUA]
 
 ━━━━━━━━━━━━━━━━━━
 🎯 CHI TIẾT LỆNH
@@ -272,12 +272,6 @@ Hai mẫu tin nhắn: mẫu **call kèo** ở ngay dưới đây; mẫu **cập 
    👉 TP 2: [GIÁ_TP2]
    👉 TP 3: [GIÁ_TP3]
 ⚖️ Tỷ lệ R:R: [TỶ_LỆ]
-
-━━━━━━━━━━━━━━━━━━
-📊 DỮ LIỆU THỊ TRƯỜNG
-• Hỗ trợ/Kháng cự : HT [GIÁ_HT] | KC [GIÁ_KC]
-• Dòng tiền (CVD) : CVD [+/- %] | Vol [X]x | Sổ lệnh [+/- %]
-• Tâm lý đám đông : Funding [+/- %] | OI [+/- %] | [X]% Đang Long
 
 ━━━━━━━━━━━━━━━━━━
 💡 LÝ DO VÀO LỆNH

@@ -3,7 +3,7 @@
 //
 // Cấu trúc bám đúng mục "Cấu trúc khi call lệnh" trong CLAUDE.md.
 
-import { fmt, pct, compact, decimalsFor } from '../chart/render.js';
+import { fmt, pct, decimalsFor } from '../chart/render.js';
 
 export const CAPTION_LIMIT = 1024;   // giới hạn caption ảnh của Telegram
 const HR = '━━━━━━━━━━━━━━━━━━';
@@ -18,10 +18,6 @@ export const esc = (s) => String(s)
  */
 export function buildCaption(snap, { setup = null, projections = null } = {}) {
   const d = decimalsFor(snap.price.lastClose);
-  const ind = snap.indicators;
-  const der = snap.derivatives;
-  const p = snap.positioning;
-  const ob = snap.orderBook;
   const L = [];
 
   // ---- Đầu ----
@@ -29,15 +25,17 @@ export function buildCaption(snap, { setup = null, projections = null } = {}) {
   L.push(`💰 Giá hiện tại: <b>${fmt(snap.price.lastClose, d)}</b>`
     + (snap.price.change24hPercent != null ? ` (${pct(snap.price.change24hPercent)})` : ''));
 
+  // Điểm đã bị bỏ khỏi mẫu — nó vẫn là thứ quyết định có call hay không
+  // (alerts.minAbsScore), chỉ là không in ra cho người đọc nữa.
   const side = setup?.side ?? 'none';
   if (setup?.blocked) {
-    L.push(`🚨 KHUYẾN NGHỊ: ⛔ <b>ĐỨNG NGOÀI</b> (Điểm: ${snap.combined.score}/100)`);
+    L.push('🚨 KHUYẾN NGHỊ: ⛔ <b>ĐỨNG NGOÀI</b>');
   } else if (side === 'long') {
-    L.push(`🚨 KHUYẾN NGHỊ: 🟢 <b>LONG / MUA</b> (Điểm: ${snap.combined.score}/100)`);
+    L.push('🚨 KHUYẾN NGHỊ: 🟢 <b>LONG / MUA</b>');
   } else if (side === 'short') {
-    L.push(`🚨 KHUYẾN NGHỊ: 🔴 <b>SHORT / BÁN</b> (Điểm: ${snap.combined.score}/100)`);
+    L.push('🚨 KHUYẾN NGHỊ: 🔴 <b>SHORT / BÁN</b>');
   } else {
-    L.push(`🚨 KHUYẾN NGHỊ: ⚪ <b>CHỜ TÍN HIỆU</b> (Điểm: ${snap.combined.score}/100)`);
+    L.push('🚨 KHUYẾN NGHỊ: ⚪ <b>CHỜ TÍN HIỆU</b>');
   }
 
   // ---- Chi tiết lệnh (chỉ khi thật sự có kèo) ----
@@ -57,25 +55,9 @@ export function buildCaption(snap, { setup = null, projections = null } = {}) {
     if (setup.rrToTp1) L.push(`⚖️ Tỷ lệ R:R: ${fmt(setup.rrToTp1, 2)}`);
   }
 
-  // ---- Dữ liệu thị trường ----
-  L.push(HR);
-  L.push('📊 <b>DỮ LIỆU THỊ TRƯỜNG</b>');
-  const sup = snap.structure?.support?.[0];
-  const res = snap.structure?.resistance?.[0];
-  L.push(`• Hỗ trợ/Kháng cự : HT ${sup ? fmt(sup.price, d) : '—'} | KC ${res ? fmt(res.price, d) : '—'}`);
-  L.push(`• Dòng tiền (CVD) : CVD ${ind.cvdSlope == null ? '—' : pct(ind.cvdSlope * 100, 1)}`
-    + ` | Vol ${ind.volumeRatio == null ? '—' : `${fmt(ind.volumeRatio, 2)}x`}`
-    + ` | Sổ lệnh ${ob ? pct(ob.imbalance * 100, 1) : '—'}`);
-  L.push(`• Tâm lý đám đông : Funding ${der?.fundingRatePercent != null ? pct(der.fundingRatePercent, 4) : '—'}`
-    + ` | OI ${der?.openInterestChangePct != null ? pct(der.openInterestChangePct) : '—'}`
-    + ` | ${p?.longAccountPercent != null ? `${fmt(p.longAccountPercent, 1)}% Đang Long` : '—'}`);
-  // Tường lệnh không vẽ trên ảnh nữa (rối mắt) -> nêu ở đây, mỗi bên mức lớn nhất.
-  const bidWall = (ob?.walls ?? []).find((w) => w.side === 'bid');
-  const askWall = (ob?.walls ?? []).find((w) => w.side === 'ask');
-  if (bidWall || askWall) {
-    L.push(`• Tường lệnh : ${bidWall ? `MUA ${fmt(bidWall.price, d)} (${fmt(bidWall.ratioToAvg, 0)}x)` : '—'}`
-      + ` | ${askWall ? `BÁN ${fmt(askWall.price, d)} (${fmt(askWall.ratioToAvg, 0)}x)` : '—'}`);
-  }
+  // Khối "DỮ LIỆU THỊ TRƯỜNG" (S/R, CVD/volume/sổ lệnh, funding/OI/định vị,
+  // tường lệnh) đã bị bỏ khỏi mẫu trong CLAUDE.md theo yêu cầu. Các số đó vẫn
+  // được chấm điểm và vẫn dùng để tính entry/SL/TP — chỉ là không in ra nữa.
 
   // ---- Lý do ----
   // Mẫu hình lịch sử vẫn góp điểm nội bộ, nhưng theo yêu cầu không nêu trong tin Telegram.
@@ -133,12 +115,15 @@ export function splitCaption(text, limit = CAPTION_LIMIT) {
  * Tin cập nhật khi kèo chạm TP, theo mục "cấu trúc sau khi done tp call kèo"
  * trong README.md.
  *
+ * Không nhận snapshot nữa: từ khi mẫu bỏ khối "NHẬN ĐỊNH NGẮN", mọi thứ in ra
+ * đều lấy từ chính kèo và `risk`, nên tin cập nhật không còn phụ thuộc số liệu
+ * thị trường mới.
+ *
  * @param call    kèo đang mở (từ data/open-calls.js)
  * @param hitTps  nhãn các TP vừa chạm trong lượt này, vd ['TP1']
- * @param snap    snapshot mới nhất, để nhận định dòng tiền còn thuận hay không
  * @param risk    strategy.risk — quyết định % chốt và đòn bẩy để quy đổi lợi nhuận
  */
-export function buildTpUpdate(call, hitTps, snap = null, risk = {}) {
+export function buildTpUpdate(call, hitTps, risk = {}) {
   const d = decimalsFor(call.entry);
   const isLong = call.side === 'long';
   const targets = call.targets ?? [];
@@ -181,18 +166,8 @@ export function buildTpUpdate(call, hitTps, snap = null, risk = {}) {
     if (nextTp) L.push(`👀 Mục tiêu tiếp: ${esc(nextTp.label)} tại ${fmt(nextTp.price, d)}.`);
   }
 
-  // Nhận định dựa trên dòng tiền hiện tại, không phải câu chữ cho có.
-  const slope = snap?.indicators?.cvdSlope;
-  if (slope != null) {
-    const stillWith = isLong ? slope > 0 : slope < 0;
-    L.push(HR);
-    L.push('💡 <b>NHẬN ĐỊNH NGẮN</b>');
-    L.push(stillWith
-      ? `💬 CVD vẫn ${pct(slope * 100, 1)} cùng chiều lệnh — lực còn thuận, `
-        + `${isFinal ? 'kèo đã chốt hết' : 'gồng phần còn lại được'}.`
-      : `💬 CVD đã đảo sang ${pct(slope * 100, 1)} ngược chiều lệnh — `
-        + `${isFinal ? 'chốt hết là hợp lý' : 'cân nhắc chốt sớm phần còn lại'}.`);
-  }
+  // Khối "NHẬN ĐỊNH NGẮN" (CVD còn thuận hay đã đảo) đã bị bỏ khỏi mẫu trong
+  // README.md theo yêu cầu.
 
   return L.join('\n');
 }
