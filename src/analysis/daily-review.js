@@ -1,6 +1,9 @@
-// Rà soát định kỳ (mặc định 24h): đo tỉ lệ thua trên toàn bộ kèo đã đóng, truy
-// nguyên đặc điểm của lệnh thua, rồi ĐỀ XUẤT chỉnh cấu hình — mỗi đề xuất đều
-// phải qua backtest chia 75% chọn / 25% mới hơn xác nhận mới được nêu ra.
+// Rà soát định kỳ (mặc định mỗi ngày): đo tỉ lệ thua trên các kèo ĐÃ CHỐT trong
+// ngày, truy nguyên đặc điểm của lệnh thua, rồi ĐỀ XUẤT chỉnh cấu hình — mỗi đề
+// xuất đều phải qua backtest chia 75% chọn / 25% mới hơn xác nhận mới được nêu ra.
+//
+// Kèo đang mở KHÔNG bao giờ lọt vào đây: `recordClosedTrade` chỉ được gọi lúc kèo
+// chạm SL/TP/hết hạn, nên `state.trades` chỉ chứa kèo đã có kết quả.
 //
 // Khác `auto-retune.js` ở ba điểm, và đó là lý do nó tồn tại riêng:
 //  1. Kích hoạt theo THỜI GIAN, không theo chuỗi 3 SL liên tiếp.
@@ -11,11 +14,12 @@
 //
 // Chỉ chạy ở Node: đọc/ghi file trạng thái và tải dữ liệu lịch sử.
 
-import { fetchKlinesHistory } from '../data/binance.js';
+import { fetchKlines, fetchKlinesHistory } from '../data/binance.js';
 import { saveStrategy } from '../config.js';
 import { closedCandles } from './engine.js';
 import { backtest } from '../backtest.js';
 import { diagnoseSupportingGroups, saveAutoRetuneState } from './auto-retune.js';
+import { KIND_LABELS, postMortemLosses } from './post-mortem.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const round = (value, digits = 2) => (Number.isFinite(Number(value)) ? Number(Number(value).toFixed(digits)) : null);
@@ -26,17 +30,57 @@ const round = (value, digits = 2) => (Number.isFinite(Number(value)) ? Number(Nu
 const LOST = 'stopped';
 const BREAKEVEN = 'breakeven';
 
+const DAY_MS = 86400e3;
+
+/**
+ * Mốc bắt đầu cửa sổ thống kê. Ba chế độ, khai báo ở `dailyReview.windowMode`:
+ *
+ *  - `calendar-day` (mặc định): reset lúc 00:00 theo `dayOffsetHours` (VN = 7).
+ *    Báo cáo chỉ gồm kèo chốt trong ngày đó, không cộng dồn. `dayOffsetDays`
+ *    lùi ngày cần rà (0 = hôm nay, -1 = hôm qua) — cần khi job chạy sáng hôm sau,
+ *    vì lúc đó "hôm nay" mới bắt đầu và gần như chưa có kèo nào chốt.
+ *  - `rolling`: `windowHours` giờ gần nhất.
+ *  - `all`: toàn bộ lịch sử đang lưu (tối đa `autoRetune.historyLimit` kèo).
+ *
+ * Trước đây chỉ có `all`, nên tiêu đề in "RÀ SOÁT 24H" trong khi con số là tổng
+ * mọi kèo từng chốt kể từ lúc file trạng thái bắt đầu tích — đọc thành một ngày
+ * bắn mấy chục kèo.
+ */
+export function reviewWindow(cfg = {}, now = Date.now()) {
+  const mode = cfg.windowMode ?? 'calendar-day';
+  if (mode === 'calendar-day') {
+    const offset = Number(cfg.dayOffsetHours ?? 0) * 3600e3;
+    const days = Math.min(0, Math.trunc(Number(cfg.dayOffsetDays ?? 0)) || 0);
+    const sinceMs = (Math.floor((now + offset) / DAY_MS) + days) * DAY_MS - offset;
+    const [y, m, d] = new Date(sinceMs + offset).toISOString().slice(0, 10).split('-');
+    return {
+      mode, sinceMs, untilMs: sinceMs + DAY_MS,
+      since: new Date(sinceMs).toISOString(), label: `NGÀY ${d}/${m}/${y}`,
+    };
+  }
+  const hours = Number(cfg.windowHours ?? 0);
+  if (mode === 'rolling' && hours > 0) {
+    const sinceMs = now - hours * 3600e3;
+    return {
+      mode, sinceMs, untilMs: null,
+      since: new Date(sinceMs).toISOString(), label: `${hours}H GẦN NHẤT`,
+    };
+  }
+  return { mode: 'all', sinceMs: null, untilMs: null, since: null, label: 'TOÀN BỘ LỊCH SỬ ĐANG LƯU' };
+}
+
 /**
  * Thống kê theo đúng cách người dùng yêu cầu: lệnh thua là lệnh chạm SL mà chưa
  * chốt được TP1. Trả cả hai cách tính mẫu số vì "không tính kèo SL do đã done
  * TP1" có thể hiểu là bỏ khỏi tử số hoặc bỏ khỏi cả hai.
  */
-export function summarizeCalls(trades, { sinceMs = null } = {}) {
-  const inWindow = sinceMs == null
+export function summarizeCalls(trades, { sinceMs = null, untilMs = null } = {}) {
+  const inWindow = sinceMs == null && untilMs == null
     ? [...trades]
     : trades.filter((t) => {
       const at = Date.parse(t.closedAt ?? '');
-      return Number.isFinite(at) && at >= sinceMs;
+      if (!Number.isFinite(at)) return false;
+      return (sinceMs == null || at >= sinceMs) && (untilMs == null || at < untilMs);
     });
   const by = (status) => inWindow.filter((t) => t.result?.status === status);
   const lost = by(LOST);
@@ -239,7 +283,8 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   const force = Boolean(deps.force);
 
   const everyHours = Math.max(1, Number(cfg.everyHours ?? 24));
-  const base = { enabled: cfg.enabled !== false, everyHours, at: new Date(now).toISOString() };
+  const window = reviewWindow(cfg, now);
+  const base = { enabled: cfg.enabled !== false, everyHours, window, at: new Date(now).toISOString() };
   if (!base.enabled) return { status: 'disabled', ...base };
 
   const lastAt = Date.parse(state.lastReviewAt ?? '');
@@ -250,23 +295,48 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     };
   }
 
-  const windowHours = Math.max(everyHours, Number(cfg.windowHours ?? 0)) || null;
-  const summary = summarizeCalls(state.trades ?? [], {
-    sinceMs: cfg.windowHours ? now - windowHours * 3600e3 : null,
-  });
+  const summary = summarizeCalls(state.trades ?? [], { sinceMs: window.sinceMs, untilMs: window.untilMs });
   const minTrades = Math.max(3, Number(cfg.minClosedTrades ?? 10));
+  const target = Number(cfg.targetLossRatePercent ?? 30);
 
   state.lastReviewAt = new Date(now).toISOString();
 
+  // Mổ xẻ từng kèo SL trên nến thật. Chạy TRƯỚC cửa `minClosedTrades` vì nó chỉ
+  // mô tả chuyện đã xảy ra — không đổi cấu hình nên không cần cỡ mẫu để an toàn,
+  // và một ngày ít kèo vẫn đáng biết mình sai ở đâu. Hỏng mạng thì bỏ phần này,
+  // không được làm chết cả bản rà soát.
+  const learn = strategy.learning ?? {};
+  base.postMortem = null;
+  if (learn.enabled !== false && summary.lostTrades.length) {
+    try {
+      base.postMortem = await postMortemLosses(summary.lostTrades, {
+        fetchCandles: deps.fetchRecentCandles ?? fetchKlines,
+        maxTrades: Number(learn.maxTradesPerReview ?? 12),
+        candles: Number(learn.replayCandles ?? 400),
+        maxHoldBars: Number(strategy.alerts?.maxHoldBars ?? 96),
+        widerSlMultiple: Number(learn.widerSlMultiple ?? 1.5),
+        minBarsAfterStop: Number(learn.minBarsAfterStop ?? 6),
+        noFavorMoveR: Number(learn.noFavorMoveR ?? 0.15),
+      });
+    } catch (error) {
+      base.postMortem = { error: error.message };
+    }
+  }
+
+  // Chưa đủ mẫu thì vẫn BÁO CÁO số của ngày, chỉ không đụng vào cấu hình. Cửa
+  // sổ một ngày thường ít kèo hơn ngưỡng này, nên nếu bỏ luôn phần thống kê thì
+  // phần lớn báo cáo sẽ trống rỗng.
   if (summary.closed < minTrades) {
-    const report = { status: 'not-enough-data', ...base, summary: { ...summary, trades: undefined, lostTrades: undefined }, minClosedTrades: minTrades };
+    const report = {
+      status: 'not-enough-data', ...base, target,
+      summary: { ...summary, trades: undefined, lostTrades: undefined }, minClosedTrades: minTrades,
+    };
     state.reviews = [...(state.reviews ?? []), { at: base.at, status: report.status, closed: summary.closed }].slice(-30);
     await persist(state);
     return report;
   }
 
   const diagnosis = diagnoseLosses(summary);
-  const target = Number(cfg.targetLossRatePercent ?? 30);
   const { candidates, worstInterval } = buildReviewCandidates(strategy, cfg, diagnosis);
 
   // Đạt mục tiêu rồi thì không đụng vào cấu hình — chỉnh khi đang ổn là cách
@@ -396,6 +466,27 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   }
 }
 
+/** Phần "sai ở đâu": đếm theo nguyên nhân, rồi một câu kết luận về hướng sửa. */
+function pushPostMortem(L, report) {
+  const pm = report.postMortem;
+  if (!pm) return;
+  L.push('');
+  if (pm.error) {
+    L.push(`🧠 <b>HỌC LẠI TỪ KÈO DÍNH SL</b> — không phát lại được: ${pm.error}`);
+    return;
+  }
+  L.push(`🧠 <b>HỌC LẠI TỪ ${pm.total} KÈO DÍNH SL</b> (chưa chốt được TP1)`);
+  for (const [kind, count] of Object.entries(pm.counts)) {
+    if (count) L.push(`   · ${KIND_LABELS[kind]}: ${count}`);
+  }
+  if (pm.medianNeededSlPercent != null) {
+    L.push(`   · Trên các kèo bị quét: SL đang đặt ${pm.medianSlPercent}%, `
+      + `cần ${pm.medianNeededSlPercent}% mới không bị quét (trung vị)`);
+  }
+  if (pm.medianBarsToSl != null) L.push(`   · Trung vị ${pm.medianBarsToSl} nến là dính SL`);
+  if (pm.verdict) L.push(`   → ${pm.verdict.text}`);
+}
+
 export function formatDailyReview(report) {
   const L = [];
   const s = report.summary;
@@ -404,10 +495,11 @@ export function formatDailyReview(report) {
   if (report.status === 'disabled') return null;
   if (report.status === 'too-soon') return null;
 
-  L.push(`📋 <b>RÀ SOÁT ${report.everyHours}H</b>`);
+  L.push(`📋 <b>RÀ SOÁT ${report.window?.label ?? `${report.everyHours}H`}</b>`);
 
-  if (report.status === 'not-enough-data') {
-    L.push(`Mới có ${s.closed} kèo đã đóng, cần tối thiểu ${report.minClosedTrades} mới đo được. Chưa chỉnh gì.`);
+  // Chỉ đếm kèo ĐÃ CHỐT trong kỳ; kèo còn chạy nằm ngoài mọi con số dưới đây.
+  if (!s.closed) {
+    L.push('Không có kèo nào chốt trong kỳ này — kèo đang mở chưa tính, chờ chạm SL/TP.');
     return L.join('\n');
   }
 
@@ -417,6 +509,15 @@ export function formatDailyReview(report) {
     L.push(`Nếu bỏ hẳn kèo hoà vốn khỏi mẫu số: ${pct(s.lossRateExcludingBreakevenPercent)}`);
   }
   L.push(`Thắng ${pct(s.winRatePercent)} · mục tiêu tỉ lệ thua ≤ ${report.target}%`);
+
+  pushPostMortem(L, report);
+
+  if (report.status === 'not-enough-data') {
+    L.push('');
+    L.push(`ℹ️ Mới ${s.closed} kèo đã đóng, cần tối thiểu ${report.minClosedTrades} mới đủ mẫu để `
+      + 'đem đi backtest. Chỉ báo cáo, <b>không chỉnh gì</b>.');
+    return L.join('\n');
+  }
 
   const d = report.diagnosis;
   if (d?.numeric?.length) {

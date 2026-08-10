@@ -10,11 +10,15 @@ name: Daily loss review (fallback, manual only)
 # To run this every 24 hours for real, add the job below to Trading-runner, where
 # `data/auto-retune.json` is already restored from Trading-state:
 #
-#   - run: npm run review:daily -- --telegram --force --no-write
+#   # cron: '10 17 * * *'  → 00:10 Vietnam time, wrapping up the day that just ended
+#   - run: npm run review:daily -- --telegram --force --no-write --yesterday
 #
 # `--force` because the cron already provides the 24-hour cadence, and
 # `--no-write` because the review only reads history — it must never become a
-# second writer of the shared state.
+# second writer of the shared state. `--yesterday` because the default window is
+# the day currently in progress: run it just after midnight without that flag and
+# the report covers a day that has barely started. Drop it if the cron sits at the
+# end of the day instead.
 on:
   workflow_dispatch:
     inputs:
@@ -22,6 +26,10 @@ on:
         description: 'Bỏ qua cửa 24h'
         type: boolean
         default: true
+      yesterday:
+        description: 'Rà ngày hôm qua thay vì ngày đang chạy'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -110,4 +118,5 @@ jobs:
           TELEGRAM_ALERT_CHAT_IDS: ${{ secrets.TELEGRAM_ALERT_CHAT_IDS }}
         run: |
           npm run review:daily -- --telegram --no-write \
-            ${{ inputs.force && '--force' || '' }}
+            ${{ inputs.force && '--force' || '' }} \
+            ${{ inputs.yesterday && '--yesterday' || '' }}

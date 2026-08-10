@@ -11,6 +11,7 @@ import { INTERVAL_MS } from '../data/binance.js';
 import { readOpenCalls, openCall, closeCall, checkCall } from '../data/open-calls.js';
 import {
   buildCallEvidence, recordClosedTrade, runAutoRetune, formatAutoRetuneReport,
+  readAutoRetuneState, setLearningPause, learningPauseLeftMs,
 } from '../analysis/auto-retune.js';
 
 /** Dựng lại mảng nến từ series của snapshot để đối chiếu SL/TP. */
@@ -81,6 +82,21 @@ export function createMonitor({
       const maxDrift = cfg.maxEntryDriftPercent ?? null;
 
       const maxHoldBars = cfg.maxHoldBars ?? 96;
+
+      // Cửa học sau SL. Đọc một lần đầu lượt, và có thể bị đẩy ra xa ngay TRONG
+      // lượt này khi có kèo chạm SL — đó mới là tình huống hay xảy ra thật: một
+      // mã dính SL ở đầu vòng lặp, các mã sau đó vẫn đang chờ được call.
+      const learnCfg = strategy.learning ?? {};
+      const pauseMinutes = learnCfg.enabled === false
+        ? 0 : Number(learnCfg.pauseMinutesAfterStop ?? 30);
+      let pausedUntil = 0;
+      try {
+        const left = learningPauseLeftMs(await readAutoRetuneState());
+        if (left > 0) pausedUntil = Date.now() + left;
+      } catch (error) {
+        log(`[monitor] không đọc được cửa học: ${error.message}`);
+      }
+
       const targets = await listTargets();
       const open = await readOpenCalls();
 
@@ -118,7 +134,24 @@ export function createMonitor({
               // chặn vòng quét chính; lần sau bot vẫn tiếp tục thu thập lại.
               log(`[monitor] không lưu được kết quả kèo ${snapshot.symbol}: ${error.message}`);
             }
-            await notify({ kind: 'closed', call: existing, result, snapshot });
+            // Vừa dính SL: đóng cửa call mới lại một lúc. Đây là chỗ duy nhất
+            // đặt cửa, vì nó chạy trong tiến trình quét — tiến trình DUY NHẤT
+            // được phép ghi trạng thái dùng chung.
+            let pause = null;
+            if (result.status === 'stopped' && pauseMinutes > 0) {
+              try {
+                pause = await setLearningPause(pauseMinutes, {
+                  reason: `${snapshot.symbol} ${snapshot.interval} dính SL`,
+                });
+                if (pause) {
+                  pausedUntil = Date.parse(pause.until);
+                  log(`[monitor] ${snapshot.symbol} dính SL — tạm dừng call mới ${pauseMinutes} phút.`);
+                }
+              } catch (error) {
+                log(`[monitor] không đặt được cửa học: ${error.message}`);
+              }
+            }
+            await notify({ kind: 'closed', call: existing, result, snapshot, pause });
             if (result.status === 'stopped' && recorded) {
               try {
                 const retune = await runAutoRetune({ strategy, state: recorded.state });
@@ -139,6 +172,17 @@ export function createMonitor({
           const score = snapshot.combined.score;
           const signal = setup.signal;
           const changed = signal !== prev.lastSignal;
+
+          // Đang trong cửa học thì HOÃN, không phải bỏ. Đặt trước `state.set` là
+          // cố ý: ghi `lastSignal` rồi mới bỏ qua sẽ tiêu mất lần "tín hiệu đổi",
+          // và với onlyOnSignalChange thì kèo im luôn tới khi tín hiệu lật —
+          // hoãn 30 phút hoá ra là huỷ. Không cập nhật `lastCandleTime` nên lượt
+          // sau xét lại đúng nến này.
+          if (pausedUntil > Date.now() && setup.side !== 'none' && Math.abs(score) >= minAbs) {
+            const left = Math.ceil((pausedUntil - Date.now()) / 60e3);
+            log(`[monitor] hoãn ${snapshot.symbol} ${snapshot.interval}: đang soi lại kèo vừa SL, còn ${left} phút.`);
+            continue;
+          }
 
           state.set(key, { lastCandleTime: candleTime, lastSignal: signal });
 

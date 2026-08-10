@@ -1,6 +1,8 @@
 // Rà soát định kỳ tỉ lệ thua và đề xuất chỉnh cấu hình.
 // Chạy:  npm run review:daily
 //        npm run review:daily -- --force            bỏ qua cửa 24h
+//        npm run review:daily -- --yesterday        rà ngày hôm qua (mặc định)
+//        npm run review:daily -- --today            rà ngày đang chạy
 //        npm run review:daily -- --state <file>     đọc trạng thái tải từ Trading-state
 //        npm run review:daily -- --telegram         gửi báo cáo vào chat cảnh báo
 //        npm run review:daily -- --no-write          không ghi lại trạng thái
@@ -20,6 +22,14 @@ const valueOf = (flag) => {
 
 const strategy = await loadStrategy();
 const stateFile = valueOf('--state');
+
+// Ghi đè tại chỗ, không lưu xuống đĩa: chỉ đổi cửa sổ của lượt chạy này.
+// Mặc định trong strategy.json là -1 (hôm qua) cho khớp cron 08:07 giờ VN của
+// runner; --today để xem ngày đang chạy khi gọi tay giữa ngày.
+const dayOffset = has('--yesterday') ? -1 : (has('--today') ? 0 : null);
+if (dayOffset != null) {
+  strategy.dailyReview = { ...strategy.dailyReview, windowMode: 'calendar-day', dayOffsetDays: dayOffset };
+}
 
 let state;
 if (stateFile) {
