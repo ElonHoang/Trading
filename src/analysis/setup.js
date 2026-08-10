@@ -159,7 +159,10 @@ export function buildSetup(snapshot, context = null, {
 
   return {
     side: finalSide,
-    signal: blocked ? 'ĐỨNG NGOÀI' : snapshot.combined.signal,
+    // Mẫu tin nhắn chỉ còn ba trạng thái: LONG, SHORT, LIMIT. Nhãn này rò ra
+    // ngoài qua dòng "🔔 <trạng thái cũ> → <trạng thái mới>" của tin call, nên
+    // phải đổi ở đây chứ không chỉ ở caption.
+    signal: blocked ? 'LIMIT' : snapshot.combined.signal,
     score: snapshot.combined.score,
     strength: blocked ? 'blocked' : snapshot.combined.strength,
     blocked,

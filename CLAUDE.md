@@ -261,7 +261,7 @@ Hai mẫu tin nhắn: mẫu **call kèo** ở ngay dưới đây; mẫu **cập 
 
 🔥 [CẶP_GIAO_DỊCH] | Khung [KHUNG_TG]
 💰 Giá hiện tại: [GIÁ_HIỆN_TẠI] ([+/- %])
-🚨 KHUYẾN NGHỊ: 🔴 [SHORT/BÁN] hoặc 🟢 [LONG/MUA]
+🚨 KHUYẾN NGHỊ: 🔴 [SHORT/BÁN] hoặc 🟢 [LONG/MUA] hoặc 🟡 [LIMIT]
 
 ━━━━━━━━━━━━━━━━━━
 🎯 CHI TIẾT LỆNH

@@ -25,17 +25,18 @@ export function buildCaption(snap, { setup = null, projections = null } = {}) {
   L.push(`💰 Giá hiện tại: <b>${fmt(snap.price.lastClose, d)}</b>`
     + (snap.price.change24hPercent != null ? ` (${pct(snap.price.change24hPercent)})` : ''));
 
-  // Điểm đã bị bỏ khỏi mẫu — nó vẫn là thứ quyết định có call hay không
-  // (alerts.minAbsScore), chỉ là không in ra cho người đọc nữa.
+  // Ba trạng thái, không hơn: LONG, SHORT, LIMIT. "ĐỨNG NGOÀI" và "CHỜ TÍN HIỆU"
+  // đã bị bỏ khỏi mẫu — chưa vào được ngay thì là lệnh chờ, kèm giá ở khối bên dưới.
+  //
+  // Điểm cũng không in nữa; nó vẫn là thứ quyết định có call hay không
+  // (alerts.minAbsScore).
   const side = setup?.side ?? 'none';
-  if (setup?.blocked) {
-    L.push('🚨 KHUYẾN NGHỊ: ⛔ <b>ĐỨNG NGOÀI</b>');
-  } else if (side === 'long') {
+  if (side === 'long') {
     L.push('🚨 KHUYẾN NGHỊ: 🟢 <b>LONG / MUA</b>');
   } else if (side === 'short') {
     L.push('🚨 KHUYẾN NGHỊ: 🔴 <b>SHORT / BÁN</b>');
   } else {
-    L.push('🚨 KHUYẾN NGHỊ: ⚪ <b>CHỜ TÍN HIỆU</b>');
+    L.push('🚨 KHUYẾN NGHỊ: 🟡 <b>LIMIT</b>');
   }
 
   // ---- Chi tiết lệnh (chỉ khi thật sự có kèo) ----
@@ -71,13 +72,16 @@ export function buildCaption(snap, { setup = null, projections = null } = {}) {
     for (const c of cautions) L.push(`⚠️ ${esc(c.text)}`);
   }
 
-  // ---- Kịch bản chờ ----
-  // Template trong CLAUDE.md không có khối này khi ĐANG call lệnh. Nhưng lúc
-  // chưa có kèo thì khối "CHI TIẾT LỆNH" trống, tin nhắn sẽ không có gì hành
-  // động được — nên chỉ khi đó mới nêu hai mốc cần chờ.
-  if (projections && side === 'none') {
+  // ---- Lệnh chờ ----
+  // KHUYẾN NGHỊ đã là LIMIT thì phải kèm giá, không thì lời khuyên rỗng: khối
+  // "CHI TIẾT LỆNH" ở trên trống khi chưa vào được ngay.
+  //
+  // NGOẠI LỆ khi bối cảnh cơ bản PHỦ QUYẾT (delist, tin xấu nghiêm trọng): không
+  // in mức nào. Đặt lệnh chờ vào đúng tình huống mà phủ quyết dựng lên để tránh
+  // là ngược nghĩa của phủ quyết. Lý do vẫn hiện ở khối ⛔ bên trên.
+  if (projections && side === 'none' && !setup?.vetoed) {
     L.push(HR);
-    L.push('⚠️ <b>MỐC CẦN CHỜ</b> (chờ nến đóng xác nhận)');
+    L.push('🎯 <b>LỆNH CHỜ (LIMIT)</b> — vào khi nến đóng xác nhận');
     const tpOf = (proj) => (proj.targets ?? []).slice(0, 2).map((t) => fmt(t.price, d)).join('/');
     L.push(`📈 Phá lên ${fmt(projections.up.entry, d)} → Long `
       + `(SL ${fmt(projections.up.stopLoss, d)} | TP ${tpOf(projections.up)})`);
