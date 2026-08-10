@@ -351,7 +351,7 @@ const monitor = createMonitor({
 
     // --- Kèo đã chốt ---
     if (payload.kind === 'closed') {
-      const { call, result, snapshot, pause } = payload;
+      const { call, result, snapshot } = payload;
       const strategy = await loadStrategy();
       const reply = (id) => (call.messages?.[id]
         ? { reply_to_message_id: call.messages[id] } : {});
@@ -380,9 +380,7 @@ const monitor = createMonitor({
         + `${call.side === 'long' ? 'LONG' : 'SHORT'} từ ${d}`
         + (loss != null ? ` · kết quả ${loss >= 0 ? '+' : ''}${loss.toFixed(2)}%` : '')
         + (result.hitTps.length ? ` · đã chạm ${result.hitTps.join(', ')}` : '')
-        + `\nGiữ ${result.bars} nến. Mã này được call lại từ nến sau.`
-        + (pause ? `\n\n🧠 <i>Tạm dừng call mới ${pause.minutes} phút để soi lại kèo này. `
-          + 'Phần theo dõi kèo đang mở vẫn chạy bình thường.</i>' : '');
+        + `\nGiữ ${result.bars} nến. Mã này được call lại từ nến sau.`;
       return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML', ...reply(id) }));
     }
 

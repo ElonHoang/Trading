@@ -51,32 +51,6 @@ async function saveState(state) {
 /** Rà soát định kỳ dùng chung file trạng thái này nên cần ghi được từ ngoài. */
 export { saveState as saveAutoRetuneState };
 
-/**
- * Cửa tạm dừng sau khi dính SL: KHÔNG mở kèo mới cho tới mốc này.
- *
- * Chỉ chặn việc MỞ kèo. Phần theo dõi kèo đang chạy — chạm TP, chạm SL, hết hạn
- * — vẫn phải làm bình thường; dừng nó lại thì kèo đang mở mất người canh, nguy
- * hiểm hơn hẳn cái mà cửa này định phòng.
- *
- * Trạng thái nằm chung `auto-retune.json` vì đó là file DUY NHẤT vừa được đồng
- * bộ về Trading-state vừa được vòng quét ghi. Thêm file mới sẽ không được runner
- * khôi phục và cửa sẽ mất sau mỗi lượt.
- */
-export async function setLearningPause(minutes, { now = Date.now(), reason = null } = {}) {
-  const span = Math.max(0, Number(minutes) || 0);
-  if (!span) return null;
-  const state = await readAutoRetuneState();
-  const until = new Date(now + span * 60e3).toISOString();
-  state.learning = { until, setAt: new Date(now).toISOString(), minutes: span, reason };
-  await saveState(state);
-  return state.learning;
-}
-
-export function learningPauseLeftMs(state, now = Date.now()) {
-  const until = Date.parse(state?.learning?.until ?? '');
-  return Number.isFinite(until) ? Math.max(0, until - now) : 0;
-}
-
 /** Chỉ lưu số liệu tại thời điểm call để sau này không suy diễn từ dữ liệu tương lai. */
 export function buildCallEvidence(snapshot, setup) {
   const groups = Object.fromEntries(Object.entries(snapshot.rules?.breakdown ?? {}).map(([name, group]) => [name, {

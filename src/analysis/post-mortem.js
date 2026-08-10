@@ -22,6 +22,32 @@ export const KIND_LABELS = {
   [KINDS.unknown]: 'chưa đủ nến sau SL để kết luận',
 };
 
+/**
+ * Cửa dừng call gắn với BÁO CÁO TỔNG HỢP CUỐI NGÀY, không phải với từng lần dính
+ * SL. Ý nghĩa: bản tổng hợp vừa hiện thì dành bấy nhiêu phút soi lại các kèo đã
+ * thua trước khi mở kèo mới.
+ *
+ * Suy ra từ ĐỒNG HỒ chứ không lưu trạng thái, và đó là lý do chính chọn cách này:
+ * bản rà soát chạy với `--no-write` để không thành nguồn ghi thứ hai vào trạng
+ * thái dùng chung (nó sẽ đua với vòng quét), nên nó KHÔNG có đường nào ghi lại
+ * "tôi vừa báo cáo xong". Mốc giờ thì cả hai bên cùng đọc được mà không ai phải ghi.
+ *
+ * `reviewAtUtc` phải khớp cron của Trading-runner/.github/workflows/daily-review.yml.
+ */
+export function inReviewPause(cfg = {}, now = Date.now()) {
+  const off = { active: false, leftMs: 0, until: null };
+  if (cfg.enabled === false) return off;
+  const minutes = Number(cfg.pauseAfterReviewMinutes ?? 0);
+  const parts = /^(\d{1,2}):(\d{2})$/.exec(String(cfg.reviewAtUtc ?? '').trim());
+  if (!(minutes > 0) || !parts) return off;
+
+  const start = Math.floor(now / 86400e3) * 86400e3
+    + Number(parts[1]) * 3600e3 + Number(parts[2]) * 60e3;
+  const end = start + minutes * 60e3;
+  if (now < start || now >= end) return off;
+  return { active: true, leftMs: end - now, until: new Date(end).toISOString() };
+}
+
 const round = (value, digits = 2) => (Number.isFinite(Number(value))
   ? Number(Number(value).toFixed(digits)) : null);
 

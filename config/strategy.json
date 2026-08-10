@@ -125,10 +125,12 @@
     "trainingRatio": 0.75
   },
   "learning": {
-    "_note": "Học lại từ kèo đã dính SL mà CHƯA chốt được TP1 ('stopped'; chạm TP1 rồi mới về entry là 'breakeven', không tính). Hai phần: (1) vòng quét đóng cửa call mới pauseMinutesAfterStop phút ngay khi có kèo dính SL; (2) bản rà soát phát lại từng kèo đó trên nến thật để phân loại nguyên nhân. Phần (2) KHÔNG tự đổi cấu hình — nó chỉ nói nên đem hướng nào đi backtest.",
+    "_note": "Học lại từ kèo đã dính SL mà CHƯA chốt được TP1 ('stopped'; chạm TP1 rồi mới về entry là 'breakeven', KHÔNG tính là thua và không đem đi mổ xẻ). Neo vào BÁO CÁO TỔNG HỢP CUỐI NGÀY, không phải vào từng lần dính SL: báo cáo hiện ra thì có pauseAfterReviewMinutes phút soi lại các kèo thua, trong khoảng đó không mở kèo mới. Bản rà soát phát lại từng kèo trên nến thật để phân loại nguyên nhân, và KHÔNG tự đổi cấu hình — nó chỉ nói nên đem hướng nào đi backtest.",
     "enabled": true,
-    "_notePause": "Chặn MỞ kèo mới, không chặn theo dõi kèo đang chạy. Cắn thật nhất ngay trong cùng lượt quét: một mã dính SL ở đầu vòng lặp thì các mã sau trong lượt đó không được call. Trên GitHub Actions (nhịp thật ~3 tiếng) cửa 30 phút gần như chỉ có tác dụng trong phạm vi một lượt; chạy Dockerfile ở máy riêng với pollSeconds 300 thì nó chặn khoảng 6 lượt.",
-    "pauseMinutesAfterStop": 30,
+    "_notePause": "Chặn MỞ kèo mới, không chặn theo dõi kèo đang chạy — dừng theo dõi thì kèo đang mở mất người canh, nguy hiểm hơn thứ cửa này định phòng. reviewAtUtc phải khớp cron của Trading-runner/.github/workflows/daily-review.yml ('7 1 * * *' = 01:07 UTC = 08:07 giờ VN); lệch thì cửa mở sai lúc. Cửa suy ra từ đồng hồ, không lưu trạng thái, vì bản rà soát chạy --no-write nên không có đường ghi lại 'tôi vừa báo cáo xong'.",
+    "_noteCadence": "CẢNH BÁO NHỊP: scheduled workflow trên GitHub bị throttle còn ~3 tiếng/lượt, nên cửa 30 phút chỉ có khoảng 1/6 cơ hội có lượt quét rơi vào. Muốn chắc chắn chặn được ít nhất một lượt thì đặt 180. Chạy Dockerfile ở máy riêng (pollSeconds 300) thì 30 là đủ và đúng nghĩa.",
+    "reviewAtUtc": "01:07",
+    "pauseAfterReviewMinutes": 30,
     "_noteReplay": "widerSlMultiple = phản chứng 'nếu SL rộng gấp bấy nhiêu lần thì có thoát không', giữ nguyên entry/TP. minBarsAfterStop = số nến tối thiểu sau khi dính SL mới dám kết luận; ít hơn thì xếp vào 'chưa đủ nến' thay vì đoán. noFavorMoveR = đi thuận lợi dưới bấy nhiêu R thì coi như sai hướng ngay từ đầu.",
     "maxTradesPerReview": 12,
     "replayCandles": 400,
