@@ -261,7 +261,7 @@ Kĩ năng 2 **không cộng điểm** — dòng tiền tính bằng giây/giờ 
 
 Kĩ năng 3 cũng **không cộng điểm và không tự đổi cấu hình theo vài lệnh đơn lẻ**. Sau chuỗi SL, chỉ `auto-retune` đã kiểm chứng theo thời gian mới được áp dụng thay đổi an toàn.
 
-Ba mẫu tin nhắn, đều ở ngay dưới đây: **call kèo** và **cập nhật khi chạm TP** do `src/telegram/caption.js` sinh ra (`buildCaption` và `buildTpUpdate`), **tổng hợp trong ngày** do `src/analysis/daily-review.js` sinh ra (`formatDailyReport`) — sửa mẫu thì phải sửa cả hàm tương ứng.
+Ba mẫu tin nhắn, đều ở ngay dưới đây: **call kèo** và **cập nhật khi chạm TP** do `src/telegram/caption.js` sinh ra (`buildCaption` và `buildTpUpdate`), **tổng hợp trong ngày** do `src/analysis/daily-review.js` sinh ra (`formatDailyReview`) — sửa mẫu thì phải sửa cả hàm tương ứng.
 
 ### Cấu trúc khi call lệnh
 
