@@ -48,14 +48,20 @@ const CALL_INTERVALS = ['4h', '1h'];
 const CANDLES = 300;
 
 /**
- * GitHub runners bị huỷ sau mỗi lượt. Không cho auto-retune ghi strategy.json
- * rồi mất ở lượt sau; phần theo dõi/cảnh báo vẫn giữ nguyên.
+ * GitHub runners bị huỷ sau mỗi lượt, nên cấu hình tự ghi sẽ mất ở lượt sau.
+ * Trước đây cả cơ chế `auto-retune` bị TẮT vì lý do đó — hệ quả là phần tự kiểm
+ * chứng sau chuỗi SL chưa từng chạy thật lần nào.
+ *
+ * Giờ tách hai chuyện: cơ chế được BẬT để chạy và ghi lại kết quả vào nhật ký,
+ * nhưng `autoApply: false` chặn đúng cái đường ghi cấu hình. Đề xuất của nó đi
+ * nhờ bản tổng hợp cuối ngày (cả hai đọc chung `data/auto-retune.json`), nên vẫn
+ * tới được người đọc mà không sinh thêm loại tin nhắn nào.
  */
 async function loadActionStrategy() {
   const strategy = await loadStrategy();
   return {
     ...strategy,
-    autoRetune: { ...(strategy.autoRetune ?? {}), enabled: false },
+    autoRetune: { ...(strategy.autoRetune ?? {}), enabled: true, autoApply: false },
   };
 }
 

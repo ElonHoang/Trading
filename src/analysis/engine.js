@@ -660,7 +660,13 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
         side: 'none',
         reasons: [`Không tải được dữ liệu mẫu hình lịch sử: ${historicalResult.error.message}`],
       }
-      : analyzeHistoricalPattern(mergeCandles(historicalResult?.candles, raw), patternCfg);
+      // closedCandles() ở đây là BẮT BUỘC: `raw` còn chứa nến đang chạy, và
+      // trước đây nó lọt thẳng vào đoạn "hiện tại" đem đi so khớp. Một nến chưa
+      // đóng làm méo cả hình dạng lẫn biên độ của đoạn 24 nến, và backtest thì
+      // không bao giờ thấy nó — tức là bản chạy thật đang so một thứ khác với
+      // thứ đã được kiểm chứng. Đo trên BTCUSDT 4h: cùng thời điểm, có nến đang
+      // chạy ra 0 mẫu giống, bỏ nó ra thì có 1.
+      : analyzeHistoricalPattern(closedCandles(mergeCandles(historicalResult?.candles, raw)), patternCfg);
 
   const { ruleScore, breakdown, consensus } = scoreSignals(candles, ind, strategy, {
     sr, derivatives, orderBook, positioning, historicalPattern,

@@ -147,7 +147,9 @@ Top trader long nhiều hơn đám đông thì nghiêng tăng, và ngược lạ
 
 **Lấy ở đâu:** `fetchKlinesHistory()` và `analyzeHistoricalPattern()` trong `src/analysis/historical-pattern.js`. Luôn dùng nến đã đóng. Khi backtest, matcher nhận `endIndex = i`, vì vậy mọi nến dùng để đánh giá mẫu cũ đều phải tồn tại trước nến mô phỏng hiện tại — không look-ahead.
 
-**Giới hạn:** đây là thống kê mẫu nhỏ trên riêng một token/khung, không phải xác suất chắc chắn và không phải lý do vào lệnh độc lập. Cache lịch sử chỉ giảm request; nến mới nhất vẫn được tải riêng ở mỗi lần phân tích.
+**Đã đo, đừng tắt:** nhóm này góp mặt ở 72/279 lệnh khi backtest 4 cặp khung 4h (3000 nến, chia 75/25). Đặt `weights.historicalPattern` về 0 kéo PF đoạn giữ lại từ 1,42 xuống 1,03 và kỳ vọng từ +0,379% xuống −0,07%/lệnh. Nới `minSimilarity` xuống 0,75 không tốt hơn, tăng trọng số lên 16 thì xấu đi. Con số "đóng góp 0" trong tài liệu cũ là của khung 1h/15m, nơi cửa sổ 3000 nến không phủ nổi 6 tháng.
+
+**Giới hạn:** đây là thống kê mẫu nhỏ trên riêng một token/khung, không phải xác suất chắc chắn và không phải lý do vào lệnh độc lập. Cache lịch sử chỉ giảm request; nến mới nhất vẫn được tải riêng ở mỗi lần phân tích. Nến ĐANG CHẠY phải bị loại trước khi so khớp — `engine.analyze()` từng đưa thẳng nó vào đoạn hiện tại, làm bản chạy thật so một thứ khác với thứ backtest đã kiểm chứng.
 
 ---
 

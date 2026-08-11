@@ -5,12 +5,13 @@
 // Kèo đang mở KHÔNG bao giờ lọt vào đây: `recordClosedTrade` chỉ được gọi lúc kèo
 // chạm SL/TP/hết hạn, nên `state.trades` chỉ chứa kèo đã có kết quả.
 //
-// Khác `auto-retune.js` ở ba điểm, và đó là lý do nó tồn tại riêng:
+// Khác `auto-retune.js` ở hai điểm, và đó là lý do nó tồn tại riêng:
 //  1. Kích hoạt theo THỜI GIAN, không theo chuỗi 3 SL liên tiếp.
 //  2. Kèo 'breakeven' (chạm TP1 rồi SL kéo về entry) KHÔNG tính là thua.
-//  3. Candidate sinh ra TỪ chẩn đoán và đi theo chiều đã đo được, thay vì luôn
-//     siết chặt. Bộ candidate của auto-retune siết đúng những núm mà repo đã đo
-//     là làm xấu thêm — xem bảng trong CLAUDE.md.
+//
+// Điểm khác thứ ba đã hết: bộ candidate giờ DÙNG CHUNG (`buildRiskCandidates`).
+// Trước đây auto-retune siết đúng những núm mà repo đã đo là làm xấu thêm, tức
+// hai đường kích hoạt đề xuất hai chiều ngược nhau cho cùng một cấu hình.
 //
 // Chỉ chạy ở Node: đọc/ghi file trạng thái và tải dữ liệu lịch sử.
 
@@ -18,7 +19,7 @@ import { fetchKlines, fetchKlinesHistory } from '../data/binance.js';
 import { saveStrategy } from '../config.js';
 import { closedCandles } from './engine.js';
 import { backtest } from '../backtest.js';
-import { diagnoseSupportingGroups, saveAutoRetuneState } from './auto-retune.js';
+import { buildRiskCandidates, diagnoseSupportingGroups, saveAutoRetuneState } from './auto-retune.js';
 import { KIND_LABELS, postMortemLosses } from './post-mortem.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -237,40 +238,10 @@ export function diagnoseLosses(summary) {
  * không. Vẫn giữ mỗi candidate ở mức một bước nhỏ để không nhảy quá xa.
  */
 export function buildReviewCandidates(strategy, cfg, diagnosis) {
-  const risk = strategy.risk ?? {};
-  const sl = Number(risk.slPercent ?? 4);
-  const tp = Array.isArray(risk.takeProfitR) ? risk.takeProfitR : [0.75, 1.5, 2.25];
-  const out = [];
-  const add = (id, label, changes, because) => {
-    const next = clone(strategy);
-    for (const [pathString, value] of Object.entries(changes)) {
-      const parts = pathString.split('.');
-      let node = next;
-      for (let i = 0; i < parts.length - 1; i++) { node[parts[i]] ??= {}; node = node[parts[i]]; }
-      node[parts.at(-1)] = value;
-    }
-    out.push({ id, label, changes, because, strategy: next });
-  };
-
-  const widerSl = Math.min(Number(cfg.maxSlPercent ?? 6), round(sl + Number(cfg.slPercentStep ?? 0.5), 2));
-  if (widerSl > sl) {
-    add('wider-stop', `Nới khoảng SL ${sl}% → ${widerSl}%`, { 'risk.slPercent': widerSl },
-      'Lệnh thua thường có khoảng SL hẹp hơn phần còn lại, tức SL nằm trong biên độ nhiễu.');
-  }
-
-  if (risk.preferSrLevels) {
-    add('fixed-stop', 'Bỏ bám SL vào hỗ trợ/kháng cự', { 'risk.preferSrLevels': false },
-      'Bám cấu trúc cho phép SL co xuống tới 0,4× mức cơ sở, làm khoảng SL thật hẹp hơn cấu hình.');
-  }
-
-  const tp1 = Number(tp[0] ?? 0.75);
-  const nearerTp1 = Math.max(Number(cfg.minTp1R ?? 0.5), round(tp1 - Number(cfg.tp1Step ?? 0.25), 2));
-  if (nearerTp1 < tp1) {
-    const ratio = nearerTp1 / tp1;
-    add('nearer-tp1', `Kéo TP gần lại (TP1 ${tp1}R → ${nearerTp1}R)`,
-      { 'risk.takeProfitR': tp.map((r) => round(r * ratio, 3)) },
-      'TP1 là mốc kéo SL về entry; TP1 gần hơn thì nhiều lệnh được bảo vệ sớm hơn.');
-  }
+  // Bộ phương án dùng CHUNG với auto-retune (`buildRiskCandidates`), để hai
+  // đường kích hoạt — theo lịch và theo chuỗi SL — không đề xuất hai chiều
+  // ngược nhau cho cùng một cấu hình.
+  const out = buildRiskCandidates(strategy, cfg);
 
   // Khung nào có tỉ lệ thua vượt trội thì nêu ra, nhưng KHÔNG backtest được qua
   // strategy.json (danh sách khung nằm trong code), nên chỉ báo cáo.
@@ -414,6 +385,24 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     fetchCandles: deps.fetchRecentCandles ?? fetchKlines,
     now,
   });
+
+  // Kết quả tự kiểm chứng sau chuỗi SL (auto-retune) ĐI NHỜ báo cáo này. Nó chạy
+  // ở vòng quét — nơi không có đường ra Telegram nào ngoài ba mẫu tin — nên nếu
+  // không nhắc lại ở đây thì cả cơ chế chỉ nằm trong log của runner. Hai bên đọc
+  // chung `data/auto-retune.json` nên không cần thêm nguồn trạng thái nào.
+  const attempts = Array.isArray(state.attempts) ? state.attempts : [];
+  const freshFrom = window.sinceMs ?? now - 7 * DAY_MS;
+  const lastAttempt = [...attempts].reverse().find((a) => (
+    ['applied', 'proposed', 'no-safe-change'].includes(a.status)
+    && Date.parse(a.at ?? '') >= freshFrom
+  )) ?? null;
+  base.retune = lastAttempt ? {
+    at: lastAttempt.at,
+    status: lastAttempt.status,
+    streak: lastAttempt.streak ?? null,
+    selected: lastAttempt.selected ?? null,
+    guardInterval: lastAttempt.guardInterval ?? null,
+  } : null;
 
   // Mổ xẻ từng kèo SL trên nến thật. Chạy TRƯỚC cửa `minClosedTrades` vì nó chỉ
   // mô tả chuyện đã xảy ra — không đổi cấu hình nên không cần cỡ mẫu để an toàn,
@@ -580,6 +569,32 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   }
 }
 
+/**
+ * Kết quả của `auto-retune` (kích hoạt theo chuỗi SL, chạy ở vòng quét) được
+ * nhắc lại ở đây vì đó là đường duy nhất nó tới được người đọc.
+ */
+function pushRetune(L, report) {
+  const rt = report.retune;
+  if (!rt) return;
+  L.push('');
+  const when = rt.at ? rt.at.slice(0, 16).replace('T', ' ') : '';
+  L.push(`🧪 <b>TỰ KIỂM CHỨNG SAU ${rt.streak ?? '?'} SL LIÊN TIẾP</b> (vòng quét, ${when} UTC)`);
+  if (rt.status === 'no-safe-change' || !rt.selected) {
+    L.push('   · Không phương án nào vừa cải thiện các cặp vừa thua vừa giữ được bộ canh gác — giữ nguyên cấu hình.');
+    return;
+  }
+  const v = rt.selected.validation ?? {};
+  const g = rt.selected.guardValidation ?? {};
+  L.push(`   · ${rt.status === 'applied' ? 'ĐÃ ÁP DỤNG' : 'ĐỀ XUẤT'}: ${rt.selected.label}`);
+  if (rt.selected.because) L.push(`   · Lý do: ${rt.selected.because}`);
+  L.push(`   · Cặp vừa thua: PF ${v.profitFactor} · drawdown ${v.maxDrawdownPercent}% · ${v.trades} lệnh`);
+  L.push(`   · Canh gác ${rt.guardInterval ?? '4h'}: PF ${g.profitFactor} · kỳ vọng ${g.expectancyPercent}%/lệnh`);
+  L.push(`   · Thay đổi: ${Object.entries(rt.selected.changes ?? {}).map(([k, val]) => `${k} = ${JSON.stringify(val)}`).join(' · ')}`);
+  if (rt.status !== 'applied') {
+    L.push('   · <b>Chưa tự ghi</b> — sửa <code>config/strategy.json</code> rồi commit để áp dụng.');
+  }
+}
+
 /** Phần "sai ở đâu": đếm theo nguyên nhân, rồi một câu kết luận về hướng sửa. */
 function pushPostMortem(L, report) {
   const pm = report.postMortem;
@@ -627,6 +642,7 @@ export function formatDailyReview(report) {
     L.push('');
     L.push(`Không có kèo nào chốt trong ${report.window?.label ?? 'kỳ này'} — kèo đang mở `
       + 'chưa tính, chờ chạm SL/TP.');
+    pushRetune(L, report);
     return L.join('\n');
   }
 
@@ -654,6 +670,7 @@ export function formatDailyReview(report) {
   L.push(`Thắng ${pct(s.winRatePercent)} · mục tiêu tỉ lệ thua ≤ ${report.target}%`);
 
   pushPostMortem(L, report);
+  pushRetune(L, report);
 
   if (report.status === 'not-enough-data') {
     L.push('');

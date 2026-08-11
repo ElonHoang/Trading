@@ -70,8 +70,11 @@
     "minVolumeRatio": 1
   },
   "autoRetune": {
-    "_note": "Sau 3 SL LIÊN TIẾP, bot lưu bằng chứng lúc vào lệnh, kiểm chứng các cấu hình nghiêm ngặt hơn trên 75% lịch sử và xác nhận ở 25% mới hơn. Chỉ tự áp dụng khi mọi cặp vừa SL đều có PF dương, đủ mẫu và drawdown giảm ít nhất mức bên dưới. Cấu hình cũ luôn được sao lưu local trước khi đổi.",
+    "_note": "Sau 3 SL LIÊN TIẾP, bot lưu bằng chứng lúc vào lệnh rồi kiểm chứng các phương án chỉnh trên 75% lịch sử và xác nhận ở 25% mới hơn. Chạy ở CẢ production (Trading-runner) từ khi tách được 'chạy cơ chế' khỏi 'ghi cấu hình' bằng autoApply.",
     "enabled": true,
+    "_noteAutoApply": "false = chỉ ĐỀ XUẤT, không ghi strategy.json. Runner GitHub bị huỷ sau mỗi lượt nên cấu hình tự ghi sẽ mất, và một thay đổi âm thầm không ai duyệt thì lượt sau không truy lại được. Đề xuất đi nhờ bản tổng hợp cuối ngày — hai bên đọc chung data/auto-retune.json. Chỉ bật true khi chạy trên máy riêng có ổ đĩa bền.",
+    "autoApply": false,
+    "_noteDirection": "Bộ phương án DÙNG CHUNG với dailyReview (buildRiskCandidates): nới SL, bỏ bám cấu trúc, kéo TP1 gần lại. Bộ CŨ (siết thresholds.buy, siết entryQuality CVD+volume, giảm slPercent) đã bị XOÁ: bảng đo trong CLAUDE.md cho thấy cả ba làm tỉ lệ SL TĂNG và PF sập, tức cơ chế 'tự sửa sau chuỗi SL' có quyền làm hệ thống xấu đi. Đừng thêm lại.",
     "stopLossStreak": 3,
     "historyLimit": 200,
     "cooldownHours": 168,
@@ -81,13 +84,20 @@
     "minTradesPerSegment": 8,
     "minProfitFactor": 1.05,
     "minDrawdownReductionPercent": 10,
-    "cvdStep": 0.01,
-    "volumeStep": 0.1,
-    "scoreStep": 5,
-    "slPercentStep": 0.25,
-    "maxCvdSlope": 0.06,
-    "maxVolumeRatio": 1.3,
-    "minSlPercent": 1.5
+    "slPercentStep": 0.5,
+    "maxSlPercent": 6,
+    "tp1Step": 0.25,
+    "minTp1R": 0.5,
+    "_noteMinSlPercent": "SÀN CỨNG cho risk.slPercent: candidate nào kéo xuống dưới mức này bị loại thẳng. Trước đây là 1,5 — tức cơ chế có quyền kéo slPercent 4 xuống 1,5 và xoá sạch gói risk đã đo (slPercent 4 + takeProfitR [0,75;1,5;2,25] + preferSrLevels false). Bộ phương án hiện tại không có cái nào siết SL, nên đây là lưới an toàn cho cả sau này.",
+    "minSlPercent": 3,
+    "_noteGuard": "Cổng thứ hai, giống dailyReview: cấu hình là toàn cục nên thay đổi sinh ra từ 3 lệnh thua (thường ở khung yếu) không được phép làm hỏng phần đang chạy tốt. Trên bộ mã này ở khung đã kiểm chứng, candidate phải giữ kỳ vọng DƯƠNG TUYỆT ĐỐI. Trước đây auto-retune không có cổng này.",
+    "guardSymbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT"
+    ],
+    "guardInterval": "4h",
+    "guardExpectancyTolerance": 0.02
   },
   "dailyReview": {
     "_note": "Rà soát định kỳ: đo tỉ lệ thua trên các kèo ĐÃ CHỐT trong kỳ, truy nguyên đặc điểm lệnh thua, rồi kiểm chứng các phương án chỉnh bằng backtest chia 75% chọn / 25% mới hơn xác nhận. Kèo 'breakeven' (đã chốt TP1 rồi mới về entry) KHÔNG tính là thua. Kèo đang mở không bao giờ được tính — chỉ vào sổ lúc chạm SL/TP/hết hạn. Chạy bằng: npm run review:daily",
@@ -107,7 +117,7 @@
     "marketSymbol": "BTCUSDT",
     "marketInterval": "4h",
     "marketTrendPercent": 2,
-    "_noteAutoApply": "false = chỉ ĐỀ XUẤT, không tự ghi strategy.json. Đây là mặc định có chủ đích: bot chạy trên GitHub runner bị huỷ sau mỗi lượt nên cấu hình tự ghi sẽ mất ở lượt sau — đúng lý do loadActionStrategy() đã tắt autoRetune. Chỉ bật true khi chạy trên máy riêng có ổ đĩa bền.",
+    "_noteAutoApply": "false = chỉ ĐỀ XUẤT, không tự ghi strategy.json. Đây là mặc định có chủ đích: bot chạy trên GitHub runner bị huỷ sau mỗi lượt nên cấu hình tự ghi sẽ mất ở lượt sau. autoRetune.autoApply cũng false và cùng lý do. Chỉ bật true khi chạy trên máy riêng có ổ đĩa bền.",
     "autoApply": false,
     "_noteDirection": "Candidate đi theo chiều ĐÃ ĐO ĐƯỢC: nới SL, bỏ bám cấu trúc, kéo TP1 gần lại. KHÔNG có candidate siết điểm/CVD/volume vì bảng đo trong CLAUDE.md cho thấy siết những núm đó làm tỉ lệ SL TĂNG và PF sập.",
     "slPercentStep": 0.5,

@@ -66,7 +66,11 @@ Ba tầng xếp lên nhau, mô tả chi tiết trong `README.md`:
 
 - `src/analysis/context.js` — Kĩ năng 2. Không cộng điểm, chỉ xác nhận hoặc phủ quyết. Mọi nguồn null-safe: lỗi mạng thì phần đó là `null` kèm `warnings`, không được chặn phần kỹ thuật.
 - `src/analysis/auto-retune.js` — sau 3 SL liên tiếp, lưu bằng chứng lúc vào lệnh rồi kiểm chứng candidate bằng chia lịch sử theo thời gian; chỉ tự ghi cấu hình khi PF dương, đủ mẫu và drawdown giảm.
-- `src/analysis/daily-review.js` — rà soát theo **thời gian**, khác `auto-retune` ở ba điểm: kích hoạt theo lịch chứ không theo chuỗi SL; kèo `breakeven` **không** tính là thua; candidate sinh từ chẩn đoán và đi theo chiều đã đo (nới SL, bỏ bám cấu trúc, kéo TP1 gần lại) thay vì luôn siết chặt. Mỗi candidate bị đo **hai lần**: trên các cặp vừa thua phải giảm tỉ lệ SL mà không làm tiền xấu đi, trên bộ canh gác `dailyReview.guardSymbols` ở khung 4h phải giữ kỳ vọng dương tuyệt đối. Mặc định `autoApply: false` — chỉ đề xuất, vì runner bị huỷ sau mỗi lượt nên cấu hình tự ghi sẽ mất.
+
+  **Đã chạy thật ở production** từ khi tách được "chạy cơ chế" khỏi "ghi cấu hình": `loadActionStrategy()` đặt `enabled: true, autoApply: false`, nên nó đo và ghi nhật ký nhưng không có đường ghi `strategy.json` — đúng vấn đề khiến trước đây cả cơ chế bị tắt trên runner tạm. Ba lớp bảo vệ, tất cả đều mới: bộ candidate dùng chung `buildRiskCandidates()` với `daily-review` (nới SL, bỏ bám cấu trúc, kéo TP1 gần lại) thay cho bộ cũ siết ngược chiều đã đo; **bộ canh gác** `autoRetune.guardSymbols` ở khung 4h phải giữ kỳ vọng dương tuyệt đối; và **sàn cứng** `minSlPercent` (3) loại thẳng candidate nào kéo `risk.slPercent` xuống dưới — sàn chỉ chặn siết xuống, không chặn nới lên.
+
+  Đề xuất của nó **đi nhờ bản tổng hợp cuối ngày** (`pushRetune`), vì vòng quét không có đường ra Telegram nào ngoài ba mẫu tin. Hai bên đọc chung `data/auto-retune.json` nên không sinh thêm nguồn trạng thái.
+- `src/analysis/daily-review.js` — rà soát theo **thời gian**, khác `auto-retune` ở hai điểm: kích hoạt theo lịch chứ không theo chuỗi SL; kèo `breakeven` **không** tính là thua. Điểm khác thứ ba đã hết — bộ candidate giờ dùng chung `buildRiskCandidates()`, nên hai đường kích hoạt không còn đề xuất hai chiều ngược nhau cho cùng một cấu hình. Mỗi candidate bị đo **hai lần**: trên các cặp vừa thua phải giảm tỉ lệ SL mà không làm tiền xấu đi, trên bộ canh gác `dailyReview.guardSymbols` ở khung 4h phải giữ kỳ vọng dương tuyệt đối. Mặc định `autoApply: false` — chỉ đề xuất, vì runner bị huỷ sau mỗi lượt nên cấu hình tự ghi sẽ mất.
 
   Cửa sổ thống kê do `dailyReview.windowMode` quyết định, **khác** `everyHours` (chỉ là nhịp chạy). Mặc định `calendar-day`: chỉ đếm kèo chốt trong ngày, qua 00:00 theo `dayOffsetHours` (VN = 7) là reset về 0. Chế độ cũ `all` cộng dồn tới `autoRetune.historyLimit` = 200 kèo trong khi tiêu đề vẫn in "24H", nên báo cáo một ngày hiện mấy chục kèo. Kèo **đang mở không bao giờ được tính** — `recordClosedTrade` chỉ chạy lúc kèo chạm SL/TP/hết hạn. Chưa đủ `minClosedTrades` thì vẫn báo cáo số của ngày, chỉ không đem đi backtest.
 - `src/analysis/post-mortem.js` — phát lại từng kèo đã dính SL **mà chưa chốt TP1** trên nến thật rồi xếp vào 4 nhóm: `bi-quet` (SL nằm trong nhiễu, giá quay lại chạm TP1), `sai-huong` (đi ngược ngay từ nến đầu), `dao-chieu`, `chua-du-nen`. Thuần JS, không import gì — nến do bên gọi truyền vào. **Không cộng điểm, không ghi cấu hình**: nó chỉ nói nên đem hướng nào đi backtest. Hai nhóm đầu đòi cách sửa ngược nhau (nới SL / đừng vào lệnh), nên gộp chúng lại thành "tỉ lệ thua" là mất đúng phần thông tin có ích. Bắt buộc chạy **sau**, không phải lúc vừa dính SL: lúc đó nến sau chưa tồn tại nên chưa phân biệt được hai nhóm đó.
@@ -186,7 +190,7 @@ Bản năng "nhiều SL thì siết điều kiện vào lệnh cho chắc" đã 
 
 `diagnose:sl` nói cùng chuyện: lệnh SL có đồng thuận **cao hơn** lệnh có lãi ở cả 4 cặp đo được, và trên BTC 15m còn có volume cao hơn (2,08 vs 1,49).
 
-Hệ quả cần biết: **3 trong 4 candidate của `autoRetune` đang siết đúng những núm này** — `score-threshold`, `flow-confirmation` (CVD+volume), `flow-and-score`. Nếu chuỗi SL kích hoạt và một trong số đó được áp, khả năng cao là làm xấu thêm. Riêng `smaller-stop` thì siết **sai chiều**: dữ liệu nói `slPercent` phải NỚI ra, không phải thu vào (2,5 → 3,5 giảm SL thật từ 48,7% xuống 28,6% trên 1h/15m).
+`autoRetune` từng có đúng 4 candidate và **3 trong số đó siết đúng những núm này** (`score-threshold`, `flow-confirmation`, `flow-and-score`), cái thứ 4 (`smaller-stop`) thì siết **sai chiều** — dữ liệu nói `slPercent` phải NỚI ra, không phải thu vào (2,5 → 3,5 giảm SL thật từ 48,7% xuống 28,6% trên 1h/15m). **Cả bốn đã bị xoá**; giờ nó dùng chung `buildRiskCandidates()` với `daily-review`. Đừng thêm lại candidate siết điểm/CVD/volume.
 
 ### Ba khoá `risk` phải đổi cùng nhau
 
@@ -204,13 +208,27 @@ Hai cạm bẫy đã đo, đừng lặp lại:
 - **Nới `slPercent` mà vẫn để `preferSrLevels: true` thì vô ích.** `buildLevels` bám SL vào S/R khi khoảng cách nằm trong `0,4×`–`2,5×` mức cơ sở, nên nới `slPercent` chỉ nới luôn vùng chấp nhận — khoảng cách thật vẫn neo vào mức S/R. Đo được: 2,5 → 3 → 3,5 → 4 cho tỉ lệ SL 35,8% → 35,9% → 35,8% → 35,4%, tức đứng yên. Tắt bám cấu trúc rồi thì cả tỉ lệ SL lẫn kỳ vọng mới cải thiện **đơn điệu** theo `slPercent` ở cả hai đoạn dữ liệu.
 - **Đẩy TP ra xa làm TĂNG tỉ lệ dính SL**, vì TP1 chính là cái kích hoạt kéo SL về entry. Giữ SL 2,5%, chỉ đổi TP1: 0,5R → SL 35,8%; 0,75R → 45,3%; 1R → 51,5%; 1,5R → 57,9%. Muốn vừa ít SL vừa lãi hơn thì phải nới SL trước rồi mới đẩy TP.
 
-`autoRetune` có candidate `smaller-stop` siết `slPercent` và `autoRetune.minSlPercent` vẫn là 1,5 — tức nếu cơ chế đó được bật thật, nó có quyền kéo 4 xuống 1,5 và xoá sạch thay đổi này.
+Gói này từng bị chính `autoRetune` đe doạ: candidate `smaller-stop` siết `slPercent` và sàn `minSlPercent` là 1,5, tức cơ chế có quyền kéo 4 xuống 1,5 và xoá sạch thay đổi. Cả candidate đó lẫn ba candidate siết điểm/CVD/volume **đã bị xoá**; sàn giờ là 3.
 
-Ba thứ khác đang chết lặng, biết để khỏi mất thời gian:
+### `historicalPattern` KHÔNG chết — nó gánh phần lớn khoảng cách giữa lãi và lỗ
 
-- `historicalPattern` có trọng số 10 nhưng đóng góp **đúng 0** trong mọi backtest — `requiredHistoryMonths: 6` không đạt được trên cửa sổ 3000 nến của 1h/15m.
+Chỗ này trong tài liệu từng ghi ngược. Đo lại trên 4 cặp (BTC/ETH/SOL/BNB) khung 4h, 3000 nến, chia 75% chọn / 25% mới hơn xác nhận:
+
+| | tổng số lệnh (holdout) | tỉ lệ SL | PF | kỳ vọng | tổng đoạn giữ lại |
+|---|---|---|---|---|---|
+| giữ nguyên (trọng số 10) | 60 | 36,7% | **1,42** | **+0,379%** | **+21,8%** |
+| tắt hẳn (trọng số 0) | 68 | 42,7% | 1,03 | −0,07% | −7,4% |
+
+Nhóm này góp mặt ở **72/279 lệnh**. Tắt nó đi là đưa kỳ vọng về âm. Hai biến thể khác đã thử và **không** tốt hơn: nới `minSimilarity` xuống 0,75 cho kết quả ngang bằng (PF holdout 1,53 nhưng kỳ vọng 0,37 và tổng y hệt), còn tăng trọng số lên 16 thì holdout xấu đi (kỳ vọng 0,254%, tổng +10,8%). Vì vậy giữ `minSimilarity: 0,82` và trọng số 10.
+
+Con số cũ ("đóng góp đúng 0") đến từ phép đo trên 1h/15m, nơi cửa sổ 3000 nến không phủ nổi `requiredHistoryMonths: 6`. Đừng suy con số của khung nhỏ ra cho 4h.
+
+Cổng lọc cũng không quá chặt như vẻ ngoài: đo 320 điểm thời gian trên 8 cặp khung 4h, mẫu giống nhất có độ giống trung vị 0,913, và ở ngưỡng 0,82 thì 268/320 điểm có đủ ≥ 3 mẫu, 141/320 (44%) ra được điểm. Phần bị chặn chủ yếu là **cổng đồng thuận** của diễn biến sau đó, không phải cổng độ giống.
+
+Hai thứ còn lại, biết để khỏi mất thời gian:
+
 - `models/` chỉ có `BTCUSDT_4h`, nên `ml.weightVsRules` vô hiệu ở phần lớn mã. Model đó cũng dưới `ml.minTestAuc`.
-- `autoRetune.enabled` bị `loadActionStrategy()` đặt `false` ở production (GitHub Actions) — toàn bộ cơ chế tự kiểm chứng sau 3 SL **chưa từng chạy thật**.
+- Tầng 3 (Claude) **không nằm trong đường sinh kèo**: `alerts-once.js` không import `llm/claude.js`. Chỉ `src/bot.js` (`/a`, `/ask`) và CLI dùng.
 
 Watchlist vẫn có hai đường ghi vào `data/watchlist.json`: `loadWatchlist`/`saveWatchlist` trong `src/config.js` (bot AI dùng) và `src/data/watchlist.js` (server + bot chart dùng). Ghi từ hai phía sẽ đè lẫn nhau — chưa hợp nhất.
 
