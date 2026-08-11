@@ -13,7 +13,7 @@ import { loadModel } from '../ml/model-store.js';
 import { readWatchlist } from '../data/watchlist.js';
 import { readMonitorState, saveMonitorState } from '../data/monitor-state.js';
 import { setCallMessages } from '../data/open-calls.js';
-import { buildCaption, buildTpUpdate, splitCaption } from './caption.js';
+import { buildCaption, buildClosedNote, buildTpUpdate, splitCaption } from './caption.js';
 import { createMonitor } from './monitor.js';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -169,23 +169,10 @@ const monitor = createMonitor({
         return send((id) => bot.api.sendMessage(id, text, { parse_mode: 'HTML', ...reply(id) }));
       }
 
-      // 'breakeven' = đã chốt một phần ở TP1 rồi giá quay về entry. Không phải SL:
-      // gọi nó là SL sẽ báo sai kết quả và làm lệch cả chuỗi SL của auto-retune.
-      const ICONS = { stopped: '🛑', breakeven: '🛡', expired: '⏱' };
-      const LABELS = {
-        stopped: 'CHẠM STOPLOSS',
-        breakeven: 'VỀ HOÀ VỐN (SL đã kéo về entry sau TP1)',
-        expired: 'HẾT HẠN GIỮ',
-      };
-      const icon = ICONS[result.status] ?? '⏱';
-      const label = LABELS[result.status] ?? 'HẾT HẠN GIỮ';
-      const change = result.lastPrice != null && call.entry
-        ? ((result.lastPrice - call.entry) / call.entry) * 100 * (call.side === 'long' ? 1 : -1) : null;
-      const text = `${icon} <b>${call.symbol} ${call.interval}</b> — ${label}\n`
-        + `${call.side === 'long' ? 'LONG' : 'SHORT'} từ ${call.entry}`
-        + (change != null ? ` · kết quả ${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '')
-        + (result.hitTps.length ? ` · đã chạm ${result.hitTps.join(', ')}` : '')
-        + `\nGiữ ${result.bars} nến. Mã này được call lại từ nến sau.`;
+      const text = buildClosedNote(call, result, {
+        risk: strategy.risk,
+        feePercent: strategy.dailyReview?.feePercent,
+      });
       return send((id) => bot.api.sendMessage(id, text, { parse_mode: 'HTML', ...reply(id) }));
     }
 

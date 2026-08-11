@@ -4,6 +4,7 @@
 // Cấu trúc bám đúng mục "Cấu trúc khi call lệnh" trong CLAUDE.md.
 
 import { fmt, pct, decimalsFor } from '../chart/render.js';
+import { tradeReturnPercent, tookPartialAtTp1 } from '../analysis/trade-pnl.js';
 
 export const CAPTION_LIMIT = 1024;   // giới hạn caption ảnh của Telegram
 const HR = '━━━━━━━━━━━━━━━━━━';
@@ -183,6 +184,56 @@ export function buildTpUpdate(call, hitTps, risk = {}) {
   // Khối "NHẬN ĐỊNH NGẮN" (CVD còn thuận hay đã đảo) đã bị bỏ khỏi mẫu trong
   // README.md theo yêu cầu.
 
+  return L.join('\n');
+}
+
+// 'breakeven' = đã chốt một phần ở TP1 rồi giá quay về entry. Không phải SL: gọi
+// nó là SL sẽ báo sai kết quả và làm lệch cả chuỗi SL của auto-retune.
+const CLOSED_ICONS = { stopped: '🛑', breakeven: '🛡', expired: '⏱' };
+const CLOSED_LABELS = {
+  stopped: 'CHẠM STOPLOSS',
+  breakeven: 'VỀ HOÀ VỐN (SL đã kéo về entry sau TP1)',
+  expired: 'HẾT HẠN GIỮ',
+};
+
+/**
+ * Tin đóng kèo cho các trạng thái KHÔNG phải `target` (chạm TP cuối thì dùng
+ * `buildTpUpdate`): dính SL, về hoà vốn sau TP1, hoặc hết hạn giữ.
+ *
+ * Dòng `kết quả` là lãi/lỗ THẬT của cả kèo, dùng chung `tradeReturnPercent()`
+ * với bản tổng hợp cuối ngày. Trước đây chỗ này lấy thẳng
+ * `(giá thoát − entry) / entry`, nên kèo `breakeven` luôn in ra +0,00%: giá thoát
+ * CHÍNH LÀ entry, còn phần đã chốt ở TP1 thì không được cộng vào. Con số đó vừa
+ * mâu thuẫn với tin TP1 đã gửi ("chốt một phần, dời SL về entry"), vừa lệch với
+ * PnL mà báo cáo ngày cộng cho cùng kèo đó.
+ *
+ * @param call        kèo đang mở (từ data/open-calls.js)
+ * @param result      kết quả checkCall()
+ * @param risk        strategy.risk — `partialFraction` quyết định phần đã chốt ở TP1
+ * @param feePercent  phí MỖI LẦN thoát, lấy từ dailyReview.feePercent
+ */
+export function buildClosedNote(call, result, { risk = {}, feePercent = 0.06 } = {}) {
+  const d = decimalsFor(call.entry);
+  const partialFraction = Number(risk.partialFraction ?? 0.5);
+  const trade = { ...call, result };
+  const pnl = tradeReturnPercent(trade, { partialFraction, feePercent });
+  const tookPartial = tookPartialAtTp1(trade);
+  const tp1 = (call.targets ?? [])[0];
+  const hitTps = result.hitTps ?? [];
+
+  const L = [];
+  L.push(`${CLOSED_ICONS[result.status] ?? '⏱'} <b>${esc(call.symbol)} ${esc(call.interval)}</b>`
+    + ` — ${CLOSED_LABELS[result.status] ?? 'HẾT HẠN GIỮ'}`);
+  L.push(`${call.side === 'long' ? 'LONG' : 'SHORT'} từ ${fmt(call.entry, d)}`
+    + (pnl != null ? ` · kết quả ${pct(pnl)}` : '')
+    + (hitTps.length ? ` · đã chạm ${esc(hitTps.join(', '))}` : ''));
+  // Nói rõ con số gồm những gì, vì với `breakeven` thì phần lãi nằm HẾT ở lần
+  // chốt TP1 — không kể ra thì người đọc không đối chiếu được với tin TP1 cũ.
+  if (tookPartial && pnl != null) {
+    L.push(`<i>Gồm ${Math.round(partialFraction * 100)}% đã chốt ở ${esc(tp1.label)}`
+      + ` (${fmt(tp1.price, d)}), phần còn lại thoát ở ${fmt(result.lastPrice, d)}.</i>`);
+  }
+  L.push(`Giữ ${result.bars} nến. Mã này được call lại từ nến sau.`);
   return L.join('\n');
 }
 

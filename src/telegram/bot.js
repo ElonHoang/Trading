@@ -15,7 +15,7 @@ import { readSubscribers, addSubscriber, removeSubscriber } from '../data/subscr
 import { createMonitor } from './monitor.js';
 import { buildContext } from '../analysis/context.js';
 import { buildSetup, buildProjections, buildLimitPlan } from '../analysis/setup.js';
-import { buildCaption, buildQuoteMessage, splitCaption, buildTpUpdate } from './caption.js';
+import { buildCaption, buildClosedNote, buildQuoteMessage, splitCaption, buildTpUpdate } from './caption.js';
 import { setCallMessages } from '../data/open-calls.js';
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -365,24 +365,10 @@ const monitor = createMonitor({
         return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML', ...reply(id) }));
       }
 
-      // 'breakeven' = đã chốt một phần ở TP1 rồi giá quay về entry. Không phải SL:
-      // gọi nó là SL sẽ báo sai kết quả và làm lệch cả chuỗi SL của auto-retune.
-      const ICONS = { stopped: '🛑', breakeven: '🛡', expired: '⏱' };
-      const LABELS = {
-        stopped: 'CHẠM STOPLOSS',
-        breakeven: 'VỀ HOÀ VỐN (SL đã kéo về entry sau TP1)',
-        expired: 'HẾT HẠN GIỮ',
-      };
-      const icon = ICONS[result.status] ?? '⏱';
-      const label = LABELS[result.status] ?? 'HẾT HẠN GIỮ';
-      const d = call.entry;
-      const loss = result.lastPrice != null && d
-        ? ((result.lastPrice - d) / d) * 100 * (call.side === 'long' ? 1 : -1) : null;
-      const txt = `${icon} <b>${call.symbol} ${call.interval}</b> — ${label}\n`
-        + `${call.side === 'long' ? 'LONG' : 'SHORT'} từ ${d}`
-        + (loss != null ? ` · kết quả ${loss >= 0 ? '+' : ''}${loss.toFixed(2)}%` : '')
-        + (result.hitTps.length ? ` · đã chạm ${result.hitTps.join(', ')}` : '')
-        + `\nGiữ ${result.bars} nến. Mã này được call lại từ nến sau.`;
+      const txt = buildClosedNote(call, result, {
+        risk: strategy.risk,
+        feePercent: strategy.dailyReview?.feePercent,
+      });
       return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML', ...reply(id) }));
     }
 
