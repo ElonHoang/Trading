@@ -164,8 +164,7 @@ const monitor = createMonitor({
         ? { reply_to_message_id: call.messages[id] } : {});
 
       if (result.status === 'target') {
-        const text = `${buildTpUpdate(call, result.hitTps, strategy.risk)}\n`
-          + `\n<i>Giữ ${result.bars} nến. Mã này được call lại từ nến sau.</i>`;
+        const text = buildTpUpdate(call, result.hitTps, strategy.risk);
         return send((id) => bot.api.sendMessage(id, text, { parse_mode: 'HTML', ...reply(id) }));
       }
 

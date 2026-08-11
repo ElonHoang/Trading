@@ -360,8 +360,7 @@ const monitor = createMonitor({
 
       // Chốt vì chạm TP cuối -> dùng đúng template cập nhật TP.
       if (result.status === 'target') {
-        const txt = `${buildTpUpdate(call, result.hitTps, strategy.risk)}\n`
-          + `\n<i>Giữ ${result.bars} nến. Mã này được call lại từ nến sau.</i>`;
+        const txt = buildTpUpdate(call, result.hitTps, strategy.risk);
         return send((id) => bot.api.sendMessage(id, txt, { parse_mode: 'HTML', ...reply(id) }));
       }
 

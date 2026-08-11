@@ -233,7 +233,8 @@ export function buildClosedNote(call, result, { risk = {}, feePercent = 0.06 } =
     L.push(`<i>Gồm ${Math.round(partialFraction * 100)}% đã chốt ở ${esc(tp1.label)}`
       + ` (${fmt(tp1.price, d)}), phần còn lại thoát ở ${fmt(result.lastPrice, d)}.</i>`);
   }
-  L.push(`Giữ ${result.bars} nến. Mã này được call lại từ nến sau.`);
+  // Không in "Giữ N nến / được call lại từ nến sau": đó là sổ sách nội bộ của
+  // vòng quét, người đọc không làm gì được với nó.
   return L.join('\n');
 }
 

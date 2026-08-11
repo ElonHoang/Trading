@@ -85,6 +85,8 @@ Ba tầng xếp lên nhau, mô tả chi tiết trong `README.md`:
 
   Tin đóng kèo (không phải chạm TP cuối) do `buildClosedNote()` trong `src/telegram/caption.js` sinh ra — một hàm dùng chung cho cả `alerts-once.js` và `telegram/bot.js`, trước đây là hai bản sao lệch nhau. Dòng `kết quả %` lấy từ `tradeReturnPercent()` ở **`src/analysis/trade-pnl.js`** (module lá, thuần JS, không import gì) — chính hàm mà bản tổng hợp ngày dùng để cộng PnL, nên cùng một kèo không thể ra hai con số. Trước đây chỗ này tự tính `(giá thoát − entry) / entry`, nên kèo `breakeven` luôn in **+0,00%**: giá thoát chính LÀ entry, còn phần đã chốt ở TP1 không được cộng vào. Với `slPercent` 4 và TP1 ở 0,75R thì con số đúng là **+1,44%** (50% chốt ở TP1 ăn 3%, trừ phí mỗi lần thoát). Kèo đã ăn TP1 còn được thêm một dòng nói rõ phần nào chốt ở đâu, để đối chiếu được với tin TP1 đã gửi.
 
+  Dòng đuôi *"Giữ N nến. Mã này được call lại từ nến sau."* **đã bị bỏ** khỏi cả tin đóng kèo lẫn tin chạm TP cuối: đó là sổ sách nội bộ của vòng quét (`result.bars`, luật `alerts.maxHoldBars`), người đọc không làm gì được với nó. Tin chạm TP cuối vì vậy giờ đúng bằng `buildTpUpdate()`, khớp mẫu trong tài liệu này, không còn phần phụ nào nối thêm.
+
   Cửa suy ra từ **đồng hồ**, không lưu trạng thái, vì bản rà soát chạy `--no-write` nên không có đường ghi lại "tôi vừa báo cáo xong" — cho nó ghi thì nó thành nguồn ghi thứ hai và đua với vòng quét. Đổi lại, `reviewAtUtc` phải khớp cron của runner bằng tay. Nhịp Actions bị throttle còn ~3 tiếng nên cửa 30 phút chỉ có khoảng 1/6 cơ hội hứng được một lượt quét; đặt 180 nếu muốn chắc chắn chặn được một lượt.
 - `src/data/open-calls.js` — kèo đang mở. Một mã đã call thì không call lại tới khi chạm SL, TP cuối, hoặc quá `alerts.maxHoldBars`.
 
