@@ -70,11 +70,46 @@ export function reviewWindow(cfg = {}, now = Date.now()) {
 }
 
 /**
+ * Lãi/lỗ của MỘT kèo, tính đúng cách thoát lệnh mà tin nhắn đã dặn và backtest
+ * đang dùng (`exitStrategy: 'scaled'`): chốt `partialFraction` ở TP1 rồi kéo SL
+ * về entry, phần còn lại đóng ở giá thoát thật.
+ *
+ * Đây là % trên VỐN CỦA MỘT KÈO, chưa nhân đòn bẩy — cùng thang với
+ * `expectancyPercent` của backtest, nên hai con số so được với nhau.
+ *
+ * `feePercent` trừ trên MỖI LẦN thoát, giống backtest: chốt hai lần thì mất phí
+ * hai lần. Bỏ phí đi thì tổng PnL đẹp hơn thực tế một cách hệ thống.
+ *
+ * KHÔNG mô phỏng phần chốt ở TP2: `checkCall` chỉ ghi lại TP nào đã chạm chứ
+ * không lưu giá thoát từng phần, nên phần còn lại được tính đóng trọn ở
+ * `result.lastPrice`. Kèo chạy tới TP cuối vì vậy bị tính THẤP hơn thực tế một
+ * chút — thà bảo thủ còn hơn tự cộng thêm phần không đo được.
+ */
+export function tradeReturnPercent(trade, { partialFraction = 0.5, feePercent = 0.06 } = {}) {
+  const entry = Number(trade?.entry);
+  const exit = Number(trade?.result?.lastPrice);
+  if (!Number.isFinite(entry) || entry === 0 || !Number.isFinite(exit)) return null;
+  const dir = trade.side === 'long' ? 1 : -1;
+  const gain = (price) => ((price - entry) / entry) * 100 * dir;
+
+  const tp1 = (trade.targets ?? [])[0];
+  const tookPartial = Boolean(tp1) && (trade.result?.hitTps ?? []).includes(tp1.label)
+    && trade.result?.status !== 'target';
+  // Chạm TP cuối thì toàn bộ vị thế coi như đóng ở đó (đúng tin "Đóng 100% khối
+  // lượng còn lại"), nên không tách phần TP1 ra nữa.
+  const partial = tookPartial ? Number(partialFraction) : 0;
+  const realized = tookPartial ? (gain(tp1.price) - feePercent) * partial : 0;
+  return round(realized + (gain(exit) - feePercent) * (1 - partial), 2);
+}
+
+/**
  * Thống kê theo đúng cách người dùng yêu cầu: lệnh thua là lệnh chạm SL mà chưa
  * chốt được TP1. Trả cả hai cách tính mẫu số vì "không tính kèo SL do đã done
  * TP1" có thể hiểu là bỏ khỏi tử số hoặc bỏ khỏi cả hai.
  */
-export function summarizeCalls(trades, { sinceMs = null, untilMs = null } = {}) {
+export function summarizeCalls(trades, {
+  sinceMs = null, untilMs = null, partialFraction = 0.5, feePercent = 0.06,
+} = {}) {
   const inWindow = sinceMs == null && untilMs == null
     ? [...trades]
     : trades.filter((t) => {
@@ -89,12 +124,34 @@ export function summarizeCalls(trades, { sinceMs = null, untilMs = null } = {}) 
   const expired = by('expired');
   const closed = inWindow.length;
   const exBe = closed - breakeven.length;
+
+  // Lãi/lỗ từng kèo, rồi tổng của cả kỳ. Cộng thẳng % của từng kèo = giả định
+  // MỌI KÈO VÀO CÙNG MỘT CỠ VỐN — đúng với kiểu kênh tín hiệu, và là cách duy
+  // nhất tính được vì bot không biết ai vào bao nhiêu.
+  const pnls = new Map(inWindow.map((t) => [t, tradeReturnPercent(t, { partialFraction, feePercent })]));
+  const pnlOf = (t) => pnls.get(t) ?? 0;
+  const measured = inWindow.filter((t) => pnls.get(t) != null);
+
+  // W/L/H theo mẫu tin: thắng = chạm TP cuối, thua = dính SL khi chưa chốt phần
+  // nào, hoà = đã chốt TP1 rồi về entry. Kèo HẾT HẠN không nằm trong ba loại
+  // trên nên xếp theo số tiền nó thật sự mang lại, chứ không mặc định gọi là hoà.
+  const expiredWin = expired.filter((t) => pnlOf(t) > 0.05);
+  const expiredLoss = expired.filter((t) => pnlOf(t) < -0.05);
+
   return {
     closed,
     lost: lost.length,
     breakeven: breakeven.length,
     won: won.length,
     expired: expired.length,
+    win: won.length + expiredWin.length,
+    loss: lost.length + expiredLoss.length,
+    draw: breakeven.length + (expired.length - expiredWin.length - expiredLoss.length),
+    pnlPercent: measured.length
+      ? round(measured.reduce((sum, t) => sum + pnlOf(t), 0), 2) : null,
+    // Kèo thiếu giá thoát (dữ liệu cũ) bị loại khỏi tổng PnL — nói ra để không
+    // ai đọc nhầm là đã tính đủ.
+    pnlFromTrades: measured.length,
     lossRatePercent: closed ? round((lost.length / closed) * 100, 1) : null,
     // Bỏ hẳn kèo breakeven khỏi mẫu số.
     lossRateExcludingBreakevenPercent: exBe > 0 ? round((lost.length / exBe) * 100, 1) : null,
@@ -274,6 +331,49 @@ function passesGuard(baseline, proposed, cfg) {
 const avg = (rows, key) => (rows.length
   ? round(rows.reduce((sum, r) => sum + (Number(r[key]) || 0), 0) / rows.length, 3) : null);
 
+/**
+ * Dòng "Thị trường chung" của mẫu tin, đo bằng chính giá BTC trong ĐÚNG cửa sổ
+ * đang rà soát — không phải cảm nhận, cũng không phải giá lúc chạy báo cáo.
+ *
+ * Chỉ ba nhãn vì chỉ đo được đúng một thứ: biên độ ròng của kỳ. Dưới
+ * `marketTrendPercent` thì gọi là Sideway. Đây là mô tả bối cảnh cho người đọc,
+ * KHÔNG cộng điểm và không đổi quyết định nào — trộn nó vào phần chấm điểm sẽ
+ * phá đúng ranh giới mà repo giữ giữa "đo được" và "kể chuyện".
+ *
+ * Lỗi mạng thì trả `{ error }`: bản rà soát không được chết vì một dòng phụ.
+ */
+export async function readMarketTrend(cfg = {}, window = {}, {
+  fetchCandles = fetchKlines, now = Date.now(),
+} = {}) {
+  const symbol = cfg.marketSymbol ?? 'BTCUSDT';
+  const interval = cfg.marketInterval ?? '4h';
+  const threshold = Math.abs(Number(cfg.marketTrendPercent ?? 2));
+  try {
+    const candles = closedCandles(await fetchCandles(symbol, interval, 200));
+    const until = window.untilMs ?? now;
+    const since = window.sinceMs ?? until - DAY_MS;
+    const inWindow = candles.filter((c) => c.openTime >= since && c.openTime < until);
+    // Cửa sổ 'rolling'/'all' hoặc kỳ mới mở chưa đủ nến: lùi về 6 nến cuối (=24h
+    // ở khung 4h) để vẫn nói được điều gì đó, và ghi lại số nến đã dùng.
+    const used = inWindow.length >= 2 ? inWindow : candles.slice(-6);
+    if (used.length < 2) return { symbol, interval, error: 'không đủ nến' };
+    const first = used[0];
+    const last = used[used.length - 1];
+    const changePercent = round(((last.close - first.open) / first.open) * 100, 2);
+    return {
+      symbol,
+      interval,
+      bars: used.length,
+      changePercent,
+      inWindow: inWindow.length >= 2,
+      label: changePercent >= threshold ? 'Uptrend'
+        : changePercent <= -threshold ? 'Downtrend' : 'Sideway',
+    };
+  } catch (error) {
+    return { symbol, interval, error: error.message };
+  }
+}
+
 export async function runDailyReview({ strategy, state, now = Date.now(), deps = {} }) {
   const cfg = strategy.dailyReview ?? {};
   const persist = deps.saveState ?? saveAutoRetuneState;
@@ -295,11 +395,25 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     };
   }
 
-  const summary = summarizeCalls(state.trades ?? [], { sinceMs: window.sinceMs, untilMs: window.untilMs });
+  const summary = summarizeCalls(state.trades ?? [], {
+    sinceMs: window.sinceMs,
+    untilMs: window.untilMs,
+    // Cùng cách thoát lệnh mà tin nhắn đã dặn và backtest đang đo, không phải
+    // một quy ước riêng cho báo cáo.
+    partialFraction: Number(strategy.risk?.partialFraction ?? 0.5),
+    feePercent: Number(cfg.feePercent ?? 0.06),
+  });
   const minTrades = Math.max(3, Number(cfg.minClosedTrades ?? 10));
   const target = Number(cfg.targetLossRatePercent ?? 30);
 
   state.lastReviewAt = new Date(now).toISOString();
+
+  // Bối cảnh thị trường của kỳ. Đặt trước mọi nhánh return để báo cáo nào cũng
+  // có dòng này, kể cả bản "chưa đủ mẫu".
+  base.market = await readMarketTrend(cfg, window, {
+    fetchCandles: deps.fetchRecentCandles ?? fetchKlines,
+    now,
+  });
 
   // Mổ xẻ từng kèo SL trên nến thật. Chạy TRƯỚC cửa `minClosedTrades` vì nó chỉ
   // mô tả chuyện đã xảy ra — không đổi cấu hình nên không cần cỡ mẫu để an toàn,
@@ -491,20 +605,49 @@ export function formatDailyReview(report) {
   const L = [];
   const s = report.summary;
   const pct = (v) => (v == null ? '—' : `${v}%`);
+  // Số trong tin dùng dấu phẩy thập phân như mọi tin nhắn khác.
+  const vi = (v) => String(v).replace('.', ',');
 
   if (report.status === 'disabled') return null;
   if (report.status === 'too-soon') return null;
 
-  L.push(`📋 <b>RÀ SOÁT ${report.window?.label ?? `${report.everyHours}H`}</b>`);
+  // ---- Khối tổng quan, theo đúng mẫu "Cấu trúc form tổng hợp ... trong 1 ngày" ----
+  const m = report.market;
+  const market = !m || m.error
+    ? `— (không đọc được ${m?.symbol ?? 'BTC'}${m?.error ? `: ${m.error}` : ''})`
+    : `${m.label} (${m.symbol} ${m.changePercent >= 0 ? '+' : ''}${vi(m.changePercent)}% trong kỳ)`;
+
+  L.push('🌟 <b>TỔNG QUAN HIỆU SUẤT TRONG NGÀY</b> 🌟');
+  L.push('');
 
   // Chỉ đếm kèo ĐÃ CHỐT trong kỳ; kèo còn chạy nằm ngoài mọi con số dưới đây.
   if (!s.closed) {
-    L.push('Không có kèo nào chốt trong kỳ này — kèo đang mở chưa tính, chờ chạm SL/TP.');
+    L.push('🔹 Tổng số lệnh đã call: 0 lệnh');
+    L.push(`🔹 Thị trường chung: ${market}`);
+    L.push('');
+    L.push(`Không có kèo nào chốt trong ${report.window?.label ?? 'kỳ này'} — kèo đang mở `
+      + 'chưa tính, chờ chạm SL/TP.');
     return L.join('\n');
   }
 
+  const pnl = s.pnlPercent;
+  L.push(`🔹 Tổng số lệnh đã call: ${s.closed} lệnh`);
+  L.push(`🔹 Tỉ lệ (Win/Loss/Hòa): ${s.win ?? s.won} W - ${s.loss ?? s.lost} L - ${s.draw ?? s.breakeven} H`);
+  L.push(`🔹 Tổng Lợi nhuận (PnL): ${pnl == null ? '—' : `${pnl >= 0 ? '🟢 +' : '🔴 '}${vi(pnl)} %`}`);
+  L.push(`🔹 Thị trường chung: ${market}`);
+
+  L.push('');
+  L.push(`📋 <b>RÀ SOÁT ${report.window?.label ?? `${report.everyHours}H`}</b> — chỉ tính kèo đã chốt, `
+    + 'kèo đang mở chưa vào sổ');
   L.push(`Đã đóng ${s.closed} kèo: 🎯 ${s.won} chạm TP · 🛑 ${s.lost} dính SL · 🛡 ${s.breakeven} về hoà vốn · ⏱ ${s.expired} hết hạn`);
   L.push(`<b>Tỉ lệ thua ${pct(s.lossRatePercent)}</b> (không tính ${s.breakeven} kèo đã chốt TP1 rồi mới về entry)`);
+  if (pnl != null) {
+    L.push('PnL là tổng % của từng kèo — mỗi kèo một cỡ vốn như nhau, đã trừ phí, '
+      + '<b>chưa nhân đòn bẩy</b>, và tính theo đúng cách thoát lệnh đã dặn (chốt một phần ở TP1).'
+      + (s.pnlFromTrades != null && s.pnlFromTrades < s.closed
+        ? ` Chỉ cộng được ${s.pnlFromTrades}/${s.closed} kèo, số còn lại thiếu giá thoát trong nhật ký.`
+        : ''));
+  }
   if (s.lossRateExcludingBreakevenPercent != null && s.breakeven > 0) {
     L.push(`Nếu bỏ hẳn kèo hoà vốn khỏi mẫu số: ${pct(s.lossRateExcludingBreakevenPercent)}`);
   }

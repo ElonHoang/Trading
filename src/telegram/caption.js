@@ -60,17 +60,13 @@ export function buildCaption(snap, { setup = null, limitPlan = null } = {}) {
   // tường lệnh) đã bị bỏ khỏi mẫu trong CLAUDE.md theo yêu cầu. Các số đó vẫn
   // được chấm điểm và vẫn dùng để tính entry/SL/TP — chỉ là không in ra nữa.
 
-  // ---- Lý do ----
-  // Mẫu hình lịch sử vẫn góp điểm nội bộ, nhưng theo yêu cầu không nêu trong tin Telegram.
-  const reasons = (setup?.reasons ?? []).filter((r) => r.group !== 'Mẫu hình lịch sử').slice(0, 3);
-  const cautions = (setup?.cautions ?? []).slice(0, 2);
-  if (reasons.length || cautions.length || setup?.blockers?.length) {
-    L.push(HR);
-    L.push('💡 <b>LÝ DO VÀO LỆNH</b>');
-    for (const b of setup?.blockers ?? []) L.push(`⛔ ${esc(b)}`);
-    for (const r of reasons) L.push(`🔻 ${esc(r.text)}`);
-    for (const c of cautions) L.push(`⚠️ ${esc(c.text)}`);
-  }
+  // Khối "💡 LÝ DO VÀO LỆNH" đã bị bỏ khỏi mẫu trong CLAUDE.md, kéo theo cả ba
+  // loại dòng của nó: lý do 🔻, cảnh báo ⚠️ và dòng ⛔ giải thích vì sao kèo bị
+  // chặn. `setup.reasons`, `cautions`, `blockers` vẫn được dựng và vẫn đi vào
+  // `evidence` của kèo để rà soát sau này — chỉ là không in ra tin nhắn nữa.
+  //
+  // Cảnh báo bối cảnh mức 'critical' KHÔNG lọt ra ngoài vì mất khối này: chúng
+  // phủ quyết luôn setup, nên tin trở thành LIMIT và không có kèo nào để vào.
 
   // ---- Lệnh chờ ----
   // KHUYẾN NGHỊ đã là LIMIT thì phải kèm giá, không thì lời khuyên rỗng: khối

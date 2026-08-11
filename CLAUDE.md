@@ -279,6 +279,10 @@ Ba mẫu tin nhắn, đều ở ngay dưới đây: **call kèo** và **cập nh
    👉 TP 3: [GIÁ_TP3]
 ⚖️ Tỷ lệ R:R: [TỶ_LỆ]
 
+Khối **💡 LÝ DO VÀO LỆNH đã bị bỏ** khỏi mẫu, kéo theo cả ba loại dòng của nó: lý do 🔻, cảnh báo ⚠️ và dòng ⛔ giải thích vì sao kèo bị chặn. `setup.reasons`/`cautions`/`blockers` vẫn được dựng và vẫn đi vào `evidence` của kèo để rà soát sau — chỉ là không in ra nữa. Cảnh báo bối cảnh mức `critical` không lọt ra ngoài vì mất khối này: chúng phủ quyết luôn setup nên tin trở thành LIMIT, không có kèo nào để vào.
+
+Khi chưa vào được ngay (KHUYẾN NGHỊ = 🟡 LIMIT), khối `CHI TIẾT LỆNH` trống và được thay bằng khối **LỆNH CHỜ (LIMIT)**: vùng giá đặt sẵn + SL/TP + hạn khớp, do `buildLimitPlan()` sinh ra (xem phần `src/analysis/setup.js` ở trên).
+
 ---
 
 ## Cấu trúc sau khi done TP call kèo
@@ -312,4 +316,13 @@ trong `data/open-calls.json`.
 🔹 Tỉ lệ (Win/Loss/Hòa): [Số] W - [Số] L - [Số] H
 🔹 Tổng Lợi nhuận (PnL): 🟢 [+ X %]
 🔹 Thị trường chung: [Sideway / Uptrend...]
+
+Bốn dòng này là **phần đầu** của bản rà soát; chẩn đoán lệnh thua, post-mortem và đề xuất chỉnh cấu hình vẫn nằm bên dưới — đó là lý do job này tồn tại, bỏ đi thì nó chỉ còn là bảng điểm.
+
+Từng con số lấy ở đâu, và giới hạn của nó:
+
+- **Số lệnh** = kèo đã CHỐT trong cửa sổ, không phải số kèo đã bắn. Kèo đang mở không bao giờ được tính (`recordClosedTrade` chỉ chạy lúc chạm SL/TP/hết hạn).
+- **W/L/H**: W = chạm TP cuối, L = dính SL khi chưa chốt phần nào, H = đã chốt TP1 rồi mới về entry. Kèo **hết hạn giữ** không thuộc ba loại trên nên được xếp theo số tiền nó thật sự mang lại, chứ không mặc định gọi là hoà.
+- **PnL** (`tradeReturnPercent`) cộng % của từng kèo, giả định **mọi kèo cùng một cỡ vốn** — bot không biết ai vào bao nhiêu — và **chưa nhân đòn bẩy**. Cách thoát lệnh lấy đúng `risk.partialFraction` + `exitStrategy: scaled` như backtest, nên con số này so được với `expectancyPercent`. Phí trừ trên **mỗi lần thoát** (`dailyReview.feePercent`). Phần chốt ở TP2 **không** được mô phỏng vì `checkCall` chỉ ghi TP nào đã chạm chứ không lưu giá thoát từng phần, nên kèo chạy tới TP cuối bị tính thấp hơn thực tế một chút — cố ý bảo thủ.
+- **Thị trường chung** = biên độ ròng của `dailyReview.marketSymbol` trong đúng cửa sổ rà soát, ngưỡng `marketTrendPercent`. Chỉ mô tả bối cảnh cho người đọc, **không cộng điểm và không đổi quyết định nào**. Lỗi mạng thì in "không đọc được", không làm chết bản rà soát.
 
