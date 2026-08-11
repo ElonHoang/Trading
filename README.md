@@ -391,28 +391,3 @@ src/analysis/entry-quality.js  src/ml/train.js     src/backtest.js
 - Phân tích kỹ thuật không dự đoán được tin tức, hack, hay quyết định của Fed.
 
 **Đây là công cụ phân tích kỹ thuật tự động, không phải lời khuyên đầu tư.**
-
----
-
-## Cấu trúc sau khi done TP call kèo
-
-```
-🚀 CẬP NHẬT: [CẶP_GIAO_DỊCH] HIT TP [1/2/3/FULL]!
-💰 Lợi nhuận: +[X]% (Spot) | +[Y]% (Đòn bẩy [Z]x)
-
-━━━━━━━━━━━━━━━━━━
-🎯 CHI TIẾT CHỐT LỜI
-• Entry đã gọi : [GIÁ_VÀO]
-• Mốc TP vừa hit : [GIÁ_TP]
-• Trạng thái lệnh : [Đã chốt 1 phần, gồng tiếp / Chốt hết]
-
-━━━━━━━━━━━━━━━━━━
-🛠 HÀNH ĐỘNG TIẾP THEO
-✅ Chốt lời: Đóng [X]% khối lượng lệnh tại đây.
-🛡 Quản lý rủi ro: Dời Stoploss về Entry (hoà vốn).
-👀 Mục tiêu tiếp: TP [2/3] tại giá [GIÁ_TP_TIẾP].
-```
-
-Các con số không tự đặt ra: `%` chốt lời lấy từ `risk.partialFraction` (cùng con số backtest
-dùng cho chiến lược `scaled`) và đòn bẩy quy đổi lấy từ `risk.displayLeverage`. Tin cập nhật **reply vào đúng tin call gốc** nhờ message id lưu
-trong `data/open-calls.json`.

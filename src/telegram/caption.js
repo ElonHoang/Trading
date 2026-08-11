@@ -14,9 +14,9 @@ export const esc = (s) => String(s)
 
 /**
  * Caption cho ảnh chart theo đúng template trong CLAUDE.md.
- * `setup` và `projections` là tuỳ chọn — thiếu thì bỏ khối tương ứng.
+ * `setup` và `limitPlan` là tuỳ chọn — thiếu thì bỏ khối tương ứng.
  */
-export function buildCaption(snap, { setup = null, projections = null } = {}) {
+export function buildCaption(snap, { setup = null, limitPlan = null } = {}) {
   const d = decimalsFor(snap.price.lastClose);
   const L = [];
 
@@ -76,17 +76,31 @@ export function buildCaption(snap, { setup = null, projections = null } = {}) {
   // KHUYẾN NGHỊ đã là LIMIT thì phải kèm giá, không thì lời khuyên rỗng: khối
   // "CHI TIẾT LỆNH" ở trên trống khi chưa vào được ngay.
   //
+  // Đây là lệnh LIMIT THẬT — một vùng giá chờ khớp, buy limit dưới giá và sell
+  // limit trên giá. Trước đây khối này in mốc PHÁ VỠ ("phá lên X → Long"), tức
+  // là lệnh stop chứ không phải limit, và cũng không nói đặt sẵn ở đâu.
+  //
   // NGOẠI LỆ khi bối cảnh cơ bản PHỦ QUYẾT (delist, tin xấu nghiêm trọng): không
   // in mức nào. Đặt lệnh chờ vào đúng tình huống mà phủ quyết dựng lên để tránh
   // là ngược nghĩa của phủ quyết. Lý do vẫn hiện ở khối ⛔ bên trên.
-  if (projections && side === 'none' && !setup?.vetoed) {
+  if (limitPlan?.orders?.length && side === 'none' && !setup?.vetoed) {
     L.push(HR);
-    L.push('🎯 <b>LỆNH CHỜ (LIMIT)</b> — vào khi nến đóng xác nhận');
-    const tpOf = (proj) => (proj.targets ?? []).slice(0, 2).map((t) => fmt(t.price, d)).join('/');
-    L.push(`📈 Phá lên ${fmt(projections.up.entry, d)} → Long `
-      + `(SL ${fmt(projections.up.stopLoss, d)} | TP ${tpOf(projections.up)})`);
-    L.push(`📉 Thủng qua ${fmt(projections.down.entry, d)} → Short `
-      + `(SL ${fmt(projections.down.stopLoss, d)} | TP ${tpOf(projections.down)})`);
+    L.push('🎯 <b>LỆNH CHỜ (LIMIT)</b> — đặt sẵn ở vùng giá, KHÔNG vào giá hiện tại');
+    for (const o of limitPlan.orders) {
+      const icon = o.direction === 'long' ? '🟢' : '🔴';
+      L.push(`${icon} <b>${esc(o.label)}</b>: ${fmt(o.zone.low, d)} – ${fmt(o.zone.high, d)}`
+        + ` (${pct(o.distancePercent)} so với giá)`);
+      L.push(`   • SL ${fmt(o.stopLoss, d)} (rủi ro ${fmt(o.riskPercent, 2)}%)`
+        + ` · TP ${o.targets.map((t) => fmt(t.price, d)).join(' / ')}`);
+      // Mức neo in lại qua fmt() để cùng cách viết số với các giá khác trong
+      // tin; `o.basis` là bản chữ cho CLI, ở đây không dùng.
+      L.push(o.fromStructure
+        ? `   • Neo vào ${o.direction === 'long' ? 'hỗ trợ' : 'kháng cự'} `
+          + `${fmt(o.anchor, d)} (${o.anchorTouches} lần chạm)`
+        : `   • Neo: ${esc(o.basis)}`);
+      L.push(`   • Huỷ nếu nến đóng ${o.direction === 'long' ? 'dưới' : 'trên'} `
+        + `${fmt(o.stopLoss, d)}, hoặc chưa khớp sau ${o.expiryBars} nến`);
+    }
   }
 
   return L.join('\n');

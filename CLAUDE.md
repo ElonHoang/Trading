@@ -71,7 +71,13 @@ Ba tầng xếp lên nhau, mô tả chi tiết trong `README.md`:
   Cửa sổ thống kê do `dailyReview.windowMode` quyết định, **khác** `everyHours` (chỉ là nhịp chạy). Mặc định `calendar-day`: chỉ đếm kèo chốt trong ngày, qua 00:00 theo `dayOffsetHours` (VN = 7) là reset về 0. Chế độ cũ `all` cộng dồn tới `autoRetune.historyLimit` = 200 kèo trong khi tiêu đề vẫn in "24H", nên báo cáo một ngày hiện mấy chục kèo. Kèo **đang mở không bao giờ được tính** — `recordClosedTrade` chỉ chạy lúc kèo chạm SL/TP/hết hạn. Chưa đủ `minClosedTrades` thì vẫn báo cáo số của ngày, chỉ không đem đi backtest.
 - `src/analysis/post-mortem.js` — phát lại từng kèo đã dính SL **mà chưa chốt TP1** trên nến thật rồi xếp vào 4 nhóm: `bi-quet` (SL nằm trong nhiễu, giá quay lại chạm TP1), `sai-huong` (đi ngược ngay từ nến đầu), `dao-chieu`, `chua-du-nen`. Thuần JS, không import gì — nến do bên gọi truyền vào. **Không cộng điểm, không ghi cấu hình**: nó chỉ nói nên đem hướng nào đi backtest. Hai nhóm đầu đòi cách sửa ngược nhau (nới SL / đừng vào lệnh), nên gộp chúng lại thành "tỉ lệ thua" là mất đúng phần thông tin có ích. Bắt buộc chạy **sau**, không phải lúc vừa dính SL: lúc đó nến sau chưa tồn tại nên chưa phân biệt được hai nhóm đó.
 - `src/analysis/setup.js` — gộp kỹ thuật + bối cảnh thành setup (entry/SL/TP + lý do xếp theo đóng góp thật), và `buildProjections()` cho hai kịch bản lên/xuống neo vào mức S/R thật.
+
+  `buildLimitPlan()` dựng khối **LỆNH CHỜ (LIMIT)** in trong tin nhắn khi chưa vào được ngay: một **vùng giá** đặt sẵn, buy limit luôn DƯỚI giá và sell limit luôn TRÊN giá — đặt ngược lại thì sàn khớp ngay, thành lệnh thị trường trá hình. Trước đây khối này in mốc phá vỡ ("phá lên X → Long"), tức là lệnh *stop*, gắn nhãn LIMIT. Vùng neo vào mức S/R gần nhất nằm trong `risk.limitOrder.minDistancePercent`–`maxDistancePercent`, không có mức nào lọt thì lùi theo `fallbackPullbackPercent`. Bề rộng vùng bị kẹp thêm bởi `maxZoneFractionOfDistance` vì `slPercent` 4 làm `zoneWidthR` 0,3 rộng tới 1,2% giá — đủ để mép vùng bò lên sát giá hiện tại và entry lại thành "vào ngay". SL ở đây tính thẳng theo `slPercent` từ entry, **không** bám S/R kể cả khi `preferSrLevels` bật, vì entry đã nằm ngay tại mức cấu trúc rồi.
+
+  Khối này **không backtest được** — backtest chỉ khớp giá đóng nến nên không mô phỏng được lệnh chờ khớp trong thân nến. Các số trong `risk.limitOrder` là chọn theo phán đoán. Vòng quét cũng **không mở kèo** cho lệnh chờ: `monitor` vẫn bỏ qua `side === 'none'`, nên đây là lời khuyên hiển thị, không phải kèo được theo dõi SL/TP.
 - `src/telegram/monitor.js` — vòng quét. Chỉ đánh giá lại **khi có nến mới đóng**; chỉ bắn khi có kèo thật (không bắn "đứng ngoài"/"chờ tín hiệu"). Có **cửa soi lại sau báo cáo ngày** (`learning.reviewAtUtc` + `pauseAfterReviewMinutes`): trong 30 phút kể từ lúc bản tổng hợp cuối ngày chạy, vòng quét không mở kèo mới. Neo vào **báo cáo**, không phải vào từng lần dính SL. Cửa chỉ chặn việc MỞ kèo — theo dõi kèo đang chạy vẫn nguyên, dừng nó thì kèo đang mở mất người canh. Kèo bị hoãn được xét lại ở lượt sau chứ không mất: kiểm tra đặt **trước** `state.set`, vì ghi `lastSignal` rồi mới bỏ qua sẽ tiêu mất lần "tín hiệu đổi" và với `onlyOnSignalChange` thì hoãn hoá ra là huỷ.
+
+  **Kèo chết trắng tay đóng im lặng**: dính SL hoặc hết hạn giữ **mà chưa chạm TP nào** thì không có tin nào cả — `monitor` chỉ gọi `notify({kind:'closed'})` khi `result.status === 'target' || result.hitTps.length > 0`. Đã ăn được TP1 rồi mới quay đầu (`breakeven`, hay hết hạn sau khi đã ăn TP) thì **vẫn báo bình thường**, vì tin TP1 đã dặn "chốt một phần, dời SL về entry" nên người đọc còn giữ phần còn lại; im ở đó là bỏ họ giữa chừng. Báo cáo `auto-retune` sau 3 SL liên tiếp chỉ ghi ra log của tiến trình, không bắn vào chat, vì nó chỉ sinh ra trên đường SL. Im lặng **không làm mất số liệu**: `recordClosedTrade` vẫn chạy trước đó, nên bản tổng hợp ngày vẫn đếm đúng số kèo thua và chuỗi SL vẫn được đếm đủ.
 
   Cửa suy ra từ **đồng hồ**, không lưu trạng thái, vì bản rà soát chạy `--no-write` nên không có đường ghi lại "tôi vừa báo cáo xong" — cho nó ghi thì nó thành nguồn ghi thứ hai và đua với vòng quét. Đổi lại, `reviewAtUtc` phải khớp cron của runner bằng tay. Nhịp Actions bị throttle còn ~3 tiếng nên cửa 30 phút chỉ có khoảng 1/6 cơ hội hứng được một lượt quét; đặt 180 nếu muốn chắc chắn chặn được một lượt.
 - `src/data/open-calls.js` — kèo đang mở. Một mã đã call thì không call lại tới khi chạm SL, TP cuối, hoặc quá `alerts.maxHoldBars`.
@@ -255,7 +261,7 @@ Kĩ năng 2 **không cộng điểm** — dòng tiền tính bằng giây/giờ 
 
 Kĩ năng 3 cũng **không cộng điểm và không tự đổi cấu hình theo vài lệnh đơn lẻ**. Sau chuỗi SL, chỉ `auto-retune` đã kiểm chứng theo thời gian mới được áp dụng thay đổi an toàn.
 
-Hai mẫu tin nhắn: mẫu **call kèo** ở ngay dưới đây; mẫu **cập nhật khi chạm TP** ở cuối `README.md`. Cả hai được `src/telegram/caption.js` sinh ra (`buildCaption` và `buildTpUpdate`) — sửa mẫu thì phải sửa cả hàm tương ứng.
+Ba mẫu tin nhắn, đều ở ngay dưới đây: **call kèo** và **cập nhật khi chạm TP** do `src/telegram/caption.js` sinh ra (`buildCaption` và `buildTpUpdate`), **tổng hợp trong ngày** do `src/analysis/daily-review.js` sinh ra (`formatDailyReport`) — sửa mẫu thì phải sửa cả hàm tương ứng.
 
 ### Cấu trúc khi call lệnh
 
@@ -273,9 +279,37 @@ Hai mẫu tin nhắn: mẫu **call kèo** ở ngay dưới đây; mẫu **cập 
    👉 TP 3: [GIÁ_TP3]
 ⚖️ Tỷ lệ R:R: [TỶ_LỆ]
 
+---
+
+## Cấu trúc sau khi done TP call kèo
+
+```
+🚀 CẬP NHẬT: [CẶP_GIAO_DỊCH] HIT TP [1/2/3/FULL]!
+💰 Lợi nhuận: +[X]% (Spot) | +[Y]% (Đòn bẩy [Z]x)
+
 ━━━━━━━━━━━━━━━━━━
-💡 LÝ DO VÀO LỆNH
-🔻 [Lý do 1: Ví dụ - Giá đi ngang nhưng CVD giảm → Đang phân phối]
-🔻 [Lý do 2: Ví dụ - Đám đông dồn Long quá mức → Dễ bị quét thanh lý]
-🔻 [Lý do 3: Ghi chú về tin tức, khối lượng...]
+🎯 CHI TIẾT CHỐT LỜI
+• Entry đã gọi : [GIÁ_VÀO]
+• Mốc TP vừa hit : [GIÁ_TP]
+• Trạng thái lệnh : [Đã chốt 1 phần, gồng tiếp / Chốt hết]
+
+━━━━━━━━━━━━━━━━━━
+🛠 HÀNH ĐỘNG TIẾP THEO
+✅ Chốt lời: Đóng [X]% khối lượng lệnh tại đây.
+🛡 Quản lý rủi ro: Dời Stoploss về Entry (hoà vốn).
+👀 Mục tiêu tiếp: TP [2/3] tại giá [GIÁ_TP_TIẾP].
+```
+
+Các con số không tự đặt ra: `%` chốt lời lấy từ `risk.partialFraction` (cùng con số backtest
+dùng cho chiến lược `scaled`) và đòn bẩy quy đổi lấy từ `risk.displayLeverage`. Tin cập nhật **reply vào đúng tin call gốc** nhờ message id lưu
+trong `data/open-calls.json`.
+
+## Cấu trúc form tổng hợp các kèo đã call trong 1 ngày
+
+🌟 TỔNG QUAN HIỆU SUẤT TRONG NGÀY 🌟
+
+🔹 Tổng số lệnh đã call: [Số lượng] lệnh
+🔹 Tỉ lệ (Win/Loss/Hòa): [Số] W - [Số] L - [Số] H
+🔹 Tổng Lợi nhuận (PnL): 🟢 [+ X %]
+🔹 Thị trường chung: [Sideway / Uptrend...]
 

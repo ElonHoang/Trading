@@ -210,4 +210,5 @@ Ngoài ra cổng này **gần như không có độ phân giải** ở khung cal
 `src/analysis/setup.js`:
 
 - `buildSetup(snapshot, context, opts)` → `side`, `entry`, `stopLoss`, `riskPercent`, `targets`, `rrToTp1` (R:R tới **mục tiêu cấu trúc gần nhất**, không phải tới TP1 — TP1 định nghĩa là 1R nên đo tới nó luôn ra 1, vô nghĩa), `reasons` (chỉ nhóm cùng hướng, xếp theo đóng góp thật), `cautions`, `notes`, `blockers`.
+- `buildLimitPlan(snapshot, risk)` → khối **LỆNH CHỜ (LIMIT)**: vùng giá đặt sẵn để chờ khớp — buy limit **dưới** giá hiện tại (neo vào hỗ trợ), sell limit **trên** giá (neo vào kháng cự), kèm SL/TP và hạn `expiryBars`. Hướng lấy theo dấu điểm; điểm quá yếu (`|điểm| < minLeanScore`) thì trả **cả hai** vùng thành kế hoạch giao dịch biên độ. Đây là lệnh limit thật, **không phải** mốc phá vỡ của `buildProjections`.
 - `buildProjections(snapshot, risk)` → hai kịch bản lên/xuống, mỗi cái có điều kiện kích hoạt (đóng nến qua mức S/R thật kèm số lần chạm), entry, SL đặt ngoài mức cấu trúc, TP, và điều kiện vô hiệu. `primary` là kịch bản đang được điểm ủng hộ — **thứ tự ưu tiên suy từ điểm, không phải xác suất thống kê**.

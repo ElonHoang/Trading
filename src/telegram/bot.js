@@ -14,7 +14,7 @@ import { readWatchlist, addSymbol, removeSymbol } from '../data/watchlist.js';
 import { readSubscribers, addSubscriber, removeSubscriber } from '../data/subscribers.js';
 import { createMonitor } from './monitor.js';
 import { buildContext } from '../analysis/context.js';
-import { buildSetup, buildProjections } from '../analysis/setup.js';
+import { buildSetup, buildProjections, buildLimitPlan } from '../analysis/setup.js';
 import { buildCaption, buildQuoteMessage, splitCaption, buildTpUpdate } from './caption.js';
 import { setCallMessages } from '../data/open-calls.js';
 
@@ -133,6 +133,7 @@ async function evaluateOn(symbolInput, interval, strategy) {
     snapshot,
     setup: context ? buildSetup(snapshot, context, { consensusPercent }) : dry,
     projections: buildProjections(snapshot, strategy.risk),
+    limitPlan: buildLimitPlan(snapshot, strategy.risk),
   };
 }
 
@@ -162,17 +163,17 @@ async function evaluateBestInterval(symbolInput, strategy) {
 async function sendAnalysis(ctx, symbolInput, interval, { edit = false } = {}) {
   const strategy = await loadStrategy();
   // interval = null -> tự chọn khung theo CALL_INTERVALS.
-  const { snapshot: payload, setup, projections } = interval
+  const { snapshot: payload, setup, projections, limitPlan } = interval
     ? await evaluateOn(symbolInput, interval, strategy)
     : await evaluateBestInterval(symbolInput, strategy);
 
   const photo = new InputFile(
-    renderAnalysisPng(payload, { setup, projections }),
+    renderAnalysisPng(payload, { setup, limitPlan, projections }),
     `${payload.symbol}-${payload.interval}.png`,
   );
   // Template đầy đủ có thể vượt 1024 ký tự -> tách phần dư sang tin nhắn riêng
   // thay vì cắt mất kịch bản chờ.
-  const { caption, rest } = splitCaption(buildCaption(payload, { setup, projections }));
+  const { caption, rest } = splitCaption(buildCaption(payload, { setup, limitPlan }));
   const reply_markup = intervalKeyboard(payload.symbol, payload.interval);
 
   if (edit) {
@@ -329,13 +330,9 @@ const monitor = createMonitor({
       }
     };
 
-    // Báo hiếm khi có 3 SL liên tiếp: bot đã kiểm chứng và chỉ đổi cấu hình khi
-    // giảm drawdown trong cả tập cũ lẫn tập dữ liệu mới hơn.
-    if (payload.kind === 'auto-retune') {
-      return send((id) => bot.api.sendMessage(id, payload.text, {
-        link_preview_options: { is_disabled: true },
-      }));
-    }
+    // Báo cáo tự kiểm chứng sau 3 SL liên tiếp KHÔNG còn gửi vào chat: nó chỉ
+    // sinh ra trên đường SL, mà chat giờ chỉ nhận ba mẫu tin (call kèo, chạm TP,
+    // tổng hợp ngày). `monitor` ghi thẳng nó ra log của tiến trình.
 
     // --- Chạm TP: theo template "cấu trúc sau khi done tp call kèo" ---
     if (payload.kind === 'progress' || payload.kind === 'tp') {
@@ -350,6 +347,11 @@ const monitor = createMonitor({
     }
 
     // --- Kèo đã chốt ---
+    //
+    // `monitor` đã lọc trước: kèo chết trắng tay (SL/hết hạn mà chưa chạm TP nào)
+    // không tới được đây. Còn lại là kèo chạm TP cuối, và kèo đã ăn ít nhất một
+    // TP rồi mới quay đầu — loại sau vẫn phải báo vì người đọc đang giữ phần còn
+    // lại của lệnh.
     if (payload.kind === 'closed') {
       const { call, result } = payload;
       const strategy = await loadStrategy();
@@ -385,15 +387,15 @@ const monitor = createMonitor({
     }
 
     // --- Call kèo mới ---
-    const { snapshot, setup, projections, changedFrom } = payload;
+    const { snapshot, setup, projections, limitPlan, changedFrom } = payload;
     const photo = new InputFile(
-      renderAnalysisPng(snapshot, { setup, projections }),
+      renderAnalysisPng(snapshot, { setup, limitPlan, projections }),
       `${snapshot.symbol}-${snapshot.interval}.png`,
     );
     const head = changedFrom
       ? `🔔 ${changedFrom} → ${setup.signal}\n`
       : '🔔 KÈO MỚI\n';
-    const { caption, rest } = splitCaption(head + buildCaption(snapshot, { setup, projections }));
+    const { caption, rest } = splitCaption(head + buildCaption(snapshot, { setup, limitPlan }));
     // Giữ message id để tin cập nhật TP sau này reply vào đúng kèo gốc.
     const messages = {};
     await send(async (id) => {

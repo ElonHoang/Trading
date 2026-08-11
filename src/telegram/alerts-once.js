@@ -5,7 +5,7 @@ import { Bot, InputFile } from 'grammy';
 
 import { analyze } from '../analysis/engine.js';
 import { buildContext } from '../analysis/context.js';
-import { buildSetup, buildProjections } from '../analysis/setup.js';
+import { buildSetup, buildProjections, buildLimitPlan } from '../analysis/setup.js';
 import { renderAnalysisPng } from '../chart/png.js';
 import { loadStrategy } from '../config.js';
 import { resolveSymbol, screenSymbols } from '../data/binance.js';
@@ -80,6 +80,7 @@ async function evaluateOn(symbolInput, interval, strategy) {
     snapshot,
     setup: context ? buildSetup(snapshot, context, { consensusPercent }) : dry,
     projections: buildProjections(snapshot, strategy.risk),
+    limitPlan: buildLimitPlan(snapshot, strategy.risk),
   };
 }
 
@@ -132,11 +133,9 @@ const monitor = createMonitor({
       }
     };
 
-    if (payload.kind === 'auto-retune') {
-      return send((id) => bot.api.sendMessage(id, payload.text, {
-        link_preview_options: { is_disabled: true },
-      }));
-    }
+    // Báo cáo tự kiểm chứng sau 3 SL liên tiếp KHÔNG còn gửi vào chat: nó chỉ
+    // sinh ra trên đường SL, mà chat giờ chỉ nhận ba mẫu tin (call kèo, chạm TP,
+    // tổng hợp ngày). `monitor` ghi thẳng nó ra log của runner.
 
     if (payload.kind === 'progress' || payload.kind === 'tp') {
       const { call, hitTps } = payload;
@@ -148,6 +147,10 @@ const monitor = createMonitor({
       }));
     }
 
+    // `monitor` đã lọc trước: kèo chết trắng tay (SL/hết hạn mà chưa chạm TP nào)
+    // không tới được đây. Còn lại là kèo chạm TP cuối, và kèo đã ăn ít nhất một
+    // TP rồi mới quay đầu — loại sau vẫn phải báo vì người đọc đang giữ phần còn
+    // lại của lệnh.
     if (payload.kind === 'closed') {
       const { call, result } = payload;
       const strategy = await loadActionStrategy();
@@ -180,15 +183,15 @@ const monitor = createMonitor({
       return send((id) => bot.api.sendMessage(id, text, { parse_mode: 'HTML', ...reply(id) }));
     }
 
-    const { snapshot, setup, projections, changedFrom } = payload;
+    const { snapshot, setup, projections, limitPlan, changedFrom } = payload;
     const photo = new InputFile(
-      renderAnalysisPng(snapshot, { setup, projections }),
+      renderAnalysisPng(snapshot, { setup, limitPlan, projections }),
       `${snapshot.symbol}-${snapshot.interval}.png`,
     );
     const heading = changedFrom
       ? `🔔 ${changedFrom} → ${setup.signal}\n`
       : '🔔 KÈO MỚI\n';
-    const { caption, rest } = splitCaption(heading + buildCaption(snapshot, { setup, projections }));
+    const { caption, rest } = splitCaption(heading + buildCaption(snapshot, { setup, limitPlan }));
     const messages = {};
     await send(async (id) => {
       const sent = await bot.api.sendPhoto(id, photo, { caption, parse_mode: 'HTML' });

@@ -215,6 +215,130 @@ function stopFor(entry, isLong, levels, slPercent) {
 }
 
 /**
+ * LỆNH CHỜ (LIMIT) thật: giá đặt sẵn ở một VÙNG, chờ giá quay lại khớp — không
+ * phải vào ngay giá hiện tại, và cũng không phải lệnh stop kiểu "phá lên thì mua".
+ *
+ * Phân biệt cho rõ, vì trước đây khối LIMIT trong tin nhắn in mốc PHÁ VỠ:
+ *  - buy limit  luôn nằm DƯỚI giá hiện tại (mua rẻ hơn ở hỗ trợ)
+ *  - sell limit luôn nằm TRÊN giá hiện tại (bán đắt hơn ở kháng cự)
+ * Đặt ngược lại thì sàn khớp ngay lập tức, tức là lệnh thị trường trá hình.
+ *
+ * Vùng neo vào mức S/R thật gần nhất nằm trong khoảng `minDistancePercent`–
+ * `maxDistancePercent`: gần hơn thì chẳng khác gì vào ngay, xa hơn thì gần như
+ * không bao giờ khớp. Không có mức nào lọt khoảng đó mới lùi theo % cứng.
+ *
+ * @param snapshot  kết quả engine.analyze()
+ * @param risk      strategy.risk (đọc thêm nhánh risk.limitOrder)
+ */
+export function buildLimitPlan(snapshot, risk = {}) {
+  // Số trong câu chữ tiếng Việt dùng dấu phẩy thập phân như mọi chỗ khác.
+  const vi = (n) => String(n).replace('.', ',');
+  const price = snapshot.price.lastClose;
+  const sr = snapshot.structure ?? { support: [], resistance: [] };
+  const cfg = risk.limitOrder ?? {};
+  const minDistance = cfg.minDistancePercent ?? 0.5;
+  const maxDistance = cfg.maxDistancePercent ?? 4;
+  const zoneWidthR = cfg.zoneWidthR ?? 0.3;
+  const maxZoneFraction = cfg.maxZoneFractionOfDistance ?? 0.5;
+  const pullback = cfg.fallbackPullbackPercent ?? 1.5;
+  const expiryBars = cfg.expiryBars ?? 6;
+  const minLeanScore = cfg.minLeanScore ?? 10;
+  const slPercent = risk.slPercent ?? 2.5;
+  const tpR = risk.takeProfitR ?? [1, 2, 3];
+
+  const build = (isLong) => {
+    // S/R từ engine đã lọc đúng phía giá và xếp gần trước, nên `find` đầu tiên
+    // lọt khoảng cách là mức gần nhất dùng được.
+    const levels = (isLong ? sr.support : sr.resistance) ?? [];
+    const level = levels.find((l) => {
+      if (isLong ? !(l.price < price) : !(l.price > price)) return false;
+      const dist = (Math.abs(price - l.price) / price) * 100;
+      return dist >= minDistance && dist <= maxDistance;
+    }) ?? null;
+
+    const anchor = level
+      ? level.price
+      : price * (isLong ? 1 - pullback / 100 : 1 + pullback / 100);
+
+    // Vùng đặt lệnh nằm về phía GIÁ HIỆN TẠI so với mức neo, không xuyên qua nó:
+    // giá thường quay đầu ngay TRÊN hỗ trợ, đặt xuyên xuống là bỏ lỡ kèo.
+    //
+    // Bề rộng phải bị KẸP theo khoảng cách tới mức neo. Với slPercent 4 thì
+    // baseRisk × 0,3 đã là 1,2% giá, đủ để mép vùng bò lên sát giá hiện tại và
+    // entry thành "vào ngay" trá hình — đúng thứ khối này sinh ra để tránh.
+    const baseRisk = anchor * (slPercent / 100);
+    const gap = Math.abs(price - anchor);
+    const width = Math.min(baseRisk * zoneWidthR, gap * maxZoneFraction);
+    const zone = isLong
+      ? { low: anchor, high: anchor + width }
+      : { low: anchor - width, high: anchor };
+    const entry = (zone.low + zone.high) / 2;
+
+    // SL tính thẳng theo % giá từ entry, KHÔNG bám S/R kể cả khi
+    // risk.preferSrLevels bật: entry đã nằm ngay tại mức cấu trúc rồi, bám tiếp
+    // mức kế dưới sẽ cho SL nằm gọn trong biên độ nhiễu (xem _notePreferSrLevels).
+    const stopLoss = isLong ? entry - baseRisk : entry + baseRisk;
+    const r = Math.abs(entry - stopLoss);
+    const targets = tpR.map((mult, i) => ({
+      label: `TP${i + 1}`,
+      r: mult,
+      price: isLong ? entry + r * mult : entry - r * mult,
+    }));
+
+    const ahead = ((isLong ? sr.resistance : sr.support) ?? [])
+      .filter((l) => (isLong ? l.price > entry : l.price < entry))
+      .slice(0, 3)
+      .map((l) => ({ price: l.price, touches: l.touches, distancePct: l.distancePct }));
+    const firstStruct = ahead[0];
+
+    return {
+      direction: isLong ? 'long' : 'short',
+      label: isLong ? 'Mua chờ (buy limit)' : 'Bán chờ (sell limit)',
+      anchor,
+      fromStructure: Boolean(level),
+      anchorTouches: level ? level.touches : null,
+      basis: level
+        ? `${isLong ? 'hỗ trợ' : 'kháng cự'} ${level.price} (${level.touches} lần chạm)`
+        : `lùi ${vi(pullback)}% từ giá — không có mức cấu trúc nào trong `
+          + `${vi(minDistance)}–${vi(maxDistance)}%`,
+      zone,
+      entry,
+      // Âm = vùng nằm dưới giá hiện tại (buy limit), dương = nằm trên (sell limit).
+      distancePercent: ((entry - price) / price) * 100,
+      stopLoss,
+      riskPerUnit: r,
+      riskPercent: (r / entry) * 100,
+      targets,
+      structureTargets: ahead,
+      // Như buildProjections: R:R tới TP1 luôn bằng bội số R nên vô nghĩa, đo tới
+      // mức cấu trúc gần nhất mới biết còn bao nhiêu room.
+      rrToStructure: firstStruct && r > 0
+        ? Number((Math.abs(firstStruct.price - entry) / r).toFixed(2)) : null,
+      structureTargetLabel: firstStruct
+        ? `${firstStruct.price} (${firstStruct.touches} lần chạm)` : null,
+      // Lệnh chờ phải có hạn: bằng chứng dòng tiền tính trên nến đã đóng, để treo
+      // vô thời hạn thì lúc khớp bối cảnh đã khác hẳn lúc chấm điểm.
+      expiryBars,
+    };
+  };
+
+  // Hướng lấy theo điểm kỹ thuật. Điểm quá yếu (|điểm| < minLeanScore) thì không
+  // có phía nào đáng ưu tiên -> đưa cả hai vùng, thành kế hoạch giao dịch biên độ.
+  const score = snapshot.combined.score;
+  const lean = score >= minLeanScore ? 'long' : score <= -minLeanScore ? 'short' : null;
+  const orders = lean === 'long' ? [build(true)]
+    : lean === 'short' ? [build(false)]
+      : [build(true), build(false)];
+
+  return {
+    price,
+    lean,
+    leanBasis: `điểm tổng hợp ${score > 0 ? '+' : ''}${score}`,
+    orders,
+  };
+}
+
+/**
  * Phép chiếu hai chiều: nếu giá đi lên thì vào đâu, và nếu giá đi xuống thì vào
  * đâu — mỗi kịch bản có điều kiện kích hoạt, entry, SL, TP và điều kiện vô hiệu.
  *

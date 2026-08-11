@@ -25,7 +25,7 @@ function candlesOf(snapshot) {
 
 /**
  * @param deps.listTargets  () => Promise<[{ symbol, interval }]>
- * @param deps.evaluate     ({symbol, interval}) => Promise<{ snapshot, setup, projections }>
+ * @param deps.evaluate     ({symbol, interval}) => Promise<{ snapshot, setup, projections, limitPlan }>
  * @param deps.notify       (payload) => Promise<void>
  * @param deps.loadStrategy () => Promise<strategy>
  * @param deps.log          (msg) => void
@@ -98,7 +98,7 @@ export function createMonitor({
         const key = `${target.symbol}|${target.interval ?? 'auto'}`;
         const prev = state.get(key) ?? {};
         try {
-          const { snapshot, setup, projections } = await evaluate(target);
+          const { snapshot, setup, projections, limitPlan } = await evaluate(target);
           const candleTime = Date.parse(snapshot.lastClosedCandleTime);
           const existing = open[snapshot.symbol];
 
@@ -128,12 +128,32 @@ export function createMonitor({
               // chặn vòng quét chính; lần sau bot vẫn tiếp tục thu thập lại.
               log(`[monitor] không lưu được kết quả kèo ${snapshot.symbol}: ${error.message}`);
             }
-            await notify({ kind: 'closed', call: existing, result, snapshot });
+            // Chỉ IM LẶNG với kèo chết trắng tay: dính SL (hoặc hết hạn) mà chưa
+            // chốt được TP nào. Đó là loại tin duy nhất bị bỏ — chat còn lại ba
+            // mẫu: call kèo, chạm TP, tổng hợp cuối ngày.
+            //
+            // Kèo ĐÃ chốt TP1 rồi mới quay đầu (`breakeven`, hoặc hết hạn sau khi
+            // đã ăn TP) vẫn báo bình thường: người đọc đã nhận tin "chốt một phần
+            // ở TP1, dời SL về entry", im luôn ở đây thì kèo treo lơ lửng và họ
+            // không biết phần còn lại đã đóng.
+            //
+            // Im lặng KHÔNG làm mất số liệu: `recordClosedTrade` ngay trên đã ghi
+            // đủ kết quả, nên bản tổng hợp ngày vẫn đếm đúng số kèo thua và
+            // `auto-retune` vẫn thấy đủ chuỗi SL.
+            if (result.status === 'target' || result.hitTps.length > 0) {
+              await notify({ kind: 'closed', call: existing, result, snapshot });
+            } else {
+              log(`[monitor] ${snapshot.symbol} ${snapshot.interval} chốt `
+                + `${result.status} khi chưa chạm TP nào — không báo, `
+                + `để dành cho bản tổng hợp ngày.`);
+            }
             if (result.status === 'stopped' && recorded) {
               try {
                 const retune = await runAutoRetune({ strategy, state: recorded.state });
                 const text = formatAutoRetuneReport(retune);
-                if (text) await notify({ kind: 'auto-retune', report: retune, text });
+                // Báo cáo tự kiểm chứng chỉ sinh ra trên đường SL, nên nó cũng
+                // không được bắn vào chat — ghi ra log của runner là đủ.
+                if (text) log(`[monitor] tự kiểm chứng sau chuỗi SL:\n${text}`);
               } catch (error) {
                 log(`[monitor] tự kiểm chứng sau SL lỗi: ${error.message}`);
               }
@@ -195,7 +215,7 @@ export function createMonitor({
 
           await notify({
             kind: 'call',
-            target, snapshot, setup, projections,
+            target, snapshot, setup, projections, limitPlan,
             changedFrom: prev.lastSignal ?? null,
             interval: snapshot.interval,
           });

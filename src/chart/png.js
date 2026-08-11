@@ -43,7 +43,7 @@ if (FONT === 'sans-serif') {
  */
 export function renderAnalysisPng(snap, {
   width = 1280, priceHeight = 560, cvdHeight = 210, scale = 2, setup = null,
-  projections = null, maxBars = null,
+  limitPlan = null, projections = null, maxBars = null,
 } = {}) {
   const s = snap.series;
   if (!s || !s.close?.length) throw new Error('Snapshot thiếu series — gọi analyze với includeSeries');
@@ -54,6 +54,22 @@ export function renderAnalysisPng(snap, {
   // là CHỜ. Nếu không thì ảnh mất hẳn hộp Long/Short mỗi khi cổng đồng thuận
   // chặn, và người xem không biết cần chờ mốc nào.
   let box = hasSetup ? setup : null;
+
+  // Ưu tiên vùng LỆNH CHỜ, vì đó chính là cái caption đang in — ảnh vẽ mốc phá
+  // vỡ trong khi tin nhắn nói vùng limit là hai lời khuyên khác nhau.
+  if (!box && limitPlan?.orders?.length) {
+    const pick = limitPlan.orders.find((o) => o.direction === limitPlan.lean);
+    if (pick) {
+      box = {
+        side: pick.direction,
+        entry: pick.entry,
+        stopLoss: pick.stopLoss,
+        targets: pick.targets,
+        rrToTp1: pick.rrToStructure,
+        pending: true,
+      };
+    }
+  }
   if (!box && projections) {
     const pick = projections.primary === 'short' ? projections.down
       : projections.primary === 'long' ? projections.up : null;

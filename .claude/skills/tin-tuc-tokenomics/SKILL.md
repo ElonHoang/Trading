@@ -15,11 +15,12 @@ Diễn giải bằng **luật cứng**, không dùng LLM — mọi kết luận 
 
 ```js
 import { buildContext } from './src/analysis/context.js';
-import { buildSetup, buildProjections } from './src/analysis/setup.js';
+import { buildSetup, buildProjections, buildLimitPlan } from './src/analysis/setup.js';
 
 const context = await buildContext(snapshot.symbol);   // null-safe từng nguồn
 const setup = buildSetup(snapshot, context);           // gộp kỹ thuật + bối cảnh
 const projections = buildProjections(snapshot, strategy.risk);
+const limitPlan = buildLimitPlan(snapshot, strategy.risk);   // vùng đặt lệnh chờ khi chưa vào ngay
 ```
 
 `buildContext` không bao giờ throw vì lỗi mạng — nguồn nào lỗi thì phần đó là `null` và có `warnings` giải thích. Bối cảnh là lớp phụ, **không được chặn phần kỹ thuật**.
