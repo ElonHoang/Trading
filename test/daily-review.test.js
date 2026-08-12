@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { applyActiveTuning } from '../src/analysis/auto-retune.js';
 import {
-  buildReviewCandidates, compareDailyPerformance, runDailyReview,
+  buildReviewCandidates, compareDailyPerformance, formatDailyReview, runDailyReview, summarizeCalls,
 } from '../src/analysis/daily-review.js';
 import { evaluateEntryQuality } from '../src/analysis/entry-quality.js';
 import { buildLearningRecord } from '../src/analysis/learning-log.js';
@@ -280,4 +280,28 @@ test('limit order uses the anchored limit price, not the zone midpoint or curren
   });
   assert.match(caption, /Entry LIMIT \(giá đặt lệnh\): <b>99,50<\/b>/);
   assert.match(caption, /KHÔNG vào giá hiện tại/);
+});
+
+test('daily summary follows the custom W/L/H form and shows PnL for 200 USD per trade', () => {
+  const trades = [
+    trade('2026-08-11', 'target', { index: 1 }),
+    trade('2026-08-11', 'stopped', { index: 2 }),
+    trade('2026-08-11', 'breakeven', { index: 3 }),
+    trade('2026-08-11', 'expired', { index: 4 }),
+  ];
+  const summary = summarizeCalls(trades, { capitalPerTradeUsd: 200 });
+  assert.deepEqual([summary.win, summary.loss, summary.draw], [1, 1, 1]);
+  assert.equal(summary.closed, 4);
+  assert.equal(summary.expired, 1);
+  assert.equal(summary.pnlUsd, Number((summary.pnlPercent * 2).toFixed(2)));
+
+  const text = formatDailyReview({
+    status: 'on-target', summary, target: 30,
+    window: { label: 'NGÀY 11/08/2026' }, comparison: null,
+  });
+  assert.match(text, /🌟 <b>Tổng Quan Hiệu Suất<\/b>/);
+  assert.match(text, /Tổng số lệnh: <b>4<\/b>/);
+  assert.match(text, /Tỉ lệ W\/L\/H: <b>1 W - 1 L - 1 H<\/b>/);
+  assert.match(text, /Giả định vốn vào mọi lệnh bằng nhau \(200\$\)/);
+  assert.doesNotMatch(text, /Thị trường chung/);
 });

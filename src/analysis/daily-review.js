@@ -84,6 +84,7 @@ export function reviewWindow(cfg = {}, now = Date.now()) {
  */
 export function summarizeCalls(trades, {
   sinceMs = null, untilMs = null, partialFraction = 0.5, feePercent = 0.06,
+  capitalPerTradeUsd = 200,
 } = {}) {
   const inWindow = sinceMs == null && untilMs == null
     ? [...trades]
@@ -104,26 +105,24 @@ export function summarizeCalls(trades, {
   // MỌI KÈO VÀO CÙNG MỘT CỠ VỐN — đúng với kiểu kênh tín hiệu, và là cách duy
   // nhất tính được vì bot không biết ai vào bao nhiêu.
   const pnls = new Map(inWindow.map((t) => [t, tradeReturnPercent(t, { partialFraction, feePercent })]));
-  const pnlOf = (t) => pnls.get(t) ?? 0;
   const measured = inWindow.filter((t) => pnls.get(t) != null);
 
-  // W/L/H theo mẫu tin: thắng = chạm TP cuối, thua = dính SL khi chưa chốt phần
-  // nào, hoà = đã chốt TP1 rồi về entry. Kèo HẾT HẠN không nằm trong ba loại
-  // trên nên xếp theo số tiền nó thật sự mang lại, chứ không mặc định gọi là hoà.
-  const expiredWin = expired.filter((t) => pnlOf(t) > 0.05);
-  const expiredLoss = expired.filter((t) => pnlOf(t) < -0.05);
-
+  const pnlPercent = measured.length
+    ? round(measured.reduce((sum, t) => sum + (pnls.get(t) ?? 0), 0), 2) : null;
   return {
     closed,
     lost: lost.length,
     breakeven: breakeven.length,
     won: won.length,
     expired: expired.length,
-    win: won.length + expiredWin.length,
-    loss: lost.length + expiredLoss.length,
-    draw: breakeven.length + (expired.length - expiredWin.length - expiredLoss.length),
-    pnlPercent: measured.length
-      ? round(measured.reduce((sum, t) => sum + pnlOf(t), 0), 2) : null,
+    // W/L/H theo đúng form: hết hạn không bị ép vào bất kỳ nhóm nào.
+    win: won.length,
+    loss: lost.length,
+    draw: breakeven.length,
+    pnlPercent,
+    capitalPerTradeUsd,
+    // Mỗi lệnh dùng cùng một lượng vốn, nên tổng tiền = tổng % × vốn/lệnh.
+    pnlUsd: pnlPercent == null ? null : round(capitalPerTradeUsd * pnlPercent / 100, 2),
     // Kèo thiếu giá thoát (dữ liệu cũ) bị loại khỏi tổng PnL — nói ra để không
     // ai đọc nhầm là đã tính đủ.
     pnlFromTrades: measured.length,
@@ -525,10 +524,12 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     // một quy ước riêng cho báo cáo.
     partialFraction: Number(strategy.risk?.partialFraction ?? 0.5),
     feePercent: Number(cfg.feePercent ?? 0.06),
+    capitalPerTradeUsd: Number(cfg.assumedCapitalPerTradeUsd ?? 200),
   });
   const comparison = compareDailyPerformance(state.trades ?? [], cfg, now, {
     partialFraction: Number(strategy.risk?.partialFraction ?? 0.5),
     feePercent: Number(cfg.feePercent ?? 0.06),
+    capitalPerTradeUsd: Number(cfg.assumedCapitalPerTradeUsd ?? 200),
   });
   base.comparison = compactComparison(comparison);
   const minTrades = Math.max(3, Number(cfg.minClosedTrades ?? 10));
@@ -887,19 +888,29 @@ export function formatDailyReview(report) {
   if (report.status === 'disabled') return null;
   if (report.status === 'too-soon') return null;
 
-  // ---- Khối tổng quan, theo đúng mẫu "Cấu trúc form tổng hợp ... trong 1 ngày" ----
-  const m = report.market;
-  const market = !m || m.error
-    ? `— (không đọc được ${m?.symbol ?? 'BTC'}${m?.error ? `: ${m.error}` : ''})`
-    : `${m.label} (${m.symbol} ${m.changePercent >= 0 ? '+' : ''}${vi(m.changePercent)}% trong kỳ)`;
+  // ---- Khối tổng quan, theo form người dùng định nghĩa trong CLAUDE.md ----
+  const capital = Number(s.capitalPerTradeUsd ?? 200);
+  const pnl = s.pnlPercent;
+  const pnlUsd = s.pnlUsd;
+  const pnlText = pnl == null || pnlUsd == null
+    ? '—'
+    : `${pnlUsd >= 0 ? '🟢 +' : '🔴 '}${vi(pnlUsd.toFixed(2))}$ `
+      + `(${pnl >= 0 ? '+' : ''}${vi(pnl.toFixed(2))}%)`;
 
-  L.push('🌟 <b>TỔNG QUAN HIỆU SUẤT TRONG NGÀY</b> 🌟');
+  L.push('🌟 <b>Tổng Quan Hiệu Suất</b>');
+  L.push(`Tổng số lệnh: <b>${s.closed}</b>`);
+  L.push('<i>Không bao gồm các kèo đang mở.</i>');
   L.push('');
+  L.push(`Tỉ lệ W/L/H: <b>${s.win ?? s.won} W - ${s.loss ?? s.lost} L - ${s.draw ?? s.breakeven} H</b>`);
+  L.push('Win (W): Kèo chạm đến TP cuối cùng.');
+  L.push('Loss (L): Kèo dính SL khi chưa kịp chốt lời phần nào.');
+  L.push('Hòa (H): Kèo đã chốt lời ở TP1 nhưng sau đó quay lại cắn Entry.');
+  L.push('');
+  L.push(`Tổng Lợi nhuận (PnL): <b>${s.closed ? pnlText : '0,00$ (+0,00%)'}</b>`);
+  L.push(`Điều kiện tính toán: Giả định vốn vào mọi lệnh bằng nhau (${vi(capital)}$) và chưa nhân đòn bẩy. Đã trừ phí sàn cho mỗi lần thoát lệnh.`);
 
   // Chỉ đếm kèo ĐÃ CHỐT trong kỳ; kèo còn chạy nằm ngoài mọi con số dưới đây.
   if (!s.closed) {
-    L.push('🔹 Tổng số lệnh đã call: 0 lệnh');
-    L.push(`🔹 Thị trường chung: ${market}`);
     L.push('');
     L.push(`Không có kèo nào chốt trong ${report.window?.label ?? 'kỳ này'} — kèo đang mở `
       + 'chưa tính, chờ chạm SL/TP.');
@@ -909,11 +920,6 @@ export function formatDailyReview(report) {
     return L.join('\n');
   }
 
-  const pnl = s.pnlPercent;
-  L.push(`🔹 Tổng số lệnh đã call: ${s.closed} lệnh`);
-  L.push(`🔹 Tỉ lệ (Win/Loss/Hòa): ${s.win ?? s.won} W - ${s.loss ?? s.lost} L - ${s.draw ?? s.breakeven} H`);
-  L.push(`🔹 Tổng Lợi nhuận (PnL): ${pnl == null ? '—' : `${pnl >= 0 ? '🟢 +' : '🔴 '}${vi(pnl)} %`}`);
-  L.push(`🔹 Thị trường chung: ${market}`);
   pushDailyComparison(L, report);
   pushActiveTuning(L, report);
 
@@ -922,12 +928,8 @@ export function formatDailyReview(report) {
     + 'kèo đang mở chưa vào sổ');
   L.push(`Đã đóng ${s.closed} kèo: 🎯 ${s.won} chạm TP · 🛑 ${s.lost} dính SL · 🛡 ${s.breakeven} về hoà vốn · ⏱ ${s.expired} hết hạn`);
   L.push(`<b>Tỉ lệ thua ${pct(s.lossRatePercent)}</b> (không tính ${s.breakeven} kèo đã chốt TP1 rồi mới về entry)`);
-  if (pnl != null) {
-    L.push('PnL là tổng % của từng kèo — mỗi kèo một cỡ vốn như nhau, đã trừ phí, '
-      + '<b>chưa nhân đòn bẩy</b>, và tính theo đúng cách thoát lệnh đã dặn (chốt một phần ở TP1).'
-      + (s.pnlFromTrades != null && s.pnlFromTrades < s.closed
-        ? ` Chỉ cộng được ${s.pnlFromTrades}/${s.closed} kèo, số còn lại thiếu giá thoát trong nhật ký.`
-        : ''));
+  if (pnl != null && s.pnlFromTrades != null && s.pnlFromTrades < s.closed) {
+    L.push(`⚠️ Chỉ cộng được PnL của ${s.pnlFromTrades}/${s.closed} kèo; số còn lại thiếu giá thoát trong nhật ký.`);
   }
   if (s.lossRateExcludingBreakevenPercent != null && s.breakeven > 0) {
     L.push(`Nếu bỏ hẳn kèo hoà vốn khỏi mẫu số: ${pct(s.lossRateExcludingBreakevenPercent)}`);

@@ -332,18 +332,19 @@ trong `data/open-calls.json`.
 
 ## Cấu trúc form tổng hợp các kèo đã call trong 1 ngày
 
-🌟 TỔNG QUAN HIỆU SUẤT TRONG NGÀY 🌟
+🌟"Tổng Quan Hiệu Suất"
+Tổng số lệnh:
 
-🔹 Tổng số lệnh đã call: [Số lượng] lệnh
-🔹 Tỉ lệ (Win/Loss/Hòa): [Số] W - [Số] L - [Số] H
-🔹 Tổng Lợi nhuận (PnL): 🟢 [+ X %]
-🔹 Thị trường chung: [Sideway / Uptrend...]
+Không bao gồm các kèo đang mở.
 
-Bốn dòng này là **phần đầu** của bản rà soát; chẩn đoán lệnh thua, post-mortem và đề xuất chỉnh cấu hình vẫn nằm bên dưới — đó là lý do job này tồn tại, bỏ đi thì nó chỉ còn là bảng điểm.
+Tỉ lệ W/L/H:
 
-Từng con số lấy ở đâu, và giới hạn của nó:
+Win (W): Kèo chạm đến TP cuối cùng.
 
-- **Số lệnh** = kèo đã CHỐT trong cửa sổ, không phải số kèo đã bắn. Kèo đang mở không bao giờ được tính (`recordClosedTrade` chỉ chạy lúc chạm SL/TP/hết hạn).
-- **W/L/H**: W = chạm TP cuối, L = dính SL khi chưa chốt phần nào, H = đã chốt TP1 rồi mới về entry. Kèo **hết hạn giữ** không thuộc ba loại trên nên được xếp theo số tiền nó thật sự mang lại, chứ không mặc định gọi là hoà.
-- **PnL** (`tradeReturnPercent`, ở `src/analysis/trade-pnl.js` và cũng là hàm tin đóng kèo dùng) cộng % của từng kèo, giả định **mọi kèo cùng một cỡ vốn** — bot không biết ai vào bao nhiêu — và **chưa nhân đòn bẩy**. Cách thoát lệnh lấy đúng `risk.partialFraction` + `exitStrategy: scaled` như backtest, nên con số này so được với `expectancyPercent`. Phí trừ trên **mỗi lần thoát** (`dailyReview.feePercent`). Phần chốt ở TP2 **không** được mô phỏng vì `checkCall` chỉ ghi TP nào đã chạm chứ không lưu giá thoát từng phần, nên kèo chạy tới TP cuối bị tính thấp hơn thực tế một chút — cố ý bảo thủ.
-- **Thị trường chung** = biên độ ròng của `dailyReview.marketSymbol` trong đúng cửa sổ rà soát, ngưỡng `marketTrendPercent`. Chỉ mô tả bối cảnh cho người đọc, **không cộng điểm và không đổi quyết định nào**. Lỗi mạng thì in "không đọc được", không làm chết bản rà soát.
+Loss (L): Kèo dính SL khi chưa kịp chốt lời phần nào.
+
+Hòa (H): Kèo đã chốt lời ở TP1 nhưng sau đó quay lại cắn Entry.
+
+Tổng Lợi nhuận (PnL):
+
+Điều kiện tính toán: Giả định vốn vào mọi lệnh là bằng nhau (200$) và chưa nhân đòn bẩy. Đã trừ phí sàn cho mỗi lần thoát lệnh.
