@@ -1,0 +1,283 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { applyActiveTuning } from '../src/analysis/auto-retune.js';
+import {
+  buildReviewCandidates, compareDailyPerformance, runDailyReview,
+} from '../src/analysis/daily-review.js';
+import { evaluateEntryQuality } from '../src/analysis/entry-quality.js';
+import { buildLearningRecord } from '../src/analysis/learning-log.js';
+import { buildLimitPlan } from '../src/analysis/setup.js';
+import { buildCaption } from '../src/telegram/caption.js';
+
+const now = Date.parse('2026-08-12T01:00:00.000Z');
+
+function trade(date, status, { interval = '4h', side = 'long', index = 0 } = {}) {
+  const entry = 100;
+  return {
+    id: `${date}-${status}-${index}`,
+    symbol: 'BTCUSDT', interval, side, entry, stopLoss: 96,
+    closedAt: `${date}T05:00:00.000Z`,
+    targets: [{ label: 'TP1', price: 103 }, { label: 'TP2', price: 106 }],
+    result: {
+      status,
+      hitTps: status === 'target' ? ['TP1', 'TP2'] : [],
+      lastPrice: status === 'target' ? 106 : 96,
+    },
+    evidence: { score: 40, consensusPercent: 70, riskPercent: 4, cvdSlope: 0.05, volumeRatio: 1.2 },
+  };
+}
+
+function day(date, losses, wins) {
+  return [
+    ...Array.from({ length: losses }, (_, index) => trade(date, 'stopped', { index })),
+    ...Array.from({ length: wins }, (_, index) => trade(date, 'target', { index: losses + index })),
+  ];
+}
+
+test('compareDailyPerformance detects a repeated multi-day SL problem in UTC+7', () => {
+  const trades = [
+    ...day('2026-08-08', 2, 1),
+    ...day('2026-08-09', 1, 2),
+    ...day('2026-08-10', 2, 1),
+  ];
+  const result = compareDailyPerformance(trades, {
+    windowMode: 'calendar-day', dayOffsetHours: 7, dayOffsetDays: -1,
+    comparisonDays: 7, minClosedTradesPerDay: 3, minBadDays: 2,
+    targetLossRatePercent: 30,
+  }, now);
+
+  assert.equal(result.days.length, 7);
+  assert.equal(result.days.at(-1).date, '2026-08-11');
+  assert.equal(result.aggregate.closed, 9);
+  assert.equal(result.badDays, 3);
+  assert.equal(result.repeatedIssue, true);
+  assert.equal(result.persistent.byInterval[0].key, '4h');
+});
+
+test('applyActiveTuning overlays persisted changes without mutating the base strategy', () => {
+  const base = { risk: { slPercent: 4, takeProfitR: [0.75, 1.5] } };
+  const effective = applyActiveTuning(base, {
+    activeTuning: { changes: { 'risk.slPercent': 4.5 } },
+  });
+  assert.equal(effective.risk.slPercent, 4.5);
+  assert.equal(base.risk.slPercent, 4);
+});
+
+test('entry quality rejects a wrong-structure, overextended entry at a range extreme', () => {
+  const result = evaluateEntryQuality({
+    side: 'long', interval: '4h', cvdSlope: 0.05, volumeRatio: 1.2,
+    structureScore: -0.4, priceChange20Pct: 5, rangePosition50: 0.9,
+  }, {
+    enabled: true, minAbsCvdSlope: 0.03, minVolumeRatio: 1,
+    requireStructureAgreement: true, maxDirectionalMove20Pct: 4,
+    avoidRangeExtremes: true, maxLongRangePosition: 0.8,
+  });
+  assert.equal(result.met, false);
+  assert.equal(result.structureMet, false);
+  assert.equal(result.moveMet, false);
+  assert.equal(result.rangeMet, false);
+});
+
+test('wrong-way post-mortem creates evidence-based entry candidates instead of widening SL', () => {
+  const strategy = {
+    risk: { slPercent: 4, takeProfitR: [0.75, 1.5], preferSrLevels: false },
+    entryQuality: {
+      enabled: true, minAbsCvdSlope: 0.03, minVolumeRatio: 1,
+      requireStructureAgreement: false, avoidRangeExtremes: false,
+    },
+  };
+  const row = (index) => ({
+    kind: 'sai-huong', side: 'long', tradeId: `loss-${index}`,
+    evidence: {
+      cvdSlope: 0.035, volumeRatio: 1.05, priceChange20Pct: 5, rangePosition50: 0.9,
+      groups: { structure: { score: -0.4 } },
+    },
+  });
+  const result = buildReviewCandidates(strategy, {
+    minEntryCauseSamples: 3, entryCauseSharePercent: 60,
+  }, { byInterval: [] }, {
+    verdict: { id: 'sai-huong' }, rows: [row(1), row(2), row(3)],
+  });
+  const ids = result.candidates.map((candidate) => candidate.id);
+  assert.equal(ids.includes('wider-stop'), false);
+  assert.equal(ids.includes('entry-structure-agreement'), true);
+  assert.equal(ids.includes('entry-no-chasing'), true);
+  assert.equal(ids.includes('entry-avoid-range-extremes'), true);
+});
+
+test('runDailyReview backtests and persists a safe fix from repeated daily losses', async () => {
+  const trades = [
+    ...day('2026-08-08', 2, 1),
+    ...day('2026-08-09', 2, 1),
+    ...day('2026-08-10', 2, 2),
+    ...day('2026-08-11', 2, 1),
+  ];
+  const strategy = {
+    risk: { slPercent: 4, takeProfitR: [0.5], preferSrLevels: false, partialFraction: 0.5 },
+    alerts: { maxHoldBars: 96 }, learning: { enabled: true },
+    dailyReview: {
+      enabled: true, windowMode: 'calendar-day', dayOffsetHours: 7, dayOffsetDays: -1,
+      comparisonDays: 7, minClosedTradesPerDay: 3, minBadDays: 2,
+      minClosedTrades: 10, targetLossRatePercent: 30,
+      minTradesPerSegment: 5, minSlRateDropPercent: 2, minProfitFactor: 1.05,
+      guardSymbols: ['BTCUSDT'], guardInterval: '4h', backtestCandles: 600,
+      trainingRatio: 0.75, runtimeApply: true, autoApply: false,
+      slPercentStep: 0.5, maxSlPercent: 6, minTp1R: 0.5,
+    },
+  };
+  const state = { trades, attempts: [], reviews: [] };
+  const candles = Array.from({ length: 600 }, (_, index) => ({
+    openTime: index * 14400e3, open: 100, high: 101, low: 99, close: 100, volume: 1, closed: true,
+  }));
+  let persisted = null;
+  const report = await runDailyReview({
+    strategy, state, now,
+    deps: {
+      force: true,
+      fetchCandles: async () => candles,
+      fetchRecentCandles: async () => candles.slice(-10),
+      postMortemLosses: async () => ({
+        total: 3, decided: 3, counts: { 'bi-quet': 3 },
+        verdict: { id: 'noi-sl', text: 'SL nằm trong nhiễu.' }, rows: [],
+      }),
+      runBacktest: async (symbol, interval, tested) => {
+        const improved = tested.risk.slPercent > 4;
+        return { stats: {
+          trades: 20,
+          exitReasons: { stoploss: improved ? 6 : 10 },
+          winRatePercent: improved ? 70 : 50,
+          profitFactor: improved ? 1.3 : 1.1,
+          expectancyPercent: improved ? 0.2 : 0.1,
+          maxDrawdownPercent: improved ? 8 : 12,
+        } };
+      },
+      saveState: async (next) => { persisted = structuredClone(next); },
+      saveStrategy: async () => { throw new Error('runtime apply must not write strategy.json'); },
+    },
+  });
+
+  assert.equal(report.status, 'applied');
+  assert.equal(report.selected.id, 'wider-stop');
+  assert.equal(persisted.activeTuning.changes['risk.slPercent'], 4.5);
+});
+
+test('runDailyReview applies an entry gate when replay says losses were wrong-way', async () => {
+  const trades = [
+    ...day('2026-08-08', 2, 1), ...day('2026-08-09', 2, 1),
+    ...day('2026-08-10', 2, 1), ...day('2026-08-11', 2, 1),
+  ];
+  const wrongRows = trades.filter((item) => item.result.status === 'stopped').slice(0, 3).map((item) => ({
+    kind: 'sai-huong', side: item.side, tradeId: item.id,
+    evidence: { groups: { structure: { score: -0.5 } } },
+  }));
+  const strategy = {
+    risk: { slPercent: 4, takeProfitR: [0.75], preferSrLevels: false, partialFraction: 0.5 },
+    entryQuality: {
+      enabled: true, minAbsCvdSlope: 0.03, minVolumeRatio: 1,
+      requireStructureAgreement: false, avoidRangeExtremes: false,
+    },
+    alerts: { maxHoldBars: 96 }, learning: { enabled: true },
+    dailyReview: {
+      enabled: true, windowMode: 'calendar-day', dayOffsetHours: 7, dayOffsetDays: -1,
+      comparisonDays: 7, minClosedTradesPerDay: 3, minBadDays: 2, minClosedTrades: 10,
+      targetLossRatePercent: 30, minTradesPerSegment: 5, minSlRateDropPercent: 2,
+      minProfitFactor: 1.05, guardSymbols: ['BTCUSDT'], guardInterval: '4h',
+      backtestCandles: 600, trainingRatio: 0.75, runtimeApply: true, autoApply: false,
+      minEntryCauseSamples: 3, entryCauseSharePercent: 60,
+    },
+  };
+  const candles = Array.from({ length: 600 }, (_, index) => ({
+    openTime: index * 14400e3, open: 100, high: 101, low: 99, close: 100, volume: 1, closed: true,
+  }));
+  let persisted = null;
+  const report = await runDailyReview({
+    strategy, state: { trades, attempts: [], reviews: [] }, now,
+    deps: {
+      force: true,
+      fetchCandles: async () => candles,
+      fetchRecentCandles: async () => candles.slice(-10),
+      postMortemLosses: async () => ({
+        total: wrongRows.length, decided: wrongRows.length,
+        counts: { 'sai-huong': wrongRows.length },
+        verdict: { id: 'sai-huong', text: 'Sai hướng.' }, rows: wrongRows,
+      }),
+      runBacktest: async (symbol, interval, tested) => {
+        const improved = tested.entryQuality.requireStructureAgreement === true;
+        return { stats: {
+          trades: 20, exitReasons: { stoploss: improved ? 5 : 10 },
+          winRatePercent: improved ? 75 : 50, profitFactor: improved ? 1.4 : 1.1,
+          expectancyPercent: improved ? 0.25 : 0.1, maxDrawdownPercent: improved ? 7 : 12,
+        } };
+      },
+      saveState: async (next) => { persisted = structuredClone(next); },
+    },
+  });
+
+  assert.equal(report.status, 'applied');
+  assert.equal(report.selected.id, 'entry-structure-agreement');
+  assert.equal(persisted.activeTuning.changes['entryQuality.requireStructureAgreement'], true);
+  assert.equal(persisted.activeTuning.changes['risk.slPercent'], undefined);
+});
+
+test('learning log keeps per-trade cause, evidence, candidates and active tuning', () => {
+  const record = buildLearningRecord({
+    status: 'applied',
+    window: { since: '2026-08-11T00:00:00.000Z' },
+    summary: { closed: 4, lost: 2 },
+    postMortem: {
+      total: 1, decided: 1, counts: { 'sai-huong': 1 },
+      verdict: { id: 'sai-huong' },
+      rows: [{
+        tradeId: 'loss-1', symbol: 'BTCUSDT', interval: '4h', side: 'long',
+        kind: 'sai-huong', barsToSl: 2, evidence: { cvdSlope: 0.035 },
+      }],
+    },
+    candidates: [{
+      id: 'entry-structure-agreement', changes: { 'entryQuality.requireStructureAgreement': true },
+      passes: true,
+    }],
+    selected: { id: 'entry-structure-agreement' },
+  }, {
+    activeTuning: { changes: { 'entryQuality.requireStructureAgreement': true } },
+    strategy: { entryQuality: { enabled: true }, risk: { slPercent: 4 } },
+    generatedAt: '2026-08-12T01:00:00.000Z',
+  });
+
+  assert.equal(record.lossAnalysis.trades[0].cause, 'sai-huong');
+  assert.equal(record.lossAnalysis.trades[0].entryEvidence.cvdSlope, 0.035);
+  assert.equal(record.candidates[0].passes, true);
+  assert.equal(record.decision.activeTuning.changes['entryQuality.requireStructureAgreement'], true);
+});
+
+test('limit order uses the anchored limit price, not the zone midpoint or current price', () => {
+  const snapshot = {
+    symbol: 'BTCUSDT', interval: '4h',
+    price: { lastClose: 100, change24hPercent: 1 },
+    combined: { score: 20 },
+    structure: {
+      support: [{ price: 99.5, touches: 3 }],
+      resistance: [{ price: 103, touches: 2 }],
+    },
+  };
+  const plan = buildLimitPlan(snapshot, {
+    slPercent: 4, takeProfitR: [0.75, 1.5],
+    limitOrder: {
+      minDistancePercent: 0.5, maxDistancePercent: 4,
+      zoneWidthR: 0.3, maxZoneFractionOfDistance: 0.5,
+      fallbackPullbackPercent: 1.5, minLeanScore: 10, expiryBars: 6,
+    },
+  });
+  const order = plan.orders[0];
+  assert.equal(order.direction, 'long');
+  assert.equal(order.entry, 99.5);
+  assert.notEqual(order.entry, (order.zone.low + order.zone.high) / 2);
+  assert.ok(order.entry < snapshot.price.lastClose);
+  assert.equal(Number(order.riskPercent.toFixed(6)), 4);
+
+  const caption = buildCaption(snapshot, {
+    setup: { side: 'none', vetoed: false }, limitPlan: plan,
+  });
+  assert.match(caption, /Entry LIMIT \(giá đặt lệnh\): <b>99,50<\/b>/);
+  assert.match(caption, /KHÔNG vào giá hiện tại/);
+});

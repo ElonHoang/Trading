@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "test": "node test/daily-review.test.js",
     "start": "node --env-file-if-exists=.env src/server.js",
     "bot": "node --env-file-if-exists=.env src/telegram/bot.js",
     "alerts:once": "node --env-file-if-exists=.env src/telegram/alerts-once.js",
@@ -17,6 +18,7 @@
     "train": "node --env-file-if-exists=.env bin/train.js",
     "backtest": "node --env-file-if-exists=.env bin/backtest.js",
     "review:daily": "node --env-file-if-exists=.env bin/daily-review.js",
+    "learn:losses": "node --env-file-if-exists=.env bin/daily-review.js --force --yesterday --log-learning",
     "diagnose:sl": "node --env-file-if-exists=.env bin/diagnose-stoploss.js",
     "validate:filters": "node --env-file-if-exists=.env bin/validate-entry-filters.js",
     "models:index": "node bin/build-model-index.js"

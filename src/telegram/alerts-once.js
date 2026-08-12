@@ -15,6 +15,8 @@ import { readMonitorState, saveMonitorState } from '../data/monitor-state.js';
 import { setCallMessages } from '../data/open-calls.js';
 import { buildCaption, buildClosedNote, buildTpUpdate, splitCaption } from './caption.js';
 import { createMonitor } from './monitor.js';
+import { applyActiveTuning, readAutoRetuneState } from '../analysis/auto-retune.js';
+import { runDailyReview } from '../analysis/daily-review.js';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const chatIds = [...new Set(
@@ -52,13 +54,12 @@ const CANDLES = 300;
  * Trước đây cả cơ chế `auto-retune` bị TẮT vì lý do đó — hệ quả là phần tự kiểm
  * chứng sau chuỗi SL chưa từng chạy thật lần nào.
  *
- * Giờ tách hai chuyện: cơ chế được BẬT để chạy và ghi lại kết quả vào nhật ký,
- * nhưng `autoApply: false` chặn đúng cái đường ghi cấu hình. Đề xuất của nó đi
- * nhờ bản tổng hợp cuối ngày (cả hai đọc chung `data/auto-retune.json`), nên vẫn
- * tới được người đọc mà không sinh thêm loại tin nhắn nào.
+ * Nhánh chuỗi SL chỉ kiểm chứng và ghi chẩn đoán. Nó không tự áp dụng vì ngay lúc
+ * chạm SL chưa đủ nến sau để phân biệt bị quét với sai hướng; optimizer ngày sẽ
+ * làm việc đó sau post-mortem.
  */
 async function loadActionStrategy() {
-  const strategy = await loadStrategy();
+  const strategy = applyActiveTuning(await loadStrategy(), await readAutoRetuneState());
   return {
     ...strategy,
     autoRetune: { ...(strategy.autoRetune ?? {}), enabled: true, autoApply: false },
@@ -198,4 +199,22 @@ const monitor = createMonitor({
 
 console.log(`Bắt đầu một lượt quét cảnh báo cho ${chatIds.length} chat.`);
 await monitor.tick();
+
+// Alert runner là tiến trình sở hữu và ghi lại auto-retune.json. Chạy optimizer
+// theo lịch ở đây để activeTuning sống qua runner kế tiếp; job gửi báo cáo ngày
+// dùng --no-write nên chỉ có trách nhiệm trình bày, không tranh quyền ghi state.
+try {
+  const strategy = await loadActionStrategy();
+  if (strategy.dailyReview?.optimizeInScanner !== false) {
+    const state = await readAutoRetuneState();
+    const review = await runDailyReview({ strategy, state });
+    if (!['too-soon', 'disabled'].includes(review.status)) {
+      const selected = review.selected ? ` · ${review.selected.label}` : '';
+      console.error(`[daily-optimizer] ${review.status}${selected}`);
+    }
+  }
+} catch (error) {
+  // Tự học hỏng không được làm mất kết quả quét và các tin vừa gửi.
+  console.error(`[daily-optimizer] lỗi: ${error.message}`);
+}
 console.log('Đã hoàn tất lượt quét cảnh báo.');

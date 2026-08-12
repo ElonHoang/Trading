@@ -209,10 +209,18 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
     const signal = labelForScore(score, t);
     if (signal.side === 'none') continue;
 
+    const diagnostics = entryDiagnostics(
+      candles, ind, i, ruleScore, score, consensus, breakdown, historicalPattern,
+    );
+
     const quality = evaluateEntryQuality({
       side: signal.side,
+      interval,
       cvdSlope: ind.cvdSlope[i],
       volumeRatio: candles[i].volume / (ind.volumeAvg[i] || 1),
+      structureScore: diagnostics.groupScores.structure ?? null,
+      priceChange20Pct: diagnostics.priceChange20Pct,
+      rangePosition50: diagnostics.rangePosition50,
     }, entryQualityCfg);
     if (quality.enabled && !quality.met) {
       skippedByEntryQuality++;
@@ -233,9 +241,6 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
     const riskPct = Math.abs(c.close - levels.stopLoss) / c.close * 100;
     if (riskPct < 0.1 || riskPct > 20) continue; // SL vô lý -> bỏ qua
 
-    const diagnostics = entryDiagnostics(
-      candles, ind, i, ruleScore, score, consensus, breakdown, historicalPattern,
-    );
     if (entryFilter && !entryFilter({
       side: signal.side,
       score,
@@ -350,4 +355,3 @@ function summarize(trades, candles, feePercent) {
     equityCurveTail: curve.slice(-30),
   };
 }
-

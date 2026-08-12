@@ -80,7 +80,11 @@ export function replayStoppedCall(trade, candles, {
   const stop = num(trade.stopLoss);
   const tp1 = num(trade.targets?.[0]?.price);
   const openedAt = num(trade.openedAtCandle ?? Date.parse(trade.openedAt ?? ''));
-  const base = { symbol: trade.symbol, interval: trade.interval, side: trade.side };
+  const base = {
+    tradeId: trade.id ?? null,
+    symbol: trade.symbol, interval: trade.interval, side: trade.side,
+    evidence: trade.evidence ?? null,
+  };
 
   // Kèo ghi trước khi bản ghi có entry/SL/TP thì không phát lại được — nói thẳng
   // ra thay vì suy ngược từ giá hiện tại rồi gán cho quyết định cũ.
@@ -157,6 +161,7 @@ export function summarizePostMortem(rows) {
   const decided = rows.filter((r) => r.kind !== KINDS.unknown);
   const swept = rows.filter((r) => r.kind === KINDS.swept);
   const wrongWay = rows.filter((r) => r.kind === KINDS.wrongWay);
+  const reversed = rows.filter((r) => r.kind === KINDS.reversed);
 
   const share = (n) => (decided.length ? round((n / decided.length) * 100, 1) : null);
   const summary = {
@@ -165,6 +170,7 @@ export function summarizePostMortem(rows) {
     counts,
     sweptSharePercent: share(swept.length),
     wrongWaySharePercent: share(wrongWay.length),
+    reversedSharePercent: share(reversed.length),
     // Đo trên chính các kèo bị quét: SL đang đặt bao nhiêu %, cần bao nhiêu %.
     medianSlPercent: round(median(swept.map((r) => r.slPercent)), 2),
     medianNeededSlPercent: round(median(swept.map((r) => r.neededSlPercent)), 2),
@@ -179,8 +185,9 @@ export function summarizePostMortem(rows) {
  * Kết luận CHỈ nêu hướng, không tự đổi cấu hình: mọi thay đổi vẫn phải qua
  * backtest chia theo thời gian của `daily-review` mới được đề xuất.
  *
- * Ba trường hợp tách bạch vì cách sửa ngược nhau, và một trong số đó là "không
- * có núm nào sửa được" — repo đã đo: siết điểm/đồng thuận/CVD làm tỉ lệ SL TĂNG.
+ * Ba trường hợp tách bạch vì cách sửa ngược nhau. Với sai-hướng, daily-review
+ * chỉ thử đúng các cổng được bằng chứng lúc entry hỗ trợ và vẫn bắt chúng qua
+ * holdout; không bật đại trà một bộ lọc chỉ vì nghe hợp lý.
  */
 function verdictOf(summary) {
   if (summary.decided < 3) {
@@ -188,6 +195,7 @@ function verdictOf(summary) {
   }
   const swept = summary.sweptSharePercent ?? 0;
   const wrong = summary.wrongWaySharePercent ?? 0;
+  const reversed = summary.reversedSharePercent ?? 0;
   if (swept >= 50) {
     return {
       id: 'noi-sl',
@@ -200,8 +208,16 @@ function verdictOf(summary) {
     return {
       id: 'sai-huong',
       text: `${wrong}% số kèo thua đi ngược ngay từ nến đầu — vấn đề nằm ở chỗ CHỌN LỆNH, `
-        + 'không phải ở khoảng SL. Nới SL lúc này chỉ lỗ sâu hơn. Lưu ý: repo đã đo và siết '
-        + 'điểm/đồng thuận/CVD làm tỉ lệ SL TĂNG, nên đây là phần hiện chưa có núm nào sửa được.',
+        + 'không phải ở khoảng SL. Nới SL lúc này chỉ lỗ sâu hơn. Hệ thống sẽ đối chiếu '
+        + 'bằng chứng entry để sinh cổng phù hợp rồi chỉ áp dụng nếu backtest holdout xác nhận.',
+    };
+  }
+  if (reversed >= 50) {
+    return {
+      id: 'dao-chieu',
+      text: `${reversed}% số kèo thua đã đi đúng hướng rồi đảo chiều thật — entry có lợi thế `
+        + 'nhưng bảo vệ lợi nhuận quá chậm. Hệ thống sẽ thử kéo TP1 gần lại và chỉ áp dụng '
+        + 'nếu backtest holdout xác nhận.',
     };
   }
   return {

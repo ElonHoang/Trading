@@ -71,6 +71,7 @@ npm run analyze -- BTC 1h --no-ai   # phân tích trong terminal
 npm run train -- BTC 4h             # train model, lưu vào models/
 npm run backtest -- BTC 4h 3000     # backtest có SL/TP
 npm run diagnose:sl -- BTC 4h 3000  # tìm đặc điểm chung của lệnh bị SL
+npm run learn:losses                 # học kèo thua hôm qua, backtest và lưu log local
 npm run validate:filters -- BTC 4h 3000 # kiểm chứng bộ lọc theo thời gian
 npm run models:index                # BẮT BUỘC chạy sau khi thêm/xoá file trong models/
 npm run bot:ai                      # bot Telegram bản có Claude (xem phần chi phí)
@@ -78,6 +79,11 @@ npm run bot:ai                      # bot Telegram bản có Claude (xem phần 
 
 **Hai bot không chạy đồng thời được.** Telegram chỉ cho một tiến trình long-poll trên mỗi
 token; chạy cả `npm run bot` và `npm run bot:ai` sẽ làm cả hai lỗi 409.
+
+`npm run learn:losses` đọc `data/auto-retune.json`, phát lại kèo thua của 7 ngày gần
+nhất, chạy candidate trên train/holdout và ghi `data/loss-learning/YYYY-MM-DD.json`
+cùng bản đọc nhanh `.txt`. Khi phân tích bản state tải từ production mà không muốn ghi
+ngược, dùng `npm run learn:losses -- --state <đường-dẫn-file-state>`.
 
 ### Cảnh báo 5 phút qua GitHub Actions
 
@@ -211,11 +217,12 @@ Mọi tham số ở `config/strategy.json`, không hardcode trong code. `setStra
 | `weights.*` | Coi trọng nhóm nào. Đặt `0` để tắt hẳn. |
 | `thresholds.*` | Ngưỡng tín hiệu, cổng đồng thuận, mức đám đông lệch, ngưỡng volume đột biến |
 | `indicators.*` | Chu kỳ `volumeAvg` và `cvdSlope` (đều 20) |
-| `risk.*` | `slPercent` 2,5% (thay cho bội số ATR trước đây), mốc TP theo R, `displayLeverage` chỉ để quy đổi hiển thị |
+| `risk.*` | `slPercent` 4% (thay cho bội số ATR trước đây), mốc TP theo R, `displayLeverage` chỉ để quy đổi hiển thị |
 | `alerts.*` | Chu kỳ quét, ngưỡng báo, phạm vi sàng lọc, hạn giữ kèo |
 | `historicalPattern.*` | Số nến so mẫu, tối đa 6 tháng lịch sử, ngưỡng giống nhau và mức đồng thuận của diễn biến sau mẫu |
 | `entryQuality.*` | Cổng bỏ qua lệnh khi CVD không đủ mạnh/cùng chiều hoặc volume dưới mức xác nhận; không tạo thêm nội dung Telegram |
-| `autoRetune.*` | Sau chuỗi SL, tự kiểm chứng cấu hình nghiêm ngặt hơn bằng chia dữ liệu theo thời gian; chỉ áp dụng nếu giảm drawdown và vẫn có PF dương |
+| `autoRetune.*` | Sau chuỗi SL, kiểm chứng nhanh và ghi chẩn đoán; chưa tự áp dụng vì chưa đủ nến để biết bị quét hay sai hướng |
+| `dailyReview.*` | So sánh 7 ngày, chỉ tự sửa khi lỗi lặp lại ít nhất 2 ngày đủ mẫu và candidate vượt train/holdout cùng bộ canh gác |
 | `ml.*` | Horizon, cách gán nhãn (`triple-barrier` theo % giá), siêu tham số. Sửa xong **phải train lại**. |
 | `llm.*` | Chỉ ảnh hưởng bot AI |
 
@@ -230,18 +237,23 @@ bot sẽ tự làm các việc sau:
 
 1. Ghi nhóm tín hiệu nào đã ủng hộ hướng vào lệnh trong cả chuỗi; đây chỉ là dấu hiệu liên
    quan, không kết luận một nhóm là nguyên nhân.
-2. Với tối đa 3 cặp vừa SL, chạy lại cấu hình hiện tại và các cấu hình chặt hơn trên 75% dữ
+2. Với tối đa 3 cặp vừa SL, chạy lại cấu hình hiện tại và các phương án chỉnh rủi ro trên 75% dữ
    liệu cũ, rồi xác nhận trên 25% dữ liệu mới hơn.
-3. Chỉ tự đổi `strategy.json` nếu candidate có đủ tối thiểu 8 lệnh ở **mỗi** phần, PF ≥ 1,05,
-   expectancy dương, và drawdown giảm ít nhất 10% trên mọi cặp đang xét. Trong các candidate
-   đạt điều kiện, bot chọn drawdown thấp nhất.
+3. Ghi kết quả kiểm chứng vào nhật ký nhưng chưa áp dụng, vì tại thời điểm vừa chạm SL chưa
+   có đủ nến sau để phân biệt bị quét với sai hướng.
 
-Bot thử siết CVD/volume, tăng ngưỡng điểm, kết hợp hai điều kiện đó, hoặc giảm khoảng SL cơ sở.
+Bot thử nới khoảng SL, bỏ bám SL vào S/R hoặc kéo TP1 gần lại.
 Các nhóm không có dữ liệu lịch sử theo nến như order book, phái sinh và định vị chỉ được nêu
 trong chẩn đoán live, không bị tự sửa trọng số bằng backtest. Cấu hình cũ được sao lưu ở
 `data/strategy-backups/`; nhật ký nằm ở `data/auto-retune.json`; cả hai chỉ ở máy chạy bot và
 không được commit. `autoRetune.cooldownHours` mặc định 168 giờ để bot không liên tục chỉnh theo
 một giai đoạn nhiễu.
+
+Vòng rà soát ngày phát lại tối đa 12 kèo thua trên nến thật. Nếu chủ yếu **bị quét**, nó
+backtest candidate SL/TP. Nếu chủ yếu **sai hướng**, nó không nới SL mà thử các điều kiện
+entry được bằng chứng hỗ trợ: cấu trúc cùng hướng, không đuổi nhịp quá xa, tránh mua gần
+đỉnh/bán gần đáy vùng 50 nến, hoặc tăng CVD/volume khi các lệnh sai tập trung sát ngưỡng.
+Chỉ candidate giảm SL trên cả train/holdout và giữ guard 4h dương mới được lưu vào state.
 
 ---
 

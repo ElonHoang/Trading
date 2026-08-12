@@ -260,19 +260,24 @@ export function buildLimitPlan(snapshot, risk = {}) {
       ? level.price
       : price * (isLong ? 1 - pullback / 100 : 1 + pullback / 100);
 
-    // Vùng đặt lệnh nằm về phía GIÁ HIỆN TẠI so với mức neo, không xuyên qua nó:
-    // giá thường quay đầu ngay TRÊN hỗ trợ, đặt xuyên xuống là bỏ lỡ kèo.
+    // `anchor` là GIÁ ĐẶT LIMIT thật. Không lấy trung điểm vùng làm entry: vùng
+    // kéo về phía giá hiện tại sẽ làm khoảng cách thực nhỏ hơn `minDistance` và
+    // có thể biến lệnh chờ thành một lệnh gần như khớp tức thì.
+    const entry = anchor;
+
+    // Vùng này chỉ là vùng khớp tham khảo quanh mức limit, nằm về phía giá hiện
+    // tại so với mức neo. Người dùng vẫn đặt lệnh tại `entry`, không đặt tại mép
+    // vùng gần giá hiện tại.
     //
     // Bề rộng phải bị KẸP theo khoảng cách tới mức neo. Với slPercent 4 thì
     // baseRisk × 0,3 đã là 1,2% giá, đủ để mép vùng bò lên sát giá hiện tại và
     // entry thành "vào ngay" trá hình — đúng thứ khối này sinh ra để tránh.
-    const baseRisk = anchor * (slPercent / 100);
+    const baseRisk = entry * (slPercent / 100);
     const gap = Math.abs(price - anchor);
     const width = Math.min(baseRisk * zoneWidthR, gap * maxZoneFraction);
     const zone = isLong
       ? { low: anchor, high: anchor + width }
       : { low: anchor - width, high: anchor };
-    const entry = (zone.low + zone.high) / 2;
 
     // SL tính thẳng theo % giá từ entry, KHÔNG bám S/R kể cả khi
     // risk.preferSrLevels bật: entry đã nằm ngay tại mức cấu trúc rồi, bám tiếp
@@ -303,7 +308,7 @@ export function buildLimitPlan(snapshot, risk = {}) {
           + `${vi(minDistance)}–${vi(maxDistance)}%`,
       zone,
       entry,
-      // Âm = vùng nằm dưới giá hiện tại (buy limit), dương = nằm trên (sell limit).
+      // Âm = giá đặt buy limit nằm dưới hiện tại, dương = sell limit nằm trên.
       distancePercent: ((entry - price) / price) * 100,
       stopLoss,
       riskPerUnit: r,

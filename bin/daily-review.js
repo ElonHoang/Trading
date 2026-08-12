@@ -7,11 +7,13 @@
 //        npm run review:daily -- --telegram         gửi báo cáo vào chat cảnh báo
 //        npm run review:daily -- --no-write          không ghi lại trạng thái
 //        npm run review:daily -- --json             in nguyên báo cáo dạng JSON
+//        npm run learn:losses                        học + lưu log JSON/TXT mỗi ngày
 
 import { readFile } from 'node:fs/promises';
 import { loadStrategy } from '../src/config.js';
-import { readAutoRetuneState } from '../src/analysis/auto-retune.js';
+import { applyActiveTuning, readAutoRetuneState } from '../src/analysis/auto-retune.js';
 import { runDailyReview, formatDailyReview } from '../src/analysis/daily-review.js';
+import { writeLearningLog } from '../src/analysis/learning-log.js';
 
 const argv = process.argv.slice(2);
 const has = (flag) => argv.includes(flag);
@@ -20,17 +22,12 @@ const valueOf = (flag) => {
   return i >= 0 ? argv[i + 1] : null;
 };
 
-const strategy = await loadStrategy();
+const baseStrategy = await loadStrategy();
 const stateFile = valueOf('--state');
 
 // Ghi đè tại chỗ, không lưu xuống đĩa: chỉ đổi cửa sổ của lượt chạy này.
 // Mặc định trong strategy.json là -1 (hôm qua) cho khớp cron 08:07 giờ VN của
 // runner; --today để xem ngày đang chạy khi gọi tay giữa ngày.
-const dayOffset = has('--yesterday') ? -1 : (has('--today') ? 0 : null);
-if (dayOffset != null) {
-  strategy.dailyReview = { ...strategy.dailyReview, windowMode: 'calendar-day', dayOffsetDays: dayOffset };
-}
-
 let state;
 if (stateFile) {
   try {
@@ -39,6 +36,7 @@ if (stateFile) {
       trades: Array.isArray(parsed?.trades) ? parsed.trades : [],
       attempts: Array.isArray(parsed?.attempts) ? parsed.attempts : [],
       reviews: Array.isArray(parsed?.reviews) ? parsed.reviews : [],
+      activeTuning: parsed?.activeTuning ?? null,
       lastReviewAt: parsed?.lastReviewAt ?? null,
       lastAppliedAt: parsed?.lastAppliedAt ?? null,
       lastHandledTriggerId: parsed?.lastHandledTriggerId ?? null,
@@ -51,17 +49,42 @@ if (stateFile) {
   state = await readAutoRetuneState();
 }
 
+const strategy = applyActiveTuning(baseStrategy, state);
+const dayOffset = has('--yesterday') ? -1 : (has('--today') ? 0 : null);
+if (dayOffset != null) {
+  strategy.dailyReview = { ...strategy.dailyReview, windowMode: 'calendar-day', dayOffsetDays: dayOffset };
+}
+
+// Chế độ chỉ đọc không được báo "đã áp dụng": state sau tiến trình sẽ bị bỏ.
+if (stateFile || has('--no-write')) {
+  strategy.dailyReview = { ...strategy.dailyReview, autoApply: false, runtimeApply: false };
+}
+
 // Đọc từ file chỉ định thì không ghi ngược lại — tránh sửa nhầm bản sao lấy từ
 // repo trạng thái. Chỉ ghi khi dùng đúng file trạng thái cục bộ.
 const deps = { force: has('--force') };
 if (stateFile || has('--no-write')) deps.saveState = async () => {};
 
 const report = await runDailyReview({ strategy, state, deps });
+const formatted = formatDailyReview(report);
+
+if (has('--log-learning')) {
+  const plain = formatted
+    ? formatted.replace(/<\/?b>/g, '').replace(/<\/?code>/g, '`').replace(/<\/?i>/g, '')
+    : `Không có báo cáo. Trạng thái: ${report.status}.`;
+  const logged = await writeLearningLog(report, {
+    strategy,
+    activeTuning: state.activeTuning ?? null,
+    text: plain,
+    ...(valueOf('--log-dir') ? { outputDir: valueOf('--log-dir') } : {}),
+  });
+  console.error(`Đã lưu nhật ký học:\n- ${logged.jsonFile}\n- ${logged.textFile}`);
+}
 
 if (has('--json')) {
   console.log(JSON.stringify(report, null, 2));
 } else {
-  const text = formatDailyReview(report);
+  const text = formatted;
   if (text) {
     console.log(text.replace(/<\/?b>/g, '').replace(/<\/?code>/g, '`'));
   } else if (report.status === 'too-soon') {
@@ -72,7 +95,7 @@ if (has('--json')) {
 }
 
 if (has('--telegram')) {
-  const text = formatDailyReview(report);
+  const text = formatted;
   if (!text) {
     console.error('Không có gì để gửi (chưa tới hạn hoặc đã tắt).');
   } else {

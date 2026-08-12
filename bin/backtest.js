@@ -5,6 +5,7 @@ import { backtest } from '../src/backtest.js';
 import { loadModel } from '../src/ml/model-store.js';
 import { normalizeSymbol } from '../src/data/binance.js';
 import { fmtNum } from '../src/analysis/engine.js';
+import { applyActiveTuning, readAutoRetuneState } from '../src/analysis/auto-retune.js';
 
 const [symbolArg, intervalArg = '4h', candlesArg] = process.argv.slice(2);
 if (!symbolArg) {
@@ -12,7 +13,8 @@ if (!symbolArg) {
   process.exit(1);
 }
 
-const strategy = await loadStrategy();
+const state = await readAutoRetuneState();
+const strategy = applyActiveTuning(await loadStrategy(), state);
 try {
   const symbol = normalizeSymbol(symbolArg);
   const r = await backtest(symbol, intervalArg, strategy, {
@@ -26,6 +28,10 @@ try {
   console.log(`Cấu hình : phí ${r.settings.feePercent}%/chiều, giữ tối đa ${r.settings.maxHoldBars} nến, `
     + `thoát "${r.settings.exitStrategy}", `
     + `trọng số ML ${r.settings.mlWeight}${r.settings.usedModel ? '' : ' (chưa có model)'}`);
+  if (state.activeTuning?.changes) {
+    console.log(`Tự sửa   : ${Object.entries(state.activeTuning.changes)
+      .map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(' · ')}`);
+  }
   console.log('');
   for (const [k, v] of Object.entries(r.stats)) {
     if (k === 'equityCurveTail') continue;

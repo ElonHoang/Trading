@@ -82,11 +82,13 @@ export function buildCaption(snap, { setup = null, limitPlan = null } = {}) {
   // là ngược nghĩa của phủ quyết. Lý do vẫn hiện ở khối ⛔ bên trên.
   if (limitPlan?.orders?.length && side === 'none' && !setup?.vetoed) {
     L.push(HR);
-    L.push('🎯 <b>LỆNH CHỜ (LIMIT)</b> — đặt sẵn ở vùng giá, KHÔNG vào giá hiện tại');
+    L.push('🎯 <b>LỆNH CHỜ (LIMIT)</b> — đặt tại Entry LIMIT bên dưới, KHÔNG vào giá hiện tại');
     for (const o of limitPlan.orders) {
       const icon = o.direction === 'long' ? '🟢' : '🔴';
-      L.push(`${icon} <b>${esc(o.label)}</b>: ${fmt(o.zone.low, d)} – ${fmt(o.zone.high, d)}`
-        + ` (${pct(o.distancePercent)} so với giá)`);
+      L.push(`${icon} <b>${esc(o.label)}</b>`);
+      L.push(`   • Entry LIMIT (giá đặt lệnh): <b>${fmt(o.entry, d)}</b>`
+        + ` (${pct(o.distancePercent)} so với giá hiện tại)`);
+      L.push(`   • Vùng khớp tham khảo: ${fmt(o.zone.low, d)} – ${fmt(o.zone.high, d)}`);
       L.push(`   • SL ${fmt(o.stopLoss, d)} (rủi ro ${fmt(o.riskPercent, 2)}%)`
         + ` · TP ${o.targets.map((t) => fmt(t.price, d)).join(' / ')}`);
       // Mức neo in lại qua fmt() để cùng cách viết số với các giá khác trong

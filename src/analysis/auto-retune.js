@@ -7,6 +7,7 @@ import { DATA_DIR, saveStrategy } from '../config.js';
 import { fetchKlinesHistory } from '../data/binance.js';
 import { closedCandles } from './engine.js';
 import { backtest } from '../backtest.js';
+import { entryMarketContext } from './entry-quality.js';
 
 const STATE_FILE = path.join(DATA_DIR, 'auto-retune.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'strategy-backups');
@@ -25,7 +26,10 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const round = (value, digits = 2) => Number(Number(value).toFixed(digits));
 
 function emptyState() {
-  return { trades: [], attempts: [], lastHandledTriggerId: null, lastAppliedAt: null };
+  return {
+    trades: [], attempts: [], reviews: [], activeTuning: null,
+    lastHandledTriggerId: null, lastAppliedAt: null, lastReviewAt: null,
+  };
 }
 
 export async function readAutoRetuneState() {
@@ -58,6 +62,11 @@ export function buildCallEvidence(snapshot, setup) {
     contributionPct: group.contributionPct ?? null,
     skipped: Boolean(group.skipped),
   }]));
+  const series = snapshot.series;
+  const candles = series?.close?.map((close, i) => ({
+    close, high: series.high?.[i], low: series.low?.[i],
+  })) ?? [];
+  const market = entryMarketContext(candles);
   return {
     side: setup.side,
     score: snapshot.combined?.score ?? null,
@@ -65,6 +74,8 @@ export function buildCallEvidence(snapshot, setup) {
     riskPercent: setup.riskPercent ?? snapshot.levels?.riskPercent ?? null,
     cvdSlope: snapshot.indicators?.cvdSlope ?? null,
     volumeRatio: snapshot.indicators?.volumeRatio ?? null,
+    priceChange20Pct: market.priceChange20Pct,
+    rangePosition50: market.rangePosition50,
     groups,
   };
 }
@@ -148,6 +159,24 @@ function setPath(obj, pathString, value) {
     node = node[parts[i]];
   }
   node[parts.at(-1)] = value;
+}
+
+/**
+ * Áp các thay đổi đã vượt backtest lên một bản sao của strategy. Bản override
+ * nằm trong state bền vững, nên GitHub runner mới vẫn dùng được cấu hình đã học
+ * ở lượt trước mà không cần sửa file trong checkout tạm.
+ */
+export function applyStrategyChanges(strategy, changes = {}) {
+  const next = clone(strategy);
+  for (const [pathString, value] of Object.entries(changes)) setPath(next, pathString, clone(value));
+  return next;
+}
+
+export function applyActiveTuning(strategy, state = {}) {
+  const changes = state.activeTuning?.changes;
+  return changes && typeof changes === 'object'
+    ? applyStrategyChanges(strategy, changes)
+    : clone(strategy);
 }
 
 function candidate(strategy, id, label, changes) {
@@ -403,10 +432,12 @@ export async function runAutoRetune({ strategy, state, deps = {} }) {
     // thay đổi âm thầm không ai duyệt thì lượt sau không truy lại được. Tắt nó
     // cho phép BẬT cả cơ chế ở production mà không có đường ghi lén.
     const autoApply = cfg.autoApply === true;
+    const runtimeApply = cfg.runtimeApply === true;
+    const applied = Boolean(selected && (autoApply || runtimeApply));
     const report = {
-      status: selected ? (autoApply ? 'applied' : 'proposed') : 'no-safe-change',
+      status: selected ? (applied ? 'applied' : 'proposed') : 'no-safe-change',
       ...reportBase,
-      autoApply,
+      autoApply, runtimeApply,
       guardInterval,
       suspectedGroups: suspects,
       pairs: baselineByPair,
@@ -420,10 +451,17 @@ export async function runAutoRetune({ strategy, state, deps = {} }) {
         guardValidation: selected.guardValidation,
       } : null,
     };
-    if (selected && autoApply) {
-      report.backupFile = await saveBackup(strategy, report);
-      await save(selected.strategy);
+    if (applied) {
+      state.activeTuning = {
+        source: 'stop-loss-streak', appliedAt: new Date().toISOString(),
+        changes: { ...(state.activeTuning?.changes ?? {}), ...selected.changes },
+        selectedId: selected.id,
+      };
       state.lastAppliedAt = new Date().toISOString();
+      if (autoApply) {
+        report.backupFile = await saveBackup(strategy, report);
+        await save(selected.strategy);
+      }
     }
     state.attempts.push({ at: new Date().toISOString(), ...report });
     state.attempts = state.attempts.slice(-30);
@@ -455,7 +493,9 @@ export function formatAutoRetuneReport(report) {
       + `kỳ vọng ${g.expectancyPercent}%/lệnh.\n`
       + `Thay đổi: ${Object.entries(report.selected.changes).map(([k, val]) => `${k} = ${JSON.stringify(val)}`).join(' · ')}\n`
       + (report.status === 'applied'
-        ? 'Cấu hình cũ đã được sao lưu cục bộ trước khi thay đổi.'
+        ? (report.backupFile
+          ? 'Cấu hình cũ đã được sao lưu cục bộ trước khi thay đổi.'
+          : 'Thay đổi đã được lưu vào state và sẽ có hiệu lực từ lượt quét sau.')
         : 'Sửa config/strategy.json rồi commit để áp dụng — bot chạy trên runner tạm nên tự ghi sẽ mất.');
   }
   if (report.status === 'no-safe-change') {

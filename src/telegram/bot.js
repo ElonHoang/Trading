@@ -8,7 +8,8 @@ import { Bot, InputFile, InlineKeyboard } from 'grammy';
 import { analyze } from '../analysis/engine.js';
 import { renderAnalysisPng } from '../chart/png.js';
 import { INTERVAL_MS, resolveSymbol, screenSymbols } from '../data/binance.js';
-import { loadStrategy } from '../config.js';
+import { loadStrategy as loadBaseStrategy } from '../config.js';
+import { applyActiveTuning, readAutoRetuneState } from '../analysis/auto-retune.js';
 import { loadModel } from '../ml/model-store.js';
 import { readWatchlist, addSymbol, removeSymbol } from '../data/watchlist.js';
 import { readSubscribers, addSubscriber, removeSubscriber } from '../data/subscribers.js';
@@ -19,6 +20,10 @@ import { buildCaption, buildClosedNote, buildQuoteMessage, splitCaption, buildTp
 import { setCallMessages } from '../data/open-calls.js';
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
+
+async function loadStrategy() {
+  return applyActiveTuning(await loadBaseStrategy(), await readAutoRetuneState());
+}
 if (!token) {
   console.error(`Thiếu TELEGRAM_BOT_TOKEN.
 

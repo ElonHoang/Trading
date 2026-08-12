@@ -9,7 +9,7 @@ import { computeIndicators, supportResistance } from '../indicators/index.js';
 import { featureVector, FEATURE_NAMES } from '../features.js';
 import { predictProba } from '../ml/gbdt.js';
 import { analyzeHistoricalPattern, historicalPatternCandleCount } from './historical-pattern.js';
-import { evaluateEntryQuality } from './entry-quality.js';
+import { entryMarketContext, evaluateEntryQuality } from './entry-quality.js';
 
 const clamp = (v, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
 
@@ -681,10 +681,14 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
     : ruleScore;
 
   const signal = labelForScore(combinedScore, strategy.thresholds);
+  const entryContext = entryMarketContext(candles);
   const entryQuality = evaluateEntryQuality({
     side: signal.side,
+    interval,
     cvdSlope: ind.cvdSlope[candles.length - 1],
     volumeRatio: candles[candles.length - 1].volume / (ind.volumeAvg[candles.length - 1] || 1),
+    structureScore: breakdown.structure?.score ?? null,
+    ...entryContext,
   }, strategy.entryQuality);
   const levels = buildLevels(candles, ind, sr, signal, strategy.risk);
   const htf = await higherTimeframeContext(symbol, interval, strategy);
