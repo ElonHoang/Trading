@@ -27,7 +27,7 @@ const round = (value, digits = 2) => Number(Number(value).toFixed(digits));
 
 function emptyState() {
   return {
-    trades: [], attempts: [], reviews: [], lossLogs: [], activeTuning: null,
+    trades: [], attempts: [], reviews: [], lossLogs: [], lossLogWeek: null, activeTuning: null,
     lastHandledTriggerId: null, lastAppliedAt: null, lastReviewAt: null,
   };
 }
@@ -41,6 +41,7 @@ export async function readAutoRetuneState() {
       trades: Array.isArray(parsed?.trades) ? parsed.trades : [],
       attempts: Array.isArray(parsed?.attempts) ? parsed.attempts : [],
       lossLogs: Array.isArray(parsed?.lossLogs) ? parsed.lossLogs : [],
+      lossLogWeek: typeof parsed?.lossLogWeek === 'string' ? parsed.lossLogWeek : null,
     };
   } catch (error) {
     if (error.code === 'ENOENT') return emptyState();

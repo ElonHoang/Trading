@@ -191,7 +191,38 @@ test('daily loss logger persists only yesterday pre-TP1 stops without training',
   assert.equal(result.log.totalLosses, 1);
   assert.equal(result.log.losses[0].cause, 'sai-huong');
   assert.equal(persisted.lossLogs.length, 1);
+  assert.equal(persisted.lossLogWeek, '2026-08-10');
   assert.equal(persisted.activeTuning, undefined);
+});
+
+test('daily loss logger clears the previous week on Monday in Vietnam', async () => {
+  const monday = Date.parse('2026-08-17T03:00:00.000Z');
+  const state = {
+    trades: [trade('2026-08-16', 'stopped', { index: 1 })],
+    lossLogWeek: '2026-08-10',
+    lossLogs: [{ date: '2026-08-15', totalLosses: 2, losses: [] }],
+  };
+  let persisted = null;
+  await recordDailyLossLog({
+    strategy: {
+      dailyReview: { dayOffsetHours: 7 },
+      learning: { dailyLossLogHistoryDays: 7 },
+    },
+    state,
+    now: monday,
+    deps: {
+      force: true,
+      postMortemLosses: async (losses) => ({
+        decided: losses.length, counts: { 'sai-huong': losses.length },
+        verdict: { id: 'khong-du-mau' },
+        rows: losses.map((item) => ({ ...item, tradeId: item.id, kind: 'sai-huong' })),
+      }),
+      saveState: async (next) => { persisted = structuredClone(next); },
+    },
+  });
+
+  assert.equal(persisted.lossLogWeek, '2026-08-17');
+  assert.deepEqual(persisted.lossLogs.map((log) => log.date), ['2026-08-16']);
 });
 
 test('review-only mode never runs backtest or changes tuning', async () => {

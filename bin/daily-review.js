@@ -38,6 +38,7 @@ if (stateFile) {
       attempts: Array.isArray(parsed?.attempts) ? parsed.attempts : [],
       reviews: Array.isArray(parsed?.reviews) ? parsed.reviews : [],
       lossLogs: Array.isArray(parsed?.lossLogs) ? parsed.lossLogs : [],
+      lossLogWeek: typeof parsed?.lossLogWeek === 'string' ? parsed.lossLogWeek : null,
       activeTuning: parsed?.activeTuning ?? null,
       lastReviewAt: parsed?.lastReviewAt ?? null,
       lastAppliedAt: parsed?.lastAppliedAt ?? null,

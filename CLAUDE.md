@@ -70,7 +70,7 @@ Ba tầng xếp lên nhau, mô tả chi tiết trong `README.md`:
   Nhánh này đã tắt trên production (`enabled: false`): vòng quét chỉ lưu dữ liệu và lossLogs, không chạy backtest sau chuỗi SL. Khi người dùng chạy training local, các lớp bảo vệ vẫn giữ nguyên: candidate rủi ro dùng chung, bộ canh gác 4h và sàn cứng `minSlPercent` (3).
 
   Đề xuất của nó **đi nhờ bản tổng hợp cuối ngày** (`pushRetune`), vì vòng quét không có đường ra Telegram nào ngoài ba mẫu tin. Hai bên đọc chung `data/auto-retune.json` nên không sinh thêm nguồn trạng thái.
-- `src/analysis/daily-loss-log.js` — vòng quét production chỉ phát lại các kèo `stopped` trước TP1 của đúng ngày hôm qua và lưu `lossLogs` vào `auto-retune.json` bền vững. Bản còn thiếu nến được làm mới vào ngày sau. Đường này không sinh candidate, không backtest, không ghi `activeTuning`.
+- `src/analysis/daily-loss-log.js` — vòng quét production chỉ phát lại các kèo `stopped` trước TP1 của đúng ngày hôm qua và lưu `lossLogs` vào `auto-retune.json` bền vững. Log reset vào lần ghi đầu tiên của mỗi tuần (thứ Hai, giờ Việt Nam) và giữ tối đa 7 ngày; bản còn thiếu nến được làm mới vào ngày sau. Đường này không sinh candidate, không backtest, không ghi `activeTuning`.
 - `src/analysis/daily-review.js` — rà soát theo **thời gian**, so sánh mặc định 7 ngày. Job Telegram chạy chế độ `review-only`, chỉ trình bày và không training. Training/backtest chỉ chạy khi người dùng chủ động gọi `npm run train:losses` ở local.
 
   Cửa sổ thống kê ngày do `dailyReview.windowMode` quyết định. Mặc định `calendar-day`, reset lúc 00:00 theo `dayOffsetHours` (VN = 7). Kèo **đang mở không bao giờ được tính**. Production không chạy optimizer; các cửa `minClosedTrades`, `comparisonDays` và cooldown chỉ được dùng trong lượt training local.

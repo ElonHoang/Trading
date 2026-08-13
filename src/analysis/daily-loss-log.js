@@ -12,6 +12,15 @@ function dateFromLabel(label, fallback) {
   return match ? `${match[3]}-${match[2]}-${match[1]}` : fallback;
 }
 
+function weekKey(now, offsetHours = 7) {
+  const dayMs = 86400e3;
+  const shifted = now + Number(offsetHours) * 3600e3;
+  const dayStart = Math.floor(shifted / dayMs) * dayMs;
+  const dayOfWeek = new Date(dayStart).getUTCDay();
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  return new Date(dayStart - daysSinceMonday * dayMs).toISOString().slice(0, 10);
+}
+
 export async function recordDailyLossLog({ strategy, state, now = Date.now(), deps = {} }) {
   const cfg = strategy.dailyReview ?? {};
   const learn = strategy.learning ?? {};
@@ -28,7 +37,15 @@ export async function recordDailyLossLog({ strategy, state, now = Date.now(), de
     if (now < reviewAt) return { status: 'too-early', log: null };
   }
   const date = dateFromLabel(window.label, new Date(window.sinceMs).toISOString().slice(0, 10));
+  const currentWeek = weekKey(now, cfg.dayOffsetHours ?? 7);
+  if (state.lossLogWeek !== currentWeek) {
+    state.lossLogs = [];
+    state.lossLogWeek = currentWeek;
+  }
   const existing = (state.lossLogs ?? []).find((log) => log.date === date);
+  if (!existing && deps.refreshExistingOnly) {
+    return { status: 'not-recorded', log: null };
+  }
   const hasUnknown = existing?.losses?.some((loss) => loss.cause === 'chua-du-nen');
   if (existing && !deps.force && !(deps.refreshUnknown && hasUnknown)) {
     return { status: 'already-logged', log: existing };
@@ -65,7 +82,7 @@ export async function recordDailyLossLog({ strategy, state, now = Date.now(), de
     losses: (analysis.rows ?? []).map(compactLoss),
   };
 
-  const keep = Math.max(7, Number(learn.dailyLossLogHistoryDays ?? 90));
+  const keep = Math.max(1, Math.min(7, Number(learn.dailyLossLogHistoryDays ?? 7)));
   state.lossLogs = [...(state.lossLogs ?? []).filter((item) => item.date !== date), log]
     .sort((a, b) => String(a.date).localeCompare(String(b.date)))
     .slice(-keep);

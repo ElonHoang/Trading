@@ -209,7 +209,11 @@ try {
     // nến. Nhờ đó kèo 4h có thêm thời gian nhưng không tải lại mọi log đã rõ.
     for (const dayOffsetDays of [-1, -2]) {
       const result = await recordDailyLossLog({
-        strategy, state, deps: { dayOffsetDays, refreshUnknown: true },
+        strategy, state, deps: {
+          dayOffsetDays,
+          refreshUnknown: true,
+          refreshExistingOnly: dayOffsetDays < -1,
+        },
       });
       if (result.log) {
         console.error(`[daily-loss-log] ${result.status} · ${result.log.date} · ${result.log.totalLosses} kèo thua`);
