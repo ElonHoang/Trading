@@ -7,7 +7,7 @@
 //
 // Khác `auto-retune.js` ở hai điểm, và đó là lý do nó tồn tại riêng:
 //  1. Kích hoạt theo THỜI GIAN, không theo chuỗi 3 SL liên tiếp.
-//  2. Kèo 'breakeven' (chạm TP1 rồi SL kéo về entry) KHÔNG tính là thua.
+//  2. W = đã chạm ít nhất TP1; L = chạm SL khi chưa chạm TP1.
 //
 // Điểm khác thứ ba đã hết: bộ candidate giờ DÙNG CHUNG (`buildRiskCandidates`).
 // Trước đây auto-retune siết đúng những núm mà repo đã đo là làm xấu thêm, tức
@@ -32,11 +32,17 @@ export { tradeReturnPercent };
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const round = (value, digits = 2) => (Number.isFinite(Number(value)) ? Number(Number(value).toFixed(digits)) : null);
 
-// 'stopped'  = chạm SL khi CHƯA chốt phần nào -> đây mới là lệnh thua thật.
-// 'breakeven'= đã chốt 50% ở TP1, SL đã kéo về entry rồi mới quay lại -> có lãi
-//              nhỏ, gọi là thua sẽ làm hỏng cả phép đo lẫn quyết định sau đó.
 const LOST = 'stopped';
 const BREAKEVEN = 'breakeven';
+
+function reachedTp1(trade) {
+  // TP được ghi theo thứ tự, nên chỉ cần có bất kỳ hitTps nào là TP1 đã qua.
+  // Cách này còn đọc đúng các bản ghi cũ bị thiếu mảng `targets`.
+  if ((trade.result?.hitTps ?? []).length > 0) return true;
+  // Bản ghi `target` cũ có thể chưa lưu hitTps nhưng đã chạm TP cuối, nên chắc
+  // chắn cũng đã đạt ít nhất TP1.
+  return trade.result?.status === 'target';
+}
 
 const DAY_MS = 86400e3;
 
@@ -78,9 +84,10 @@ export function reviewWindow(cfg = {}, now = Date.now()) {
 }
 
 /**
- * Thống kê theo đúng cách người dùng yêu cầu: lệnh thua là lệnh chạm SL mà chưa
- * chốt được TP1. Trả cả hai cách tính mẫu số vì "không tính kèo SL do đã done
- * TP1" có thể hiểu là bỏ khỏi tử số hoặc bỏ khỏi cả hai.
+ * Thống kê theo đúng cách người dùng yêu cầu:
+ * - W: kèo đã chạm ít nhất TP1, bất kể sau đó target/breakeven/expired.
+ * - L: kèo chạm SL khi chưa chạm TP1.
+ * Mẫu số tỷ lệ là W + L; kèo hết hạn chưa TP1 không bị ép vào nhóm nào.
  */
 export function summarizeCalls(trades, {
   sinceMs = null, untilMs = null, partialFraction = 0.5, feePercent = 0.06,
@@ -94,12 +101,12 @@ export function summarizeCalls(trades, {
       return (sinceMs == null || at >= sinceMs) && (untilMs == null || at < untilMs);
     });
   const by = (status) => inWindow.filter((t) => t.result?.status === status);
-  const lost = by(LOST);
+  const won = inWindow.filter(reachedTp1);
+  const lost = inWindow.filter((t) => t.result?.status === LOST && !reachedTp1(t));
   const breakeven = by(BREAKEVEN);
-  const won = by('target');
   const expired = by('expired');
   const closed = inWindow.length;
-  const exBe = closed - breakeven.length;
+  const rated = won.length + lost.length;
 
   // Lãi/lỗ từng kèo, rồi tổng của cả kỳ. Cộng thẳng % của từng kèo = giả định
   // MỌI KÈO VÀO CÙNG MỘT CỠ VỐN — đúng với kiểu kênh tín hiệu, và là cách duy
@@ -115,10 +122,10 @@ export function summarizeCalls(trades, {
     breakeven: breakeven.length,
     won: won.length,
     expired: expired.length,
-    // W/L/H theo đúng form: hết hạn không bị ép vào bất kỳ nhóm nào.
+    rated,
+    unrated: closed - rated,
     win: won.length,
     loss: lost.length,
-    draw: breakeven.length,
     pnlPercent,
     capitalPerTradeUsd,
     // Mỗi lệnh dùng cùng một lượng vốn, nên tổng tiền = tổng % × vốn/lệnh.
@@ -126,11 +133,11 @@ export function summarizeCalls(trades, {
     // Kèo thiếu giá thoát (dữ liệu cũ) bị loại khỏi tổng PnL — nói ra để không
     // ai đọc nhầm là đã tính đủ.
     pnlFromTrades: measured.length,
-    lossRatePercent: closed ? round((lost.length / closed) * 100, 1) : null,
-    // Bỏ hẳn kèo breakeven khỏi mẫu số.
-    lossRateExcludingBreakevenPercent: exBe > 0 ? round((lost.length / exBe) * 100, 1) : null,
-    winRatePercent: closed ? round((won.length / closed) * 100, 1) : null,
+    lossRatePercent: rated ? round((lost.length / rated) * 100, 1) : null,
+    winRatePercent: rated ? round((won.length / rated) * 100, 1) : null,
     trades: inWindow,
+    ratedTrades: [...won, ...lost],
+    wonTrades: won,
     lostTrades: lost,
   };
 }
@@ -159,7 +166,7 @@ export function compareDailyPerformance(trades, cfg = {}, now = Date.now(), pnlO
     days.push({
       date, sinceMs, untilMs,
       ...summary,
-      bad: summary.closed >= minTradesPerDay
+      bad: summary.rated >= minTradesPerDay
         && summary.lossRatePercent != null
         && summary.lossRatePercent > target,
     });
@@ -171,18 +178,18 @@ export function compareDailyPerformance(trades, cfg = {}, now = Date.now(), pnlO
       ? round(day.lossRatePercent - previous.lossRatePercent, 1) : null;
     day.pnlDelta = previous?.pnlPercent != null && day.pnlPercent != null
       ? round(day.pnlPercent - previous.pnlPercent, 2) : null;
-    if (day.closed) previous = day;
+    if (day.rated) previous = day;
   }
 
   const sinceMs = endMs - lookbackDays * DAY_MS;
   const aggregate = summarizeCalls(trades, { ...pnlOptions, sinceMs, untilMs: endMs });
-  const eligibleDays = days.filter((day) => day.closed >= minTradesPerDay).length;
+  const eligibleDays = days.filter((day) => day.rated >= minTradesPerDay).length;
   const badDays = days.filter((day) => day.bad).length;
 
   const repeatedBy = (key) => {
     const totals = new Map();
     for (const day of days) {
-      const dayTotals = tally(day.trades, (trade) => trade[key]);
+      const dayTotals = tally(day.ratedTrades, (trade) => trade[key]);
       const dayLost = tally(day.lostTrades, (trade) => trade[key]);
       for (const [value, total] of dayTotals) {
         const lost = dayLost.get(value) ?? 0;
@@ -210,12 +217,22 @@ export function compareDailyPerformance(trades, cfg = {}, now = Date.now(), pnlO
 }
 
 function compactComparison(comparison) {
-  const compact = ({ trades: unusedTrades, lostTrades: unusedLost, ...summary }) => summary;
+  const compact = ({
+    trades: unusedTrades, ratedTrades: unusedRated, wonTrades: unusedWon,
+    lostTrades: unusedLost, ...summary
+  }) => summary;
   return {
     ...comparison,
     days: comparison.days.map(compact),
     aggregate: compact(comparison.aggregate),
   };
+}
+
+function compactCallSummary({
+  trades: unusedTrades, ratedTrades: unusedRated, wonTrades: unusedWon,
+  lostTrades: unusedLost, ...summary
+}) {
+  return summary;
 }
 
 const NUMERIC_FIELDS = [
@@ -245,7 +262,7 @@ function tally(trades, pick) {
  */
 export function diagnoseLosses(summary) {
   const lost = summary.lostTrades;
-  const rest = summary.trades.filter((t) => t.result?.status !== LOST);
+  const rest = summary.wonTrades;
   const numeric = [];
   for (const field of NUMERIC_FIELDS) {
     const take = (rows) => rows
@@ -269,7 +286,7 @@ export function diagnoseLosses(summary) {
   numeric.sort((x, y) => Math.abs(y.deltaPercent ?? 0) - Math.abs(x.deltaPercent ?? 0));
 
   const rateBy = (pick) => {
-    const all = tally(summary.trades, pick);
+    const all = tally(summary.ratedTrades, pick);
     const bad = tally(lost, pick);
     return [...all.entries()]
       .map(([key, total]) => ({
@@ -590,10 +607,10 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   // Ngược lại, vẫn bắt buộc lỗi phải xuất hiện ở nhiều ngày để tránh tối ưu theo
   // một phiên bất thường.
   const decisionSummary = comparison.aggregate;
-  if (decisionSummary.closed < minTrades) {
+  if (decisionSummary.rated < minTrades) {
     const report = {
       status: 'not-enough-data', ...base, target,
-      summary: { ...summary, trades: undefined, lostTrades: undefined }, minClosedTrades: minTrades,
+      summary: compactCallSummary(summary), minClosedTrades: minTrades,
     };
     state.reviews = [...(state.reviews ?? []), {
       at: base.at, status: report.status, closed: summary.closed,
@@ -603,15 +620,16 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     return report;
   }
 
-  // Không có kết quả mới trong ngày đang rà thì chỉ hiển thị chuỗi so sánh. Nếu
-  // vẫn chạy optimizer, cùng một mẫu cũ có thể nới SL thêm một bước mỗi ngày.
-  if (!summary.closed) {
+  // Không có W/L mới trong ngày đang rà thì chỉ hiển thị chuỗi so sánh. Kèo hết
+  // hạn trắng tay vẫn nằm trong tổng số/PnL nhưng không đủ để kích hoạt optimizer.
+  if (!summary.rated) {
     const report = {
       status: 'no-new-data', ...base, target,
-      summary: { ...summary, trades: undefined, lostTrades: undefined }, minClosedTrades: minTrades,
+      summary: compactCallSummary(summary), minClosedTrades: minTrades,
     };
     state.reviews = [...(state.reviews ?? []), {
-      at: base.at, status: report.status, closed: 0, lossRatePercent: null, pnlPercent: null,
+      at: base.at, status: report.status, closed: summary.closed,
+      rated: 0, lossRatePercent: null, pnlPercent: summary.pnlPercent,
     }].slice(-30);
     await persist(state);
     return report;
@@ -624,7 +642,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   if (decisionSummary.lossRatePercent != null && decisionSummary.lossRatePercent <= target) {
     const report = {
       status: 'on-target', ...base, target,
-      summary: { ...summary, trades: undefined, lostTrades: undefined }, diagnosis, worstInterval,
+      summary: compactCallSummary(summary), diagnosis, worstInterval,
     };
     state.reviews = [...(state.reviews ?? []), {
       at: base.at, status: report.status, closed: summary.closed,
@@ -637,7 +655,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   if (!comparison.repeatedIssue) {
     const report = {
       status: 'monitoring-pattern', ...base, target,
-      summary: { ...summary, trades: undefined, lostTrades: undefined }, diagnosis, worstInterval,
+      summary: compactCallSummary(summary), diagnosis, worstInterval,
     };
     state.reviews = [...(state.reviews ?? []), {
       at: base.at, status: report.status, closed: summary.closed,
@@ -654,7 +672,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     const report = {
       status: 'cooldown', ...base, target,
       nextTuneAt: new Date(lastAppliedAt + cooldownHours * 3600e3).toISOString(),
-      summary: { ...summary, trades: undefined, lostTrades: undefined }, diagnosis, worstInterval,
+      summary: compactCallSummary(summary), diagnosis, worstInterval,
     };
     state.reviews = [...(state.reviews ?? []), {
       at: base.at, status: report.status, closed: summary.closed,
@@ -668,7 +686,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     const report = {
       status: 'no-supported-change', ...base, target,
       cause: base.postMortem?.verdict ?? null,
-      summary: { ...summary, trades: undefined, lostTrades: undefined }, diagnosis, worstInterval,
+      summary: compactCallSummary(summary), diagnosis, worstInterval,
     };
     state.reviews = [...(state.reviews ?? []), {
       at: base.at, status: report.status, closed: summary.closed,
@@ -763,7 +781,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     const report = {
       status: selected ? (applied ? 'applied' : 'proposed') : 'no-safe-change',
       ...base, target, guardInterval,
-      summary: { ...summary, trades: undefined, lostTrades: undefined },
+      summary: compactCallSummary(summary),
       diagnosis, worstInterval,
       baselines,
       candidates: evaluated.map(({ strategy: unused, ...rest }) => rest),
@@ -794,7 +812,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   } catch (error) {
     const report = {
       status: 'failed', ...base, target, error: error.message,
-      summary: { ...summary, trades: undefined, lostTrades: undefined }, diagnosis, worstInterval,
+      summary: compactCallSummary(summary), diagnosis, worstInterval,
     };
     state.reviews = [...(state.reviews ?? []), { at: base.at, status: report.status, error: error.message }].slice(-30);
     await persist(state);
@@ -859,9 +877,10 @@ function pushDailyComparison(L, report) {
     const label = day.date.split('-').reverse().slice(0, 2).join('/');
     const delta = day.lossRateDelta == null ? ''
       : ` · ΔSL ${day.lossRateDelta > 0 ? '+' : ''}${pct(day.lossRateDelta)}`;
-    L.push(`   · ${label}: ${day.closed} kèo · SL ${pct(day.lossRatePercent)} · PnL ${pct(day.pnlPercent)}${delta}`);
+    L.push(`   · ${label}: ${day.rated} kèo W/L (${day.closed} đã đóng) · `
+      + `SL ${pct(day.lossRatePercent)} · PnL ${pct(day.pnlPercent)}${delta}`);
   }
-  L.push(`   → Gộp ${c.aggregate.closed} kèo: SL ${pct(c.aggregate.lossRatePercent)} · `
+  L.push(`   → Gộp ${c.aggregate.rated} kèo W/L: SL ${pct(c.aggregate.lossRatePercent)} · `
     + `PnL ${pct(c.aggregate.pnlPercent)} · ${c.badDays}/${c.eligibleDays} ngày đủ mẫu vượt mục tiêu`);
   const repeated = [
     ...(c.persistent?.byInterval ?? []).slice(0, 2).map((row) => `khung ${row.key} (${row.badDays} ngày)`),
@@ -902,10 +921,9 @@ export function formatDailyReview(report) {
   L.push(`Tổng số lệnh: <b>${s.closed}</b>`);
   L.push('<i>Không bao gồm các kèo đang mở.</i>');
   L.push('');
-  L.push(`Tỉ lệ W/L/H: <b>${s.win ?? s.won} W - ${s.loss ?? s.lost} L - ${s.draw ?? s.breakeven} H</b>`);
-  L.push('Win (W): Kèo chạm đến TP cuối cùng.');
-  L.push('Loss (L): Kèo dính SL khi chưa kịp chốt lời phần nào.');
-  L.push('Hòa (H): Kèo đã chốt lời ở TP1 nhưng sau đó quay lại cắn Entry.');
+  L.push(`Tỉ lệ W/L: <b>${s.win ?? s.won} W - ${s.loss ?? s.lost} L</b>`);
+  L.push('Win (W): Kèo đã chạm ít nhất TP1.');
+  L.push('Loss (L): Kèo chạm SL khi chưa chạm TP1.');
   L.push('');
   L.push(`Tổng Lợi nhuận (PnL): <b>${s.closed ? pnlText : '0,00$ (+0,00%)'}</b>`);
   L.push(`Điều kiện tính toán: Giả định vốn vào mọi lệnh bằng nhau (${vi(capital)}$) và chưa nhân đòn bẩy. Đã trừ phí sàn cho mỗi lần thoát lệnh.`);
@@ -927,22 +945,21 @@ export function formatDailyReview(report) {
   L.push('');
   L.push(`📋 <b>RÀ SOÁT ${report.window?.label ?? `${report.everyHours}H`}</b> — chỉ tính kèo đã chốt, `
     + 'kèo đang mở chưa vào sổ');
-  L.push(`Đã đóng ${s.closed} kèo: 🎯 ${s.won} chạm TP · 🛑 ${s.lost} dính SL · 🛡 ${s.breakeven} về hoà vốn · ⏱ ${s.expired} hết hạn`);
-  L.push(`<b>Tỉ lệ thua ${pct(s.lossRatePercent)}</b> (không tính ${s.breakeven} kèo đã chốt TP1 rồi mới về entry)`);
+  L.push(`Đã đóng ${s.closed} kèo: ✅ ${s.won} đã chạm TP1+ · 🛑 ${s.lost} chạm SL trước TP1`
+    + ` · ⏱ ${s.unrated} chưa TP1 và không chạm SL`);
+  L.push(`<b>Tỉ lệ thắng ${pct(s.winRatePercent)} · tỷ lệ thua ${pct(s.lossRatePercent)}</b> `
+    + `(mẫu số ${s.rated} kèo W + L)`);
   if (pnl != null && s.pnlFromTrades != null && s.pnlFromTrades < s.closed) {
     L.push(`⚠️ Chỉ cộng được PnL của ${s.pnlFromTrades}/${s.closed} kèo; số còn lại thiếu giá thoát trong nhật ký.`);
   }
-  if (s.lossRateExcludingBreakevenPercent != null && s.breakeven > 0) {
-    L.push(`Nếu bỏ hẳn kèo hoà vốn khỏi mẫu số: ${pct(s.lossRateExcludingBreakevenPercent)}`);
-  }
-  L.push(`Thắng ${pct(s.winRatePercent)} · mục tiêu tỉ lệ thua ≤ ${report.target}%`);
+  L.push(`Mục tiêu tỉ lệ thua ≤ ${report.target}%`);
 
   pushPostMortem(L, report);
   pushRetune(L, report);
 
   if (report.status === 'not-enough-data') {
     L.push('');
-    L.push(`ℹ️ Chuỗi so sánh mới có ${report.comparison?.aggregate?.closed ?? s.closed} kèo đã đóng, `
+    L.push(`ℹ️ Chuỗi so sánh mới có ${report.comparison?.aggregate?.rated ?? s.rated} kèo W/L, `
       + `cần tối thiểu ${report.minClosedTrades} mới đủ mẫu để đem đi backtest. Chỉ báo cáo, <b>không chỉnh gì</b>.`);
     return L.join('\n');
   }

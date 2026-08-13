@@ -108,7 +108,7 @@
     "guardExpectancyTolerance": 0.02
   },
   "dailyReview": {
-    "_note": "Rà soát định kỳ: đo tỉ lệ thua trên các kèo ĐÃ CHỐT trong kỳ, truy nguyên đặc điểm lệnh thua, rồi kiểm chứng các phương án chỉnh bằng backtest chia 75% chọn / 25% mới hơn xác nhận. Kèo 'breakeven' (đã chốt TP1 rồi mới về entry) KHÔNG tính là thua. Kèo đang mở không bao giờ được tính — chỉ vào sổ lúc chạm SL/TP/hết hạn. Chạy bằng: npm run review:daily",
+    "_note": "Rà soát định kỳ: W = kèo đã chạm ít nhất TP1; L = kèo chạm SL khi chưa chạm TP1; tỷ lệ dùng mẫu số W + L. Kèo hết hạn chưa TP1 và chưa SL không bị ép vào nhóm nào. Sau đó truy nguyên đặc điểm lệnh thua và kiểm chứng phương án chỉnh bằng backtest chia 75% chọn / 25% mới hơn xác nhận. Kèo đang mở không bao giờ được tính. Chạy bằng: npm run review:daily",
     "enabled": true,
     "_noteOptimizeInScanner": "Alert runner kiểm tra optimizer tối đa mỗi everyHours và là nơi ghi activeTuning vào state bền vững. Job gửi báo cáo vẫn chạy --no-write để tránh hai tiến trình cùng ghi.",
     "optimizeInScanner": true,

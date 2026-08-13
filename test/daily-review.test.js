@@ -22,8 +22,8 @@ function trade(date, status, { interval = '4h', side = 'long', index = 0 } = {})
     targets: [{ label: 'TP1', price: 103 }, { label: 'TP2', price: 106 }],
     result: {
       status,
-      hitTps: status === 'target' ? ['TP1', 'TP2'] : [],
-      lastPrice: status === 'target' ? 106 : 96,
+      hitTps: status === 'target' ? ['TP1', 'TP2'] : status === 'breakeven' ? ['TP1'] : [],
+      lastPrice: status === 'target' ? 106 : status === 'breakeven' ? 100 : 96,
     },
     evidence: { score: 40, consensusPercent: 70, riskPercent: 4, cvdSlope: 0.05, volumeRatio: 1.2 },
   };
@@ -328,17 +328,25 @@ test('limit order uses the anchored limit price, not the zone midpoint or curren
   assert.match(caption, /KHÔNG vào giá hiện tại/);
 });
 
-test('daily summary follows the custom W/L/H form and shows PnL for 200 USD per trade', () => {
+test('daily summary counts TP1+ as wins and pre-TP1 stops as losses', () => {
   const trades = [
     trade('2026-08-11', 'target', { index: 1 }),
     trade('2026-08-11', 'stopped', { index: 2 }),
     trade('2026-08-11', 'breakeven', { index: 3 }),
     trade('2026-08-11', 'expired', { index: 4 }),
+    {
+      ...trade('2026-08-11', 'expired', { index: 5 }),
+      result: { status: 'expired', hitTps: ['TP1'], lastPrice: 102 },
+    },
   ];
   const summary = summarizeCalls(trades, { capitalPerTradeUsd: 200 });
-  assert.deepEqual([summary.win, summary.loss, summary.draw], [1, 1, 1]);
-  assert.equal(summary.closed, 4);
-  assert.equal(summary.expired, 1);
+  assert.deepEqual([summary.win, summary.loss], [3, 1]);
+  assert.equal(summary.closed, 5);
+  assert.equal(summary.rated, 4);
+  assert.equal(summary.unrated, 1);
+  assert.equal(summary.expired, 2);
+  assert.equal(summary.winRatePercent, 75);
+  assert.equal(summary.lossRatePercent, 25);
   assert.equal(summary.pnlUsd, Number((summary.pnlPercent * 2).toFixed(2)));
 
   const text = formatDailyReview({
@@ -346,8 +354,9 @@ test('daily summary follows the custom W/L/H form and shows PnL for 200 USD per 
     window: { label: 'NGÀY 11/08/2026' }, comparison: null,
   });
   assert.match(text, /🌟 <b>Tổng Quan Hiệu Suất<\/b>/);
-  assert.match(text, /Tổng số lệnh: <b>4<\/b>/);
-  assert.match(text, /Tỉ lệ W\/L\/H: <b>1 W - 1 L - 1 H<\/b>/);
+  assert.match(text, /Tổng số lệnh: <b>5<\/b>/);
+  assert.match(text, /Tỉ lệ W\/L: <b>3 W - 1 L<\/b>/);
+  assert.match(text, /Tỉ lệ thắng 75% · tỷ lệ thua 25%/);
   assert.match(text, /Giả định vốn vào mọi lệnh bằng nhau \(200\$\)/);
   assert.doesNotMatch(text, /Thị trường chung/);
 });

@@ -337,13 +337,13 @@ Tổng số lệnh:
 
 Không bao gồm các kèo đang mở.
 
-Tỉ lệ W/L/H:
+Tỉ lệ W/L:
 
-Win (W): Kèo chạm đến TP cuối cùng.
+Win (W): Kèo đã chạm ít nhất TP1.
 
-Loss (L): Kèo dính SL khi chưa kịp chốt lời phần nào.
+Loss (L): Kèo chạm SL khi chưa chạm TP1.
 
-Hòa (H): Kèo đã chốt lời ở TP1 nhưng sau đó quay lại cắn Entry.
+Mẫu số tính tỷ lệ là W + L. Kèo hết hạn chưa TP1 và chưa chạm SL không tính vào tỷ lệ.
 
 Tổng Lợi nhuận (PnL):
 
