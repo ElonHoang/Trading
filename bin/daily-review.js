@@ -6,6 +6,7 @@
 //        npm run review:daily -- --state <file>     đọc trạng thái tải từ Trading-state
 //        npm run review:daily -- --telegram         gửi báo cáo vào chat cảnh báo
 //        npm run review:daily -- --no-write          không ghi lại trạng thái
+//        npm run review:daily -- --no-train          chỉ báo cáo, không backtest
 //        npm run review:daily -- --json             in nguyên báo cáo dạng JSON
 //        npm run learn:losses                        học + lưu log JSON/TXT mỗi ngày
 
@@ -36,6 +37,7 @@ if (stateFile) {
       trades: Array.isArray(parsed?.trades) ? parsed.trades : [],
       attempts: Array.isArray(parsed?.attempts) ? parsed.attempts : [],
       reviews: Array.isArray(parsed?.reviews) ? parsed.reviews : [],
+      lossLogs: Array.isArray(parsed?.lossLogs) ? parsed.lossLogs : [],
       activeTuning: parsed?.activeTuning ?? null,
       lastReviewAt: parsed?.lastReviewAt ?? null,
       lastAppliedAt: parsed?.lastAppliedAt ?? null,
@@ -62,7 +64,10 @@ if (stateFile || has('--no-write')) {
 
 // Đọc từ file chỉ định thì không ghi ngược lại — tránh sửa nhầm bản sao lấy từ
 // repo trạng thái. Chỉ ghi khi dùng đúng file trạng thái cục bộ.
-const deps = { force: has('--force') };
+const deps = {
+  force: has('--force'),
+  skipTraining: has('--no-train') || (has('--telegram') && has('--no-write')),
+};
 if (stateFile || has('--no-write')) deps.saveState = async () => {};
 
 const report = await runDailyReview({ strategy, state, deps });

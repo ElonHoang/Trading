@@ -76,8 +76,8 @@
     "blockedIntervals": []
   },
   "autoRetune": {
-    "_note": "Sau 3 SL LIÊN TIẾP, bot lưu bằng chứng và kiểm chứng nhanh trên 75% lịch sử + 25% mới hơn, nhưng chỉ ghi chẩn đoán. Vòng dailyReview chờ đủ nến post-mortem, xác định đúng nguyên nhân rồi mới có quyền tự áp dụng.",
-    "enabled": true,
+    "_note": "Đã tắt trên production. Bot chỉ ghi kèo thua và nguyên nhân hằng ngày; training/backtest sau chuỗi SL chỉ chạy khi người dùng chủ động bật ở local.",
+    "enabled": false,
     "_noteRuntimeApply": "Tắt có chủ đích: ngay lúc vừa đủ 3 SL chưa có đủ nến sau để biết bị quét hay sai hướng. Nhánh này chỉ chẩn đoán; dailyReview sau post-mortem mới có quyền tự áp dụng.",
     "runtimeApply": false,
     "_noteAutoApply": "Giữ false để nhánh chuỗi SL không chỉnh trước khi có kết luận post-mortem. dailyReview.runtimeApply mới là đường tự áp dụng chính.",
@@ -108,10 +108,10 @@
     "guardExpectancyTolerance": 0.02
   },
   "dailyReview": {
-    "_note": "Rà soát định kỳ: W = kèo đã chạm ít nhất TP1; L = kèo chạm SL khi chưa chạm TP1; tỷ lệ dùng mẫu số W + L. Kèo hết hạn chưa TP1 và chưa SL không bị ép vào nhóm nào. Sau đó truy nguyên đặc điểm lệnh thua và kiểm chứng phương án chỉnh bằng backtest chia 75% chọn / 25% mới hơn xác nhận. Kèo đang mở không bao giờ được tính. Chạy bằng: npm run review:daily",
+    "_note": "Rà soát định kỳ: W = kèo đã chạm ít nhất TP1; L = kèo chạm SL khi chưa chạm TP1; tỷ lệ dùng mẫu số W + L. Production chỉ báo cáo và ghi nguyên nhân, không training. Người dùng chạy npm run train:losses ở local để kiểm chứng phương án bằng backtest 75%/25%. Kèo đang mở không bao giờ được tính.",
     "enabled": true,
-    "_noteOptimizeInScanner": "Alert runner kiểm tra optimizer tối đa mỗi everyHours và là nơi ghi activeTuning vào state bền vững. Job gửi báo cáo vẫn chạy --no-write để tránh hai tiến trình cùng ghi.",
-    "optimizeInScanner": true,
+    "_noteOptimizeInScanner": "Đã tắt: alert runner chỉ ghi lossLogs hằng ngày; training/backtest do người dùng chạy local.",
+    "optimizeInScanner": false,
     "everyHours": 24,
     "_noteWindow": "windowMode quyết định ĐẾM NHỮNG KÈO NÀO, khác everyHours (chỉ là nhịp chạy). 'calendar-day' = chỉ kèo chốt trong ngày hôm nay, qua 00:00 theo dayOffsetHours là reset về 0 — đây là mặc định. 'rolling' = windowHours giờ gần nhất. 'all' = cộng dồn toàn bộ lịch sử đang lưu (autoRetune.historyLimit giới hạn 200 kèo); đây là chế độ cũ, nó làm báo cáo hiện mấy chục kèo dưới tiêu đề '24H'.",
     "windowMode": "calendar-day",
@@ -166,6 +166,9 @@
   "learning": {
     "_note": "Học lại từ kèo đã dính SL mà CHƯA chốt được TP1 ('stopped'; chạm TP1 rồi mới về entry là 'breakeven', KHÔNG tính là thua và không đem đi mổ xẻ). Neo vào BÁO CÁO TỔNG HỢP CUỐI NGÀY, không phải vào từng lần dính SL: báo cáo hiện ra thì có pauseAfterReviewMinutes phút soi lại các kèo thua, trong khoảng đó không mở kèo mới. Bản rà soát phát lại từng kèo trên nến thật để phân loại nguyên nhân, và KHÔNG tự đổi cấu hình — nó chỉ nói nên đem hướng nào đi backtest.",
     "enabled": true,
+    "dailyLossLogEnabled": true,
+    "dailyLossLogHistoryDays": 90,
+    "_noteDailyLossLog": "Vòng quét chỉ ghi kèo stopped trước TP1 của đúng từng ngày vào lossLogs trong auto-retune state. Không backtest, không sinh candidate, không sửa chỉ số. Bản còn 'chưa đủ nến' được phát lại vào ngày sau để khung 4h có thêm dữ liệu.",
     "_notePause": "Chặn MỞ kèo mới, không chặn theo dõi kèo đang chạy — dừng theo dõi thì kèo đang mở mất người canh, nguy hiểm hơn thứ cửa này định phòng. reviewAtUtc phải khớp cron của Trading-runner/.github/workflows/daily-review.yml ('7 1 * * *' = 01:07 UTC = 08:07 giờ VN); lệch thì cửa mở sai lúc. Cửa suy ra từ đồng hồ, không lưu trạng thái, vì bản rà soát chạy --no-write nên không có đường ghi lại 'tôi vừa báo cáo xong'.",
     "_noteCadence": "CẢNH BÁO NHỊP: scheduled workflow trên GitHub bị throttle còn ~3 tiếng/lượt, nên cửa 30 phút chỉ có khoảng 1/6 cơ hội có lượt quét rơi vào. Muốn chắc chắn chặn được ít nhất một lượt thì đặt 180. Chạy Dockerfile ở máy riêng (pollSeconds 300) thì 30 là đủ và đúng nghĩa.",
     "reviewAtUtc": "01:07",

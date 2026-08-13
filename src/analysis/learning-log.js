@@ -8,7 +8,7 @@ import { DATA_DIR } from '../config.js';
 
 const DEFAULT_DIR = path.join(DATA_DIR, 'loss-learning');
 
-const compactLoss = (row) => ({
+export const compactLoss = (row) => ({
   tradeId: row.tradeId ?? null,
   symbol: row.symbol ?? null,
   interval: row.interval ?? null,

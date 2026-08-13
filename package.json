@@ -19,6 +19,7 @@
     "backtest": "node --env-file-if-exists=.env bin/backtest.js",
     "review:daily": "node --env-file-if-exists=.env bin/daily-review.js",
     "learn:losses": "node --env-file-if-exists=.env bin/daily-review.js --force --yesterday --log-learning",
+    "train:losses": "node --env-file-if-exists=.env bin/daily-review.js --force --yesterday --log-learning",
     "diagnose:sl": "node --env-file-if-exists=.env bin/diagnose-stoploss.js",
     "validate:filters": "node --env-file-if-exists=.env bin/validate-entry-filters.js",
     "models:index": "node bin/build-model-index.js"

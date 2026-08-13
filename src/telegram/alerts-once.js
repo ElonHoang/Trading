@@ -16,7 +16,7 @@ import { setCallMessages } from '../data/open-calls.js';
 import { buildCaption, buildClosedNote, buildTpUpdate, splitCaption } from './caption.js';
 import { createMonitor } from './monitor.js';
 import { applyActiveTuning, readAutoRetuneState } from '../analysis/auto-retune.js';
-import { runDailyReview } from '../analysis/daily-review.js';
+import { recordDailyLossLog } from '../analysis/daily-loss-log.js';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const chatIds = [...new Set(
@@ -54,15 +54,14 @@ const CANDLES = 300;
  * Trước đây cả cơ chế `auto-retune` bị TẮT vì lý do đó — hệ quả là phần tự kiểm
  * chứng sau chuỗi SL chưa từng chạy thật lần nào.
  *
- * Nhánh chuỗi SL chỉ kiểm chứng và ghi chẩn đoán. Nó không tự áp dụng vì ngay lúc
- * chạm SL chưa đủ nến sau để phân biệt bị quét với sai hướng; optimizer ngày sẽ
- * làm việc đó sau post-mortem.
+ * Training tự động đã tắt hoàn toàn. Runner chỉ ghi dữ liệu kèo và lossLogs;
+ * người dùng chủ động chạy training local khi muốn đánh giá phương án sửa.
  */
 async function loadActionStrategy() {
   const strategy = applyActiveTuning(await loadStrategy(), await readAutoRetuneState());
   return {
     ...strategy,
-    autoRetune: { ...(strategy.autoRetune ?? {}), enabled: true, autoApply: false },
+    autoRetune: { ...(strategy.autoRetune ?? {}), enabled: false, autoApply: false },
   };
 }
 
@@ -200,21 +199,25 @@ const monitor = createMonitor({
 console.log(`Bắt đầu một lượt quét cảnh báo cho ${chatIds.length} chat.`);
 await monitor.tick();
 
-// Alert runner là tiến trình sở hữu và ghi lại auto-retune.json. Chạy optimizer
-// theo lịch ở đây để activeTuning sống qua runner kế tiếp; job gửi báo cáo ngày
-// dùng --no-write nên chỉ có trách nhiệm trình bày, không tranh quyền ghi state.
+// Alert runner là tiến trình sở hữu và ghi lại auto-retune.json. Mỗi ngày nó chỉ
+// lưu kèo thua + nguyên nhân vào state bền vững; training/backtest chạy thủ công.
 try {
   const strategy = await loadActionStrategy();
-  if (strategy.dailyReview?.optimizeInScanner !== false) {
+  if (strategy.learning?.dailyLossLogEnabled !== false) {
     const state = await readAutoRetuneState();
-    const review = await runDailyReview({ strategy, state });
-    if (!['too-soon', 'disabled'].includes(review.status)) {
-      const selected = review.selected ? ` · ${review.selected.label}` : '';
-      console.error(`[daily-optimizer] ${review.status}${selected}`);
+    // Bản hôm qua được tạo mới; bản hôm kia chỉ phát lại nếu lần trước còn thiếu
+    // nến. Nhờ đó kèo 4h có thêm thời gian nhưng không tải lại mọi log đã rõ.
+    for (const dayOffsetDays of [-1, -2]) {
+      const result = await recordDailyLossLog({
+        strategy, state, deps: { dayOffsetDays, refreshUnknown: true },
+      });
+      if (result.log) {
+        console.error(`[daily-loss-log] ${result.status} · ${result.log.date} · ${result.log.totalLosses} kèo thua`);
+      }
     }
   }
 } catch (error) {
-  // Tự học hỏng không được làm mất kết quả quét và các tin vừa gửi.
-  console.error(`[daily-optimizer] lỗi: ${error.message}`);
+  // Ghi log hỏng không được làm mất kết quả quét và các tin vừa gửi.
+  console.error(`[daily-loss-log] lỗi: ${error.message}`);
 }
 console.log('Đã hoàn tất lượt quét cảnh báo.');

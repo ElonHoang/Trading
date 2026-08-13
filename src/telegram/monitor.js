@@ -139,7 +139,7 @@ export function createMonitor({
             //
             // Im lặng KHÔNG làm mất số liệu: `recordClosedTrade` ngay trên đã ghi
             // đủ kết quả, nên bản tổng hợp ngày vẫn đếm đúng số kèo thua và
-            // `auto-retune` vẫn thấy đủ chuỗi SL.
+            // loss logger hằng ngày vẫn thấy đủ các kèo SL trong state.
             if (result.status === 'target' || result.hitTps.length > 0) {
               await notify({ kind: 'closed', call: existing, result, snapshot });
             } else {
@@ -147,7 +147,7 @@ export function createMonitor({
                 + `${result.status} khi chưa chạm TP nào — không báo, `
                 + `để dành cho bản tổng hợp ngày.`);
             }
-            if (result.status === 'stopped' && recorded) {
+            if (result.status === 'stopped' && recorded && strategy.autoRetune?.enabled === true) {
               try {
                 const retune = await runAutoRetune({ strategy, state: recorded.state });
                 const text = formatAutoRetuneReport(retune);

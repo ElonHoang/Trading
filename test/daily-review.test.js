@@ -5,6 +5,7 @@ import { applyActiveTuning } from '../src/analysis/auto-retune.js';
 import {
   buildReviewCandidates, compareDailyPerformance, formatDailyReview, runDailyReview, summarizeCalls,
 } from '../src/analysis/daily-review.js';
+import { recordDailyLossLog } from '../src/analysis/daily-loss-log.js';
 import { evaluateEntryQuality } from '../src/analysis/entry-quality.js';
 import { buildLearningRecord } from '../src/analysis/learning-log.js';
 import { KINDS, replayStoppedCall, summarizePostMortem } from '../src/analysis/post-mortem.js';
@@ -150,6 +151,81 @@ test('post-mortem requires a strict majority before choosing one fix direction',
   ];
 
   assert.equal(summarizePostMortem(rows).verdict.id, 'hon-hop');
+});
+
+test('daily loss logger persists only yesterday pre-TP1 stops without training', async () => {
+  const yesterdayLoss = trade('2026-08-11', 'stopped', { index: 1 });
+  const state = {
+    trades: [
+      yesterdayLoss,
+      trade('2026-08-11', 'target', { index: 2 }),
+      trade('2026-08-10', 'stopped', { index: 3 }),
+    ],
+    lossLogs: [],
+  };
+  let persisted = null;
+  const result = await recordDailyLossLog({
+    strategy: {
+      dailyReview: { dayOffsetHours: 7 },
+      alerts: { maxHoldBars: 96 },
+      learning: { dailyLossLogHistoryDays: 90 },
+    },
+    state,
+    now,
+    deps: {
+      postMortemLosses: async (losses) => {
+        assert.deepEqual(losses.map((item) => item.id), [yesterdayLoss.id]);
+        return {
+          decided: 1,
+          counts: { 'sai-huong': 1 },
+          verdict: { id: 'sai-huong', text: 'Sai hướng.' },
+          rows: [{ ...yesterdayLoss, tradeId: yesterdayLoss.id, kind: 'sai-huong', barsToSl: 2 }],
+        };
+      },
+      saveState: async (next) => { persisted = structuredClone(next); },
+    },
+  });
+
+  assert.equal(result.status, 'logged');
+  assert.equal(result.log.date, '2026-08-11');
+  assert.equal(result.log.totalLosses, 1);
+  assert.equal(result.log.losses[0].cause, 'sai-huong');
+  assert.equal(persisted.lossLogs.length, 1);
+  assert.equal(persisted.activeTuning, undefined);
+});
+
+test('review-only mode never runs backtest or changes tuning', async () => {
+  const state = { trades: day('2026-08-11', 1, 1), attempts: [], reviews: [] };
+  let backtests = 0;
+  let persisted = null;
+  const report = await runDailyReview({
+    strategy: {
+      risk: { partialFraction: 0.5 },
+      alerts: { maxHoldBars: 96 },
+      learning: { enabled: true },
+      dailyReview: {
+        enabled: true, windowMode: 'calendar-day', dayOffsetHours: 7, dayOffsetDays: -1,
+        comparisonDays: 7, targetLossRatePercent: 30,
+      },
+    },
+    state,
+    now,
+    deps: {
+      force: true,
+      skipTraining: true,
+      fetchRecentCandles: async () => [],
+      postMortemLosses: async () => ({
+        total: 1, decided: 1, counts: { 'sai-huong': 1 },
+        verdict: { id: 'sai-huong' }, rows: [],
+      }),
+      runBacktest: async () => { backtests++; throw new Error('must not run'); },
+      saveState: async (next) => { persisted = structuredClone(next); },
+    },
+  });
+
+  assert.equal(report.status, 'review-only');
+  assert.equal(backtests, 0);
+  assert.equal(persisted.activeTuning, undefined);
 });
 
 test('runDailyReview backtests and persists a safe fix from repeated daily losses', async () => {

@@ -602,6 +602,23 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     }
   }
 
+  // Job production chỉ cần báo cáo và ghi nhận nguyên nhân. Training/backtest
+  // được người dùng chủ động chạy local, nên dừng trước mọi candidate và thay đổi.
+  if (deps.skipTraining) {
+    const diagnosis = comparison.aggregate.rated
+      ? diagnoseLosses(comparison.aggregate) : null;
+    const report = {
+      status: 'review-only', ...base, target,
+      summary: compactCallSummary(summary), diagnosis,
+    };
+    state.reviews = [...(state.reviews ?? []), {
+      at: base.at, status: report.status, closed: summary.closed, rated: summary.rated,
+      lossRatePercent: summary.lossRatePercent, pnlPercent: summary.pnlPercent,
+    }].slice(-30);
+    await persist(state);
+    return report;
+  }
+
   // Phần quyết định dùng mẫu GỘP nhiều ngày. Một ngày thường có ít kèo, nên chờ
   // đủ 10 lệnh trong riêng ngày đó khiến vòng tự học gần như không bao giờ chạy.
   // Ngược lại, vẫn bắt buộc lỗi phải xuất hiện ở nhiều ngày để tránh tối ưu theo
@@ -1001,6 +1018,10 @@ export function formatDailyReview(report) {
   if (report.status === 'no-supported-change') {
     L.push(`🧠 Tỉ lệ SL đang cao nhưng nguyên nhân ${report.cause?.id ?? 'chưa xác định'} chưa hỗ trợ `
       + 'một điều chỉnh cụ thể. Giữ nguyên cấu hình thay vì thử tham số không liên quan.');
+    return L.join('\n');
+  }
+  if (report.status === 'review-only') {
+    L.push('📝 Chỉ ghi nhận kèo thua và nguyên nhân. Không training, không backtest, không sửa cấu hình.');
     return L.join('\n');
   }
   if (report.status === 'failed') {
