@@ -380,7 +380,7 @@ export function buildReviewCandidates(strategy, cfg, diagnosis, postMortem = nul
   const out = causeId === 'sai-huong'
     ? buildEntryCandidates(strategy, cfg, postMortem)
     : causeId === 'noi-sl'
-      ? risk.filter((item) => ['wider-stop', 'fixed-stop'].includes(item.id))
+      ? risk.filter((item) => item.id === 'fixed-stop' || item.id.startsWith('wider-stop'))
       : causeId === 'dao-chieu'
         ? risk.filter((item) => item.id === 'nearer-tp1')
         : [];
@@ -577,6 +577,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
         maxHoldBars: Number(strategy.alerts?.maxHoldBars ?? 96),
         widerSlMultiple: Number(learn.widerSlMultiple ?? 1.5),
         minBarsAfterStop: Number(learn.minBarsAfterStop ?? 6),
+        sweepRecoveryBars: Number(learn.sweepRecoveryBars ?? 6),
         noFavorMoveR: Number(learn.noFavorMoveR ?? 0.15),
       });
     } catch (error) {

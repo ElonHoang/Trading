@@ -22,6 +22,8 @@ const compactLoss = (row) => ({
   slPercent: row.slPercent ?? null,
   neededSlPercent: row.neededSlPercent ?? null,
   reachedTp1After: row.reachedTp1After ?? null,
+  barsToTp1AfterSl: row.barsToTp1AfterSl ?? null,
+  reachedTp1Soon: row.reachedTp1Soon ?? null,
   widerStopSaves: row.widerStopSaves ?? null,
   entryEvidence: row.evidence ?? null,
 });

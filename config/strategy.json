@@ -170,11 +170,12 @@
     "_noteCadence": "CẢNH BÁO NHỊP: scheduled workflow trên GitHub bị throttle còn ~3 tiếng/lượt, nên cửa 30 phút chỉ có khoảng 1/6 cơ hội có lượt quét rơi vào. Muốn chắc chắn chặn được ít nhất một lượt thì đặt 180. Chạy Dockerfile ở máy riêng (pollSeconds 300) thì 30 là đủ và đúng nghĩa.",
     "reviewAtUtc": "01:07",
     "pauseAfterReviewMinutes": 30,
-    "_noteReplay": "widerSlMultiple = phản chứng 'nếu SL rộng gấp bấy nhiêu lần thì có thoát không', giữ nguyên entry/TP. minBarsAfterStop = số nến tối thiểu sau khi dính SL mới dám kết luận; ít hơn thì xếp vào 'chưa đủ nến' thay vì đoán. noFavorMoveR = đi thuận lợi dưới bấy nhiêu R thì coi như sai hướng ngay từ đầu.",
+    "_noteReplay": "widerSlMultiple = phản chứng 'nếu SL rộng gấp bấy nhiêu lần thì có thoát không', giữ nguyên entry/TP. minBarsAfterStop = số nến tối thiểu sau khi dính SL mới dám kết luận; ít hơn thì xếp vào 'chưa đủ nến' thay vì đoán. sweepRecoveryBars = TP1 phải quay lại trong tối đa bấy nhiêu nến sau SL mới được coi là bị quét; quay lại quá muộn có thể là một nhịp thị trường khác. noFavorMoveR = đi thuận lợi dưới bấy nhiêu R thì coi như sai hướng ngay từ đầu.",
     "maxTradesPerReview": 12,
     "replayCandles": 400,
     "widerSlMultiple": 1.5,
     "minBarsAfterStop": 6,
+    "sweepRecoveryBars": 6,
     "noFavorMoveR": 0.15
   },
   "risk": {

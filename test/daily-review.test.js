@@ -7,6 +7,7 @@ import {
 } from '../src/analysis/daily-review.js';
 import { evaluateEntryQuality } from '../src/analysis/entry-quality.js';
 import { buildLearningRecord } from '../src/analysis/learning-log.js';
+import { KINDS, replayStoppedCall, summarizePostMortem } from '../src/analysis/post-mortem.js';
 import { buildLimitPlan } from '../src/analysis/setup.js';
 import { buildCaption } from '../src/telegram/caption.js';
 
@@ -104,6 +105,51 @@ test('wrong-way post-mortem creates evidence-based entry candidates instead of w
   assert.equal(ids.includes('entry-structure-agreement'), true);
   assert.equal(ids.includes('entry-no-chasing'), true);
   assert.equal(ids.includes('entry-avoid-range-extremes'), true);
+});
+
+test('swept-loss post-mortem keeps the full wider-stop ladder', () => {
+  const result = buildReviewCandidates({
+    risk: { slPercent: 4, takeProfitR: [0.75, 1.5], preferSrLevels: false },
+  }, {
+    slPercentStep: 0.5, maxSlPercent: 6,
+  }, { byInterval: [] }, {
+    verdict: { id: 'noi-sl' }, rows: [],
+  });
+  assert.deepEqual(result.candidates.map((candidate) => candidate.changes['risk.slPercent']), [4.5, 5, 5.5, 6]);
+});
+
+test('post-mortem does not call a much later TP1 recovery a stop sweep', () => {
+  const trade = {
+    id: 'late-recovery', symbol: 'TESTUSDT', interval: '1h', side: 'long',
+    entry: 100, stopLoss: 96, targets: [{ price: 103 }], openedAtCandle: 0,
+  };
+  const candle = (openTime, low, high) => ({ openTime, low, high });
+  const candles = [
+    candle(1, 95, 100),
+    ...Array.from({ length: 7 }, (_, i) => candle(i + 2, 94, 99)),
+    candle(9, 98, 104),
+  ];
+
+  const result = replayStoppedCall(trade, candles, {
+    sweepRecoveryBars: 6, minBarsAfterStop: 6, widerSlMultiple: 1.5,
+  });
+
+  assert.equal(result.reachedTp1After, true);
+  assert.equal(result.barsToTp1AfterSl, 8);
+  assert.equal(result.reachedTp1Soon, false);
+  assert.equal(result.widerStopSaves, false);
+  assert.equal(result.kind, KINDS.wrongWay);
+});
+
+test('post-mortem requires a strict majority before choosing one fix direction', () => {
+  const rows = [
+    { kind: KINDS.swept, slPercent: 4, neededSlPercent: 6, barsToSl: 1 },
+    { kind: KINDS.swept, slPercent: 4, neededSlPercent: 6, barsToSl: 2 },
+    { kind: KINDS.wrongWay, barsToSl: 1 },
+    { kind: KINDS.reversed, barsToSl: 3 },
+  ];
+
+  assert.equal(summarizePostMortem(rows).verdict.id, 'hon-hop');
 });
 
 test('runDailyReview backtests and persists a safe fix from repeated daily losses', async () => {

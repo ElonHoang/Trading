@@ -207,9 +207,16 @@ export function buildRiskCandidates(strategy, cfg = {}) {
     out.push({ ...built, because });
   };
 
-  const widerSl = Math.min(Number(cfg.maxSlPercent ?? 6), round(sl + Number(cfg.slPercentStep ?? 0.5), 2));
-  if (widerSl > sl) {
-    add('wider-stop', `Nới khoảng SL ${sl}% → ${widerSl}%`, { 'risk.slPercent': widerSl },
+  // Thử cả một thang nhỏ tới trần cấu hình. Chỉ thử đúng một bước 0,5% khiến
+  // optimizer kết luận "không có phương án" dù post-mortem đo rằng nhiễu rộng
+  // hơn nhiều; ngược lại nhảy thẳng tới trần sẽ không tìm được mức thấp nhất đủ
+  // hiệu quả. Mọi nấc vẫn phải qua train/holdout và guard như nhau.
+  const step = Math.max(0.1, Number(cfg.slPercentStep ?? 0.5));
+  const maxSl = Math.max(sl, Number(cfg.maxSlPercent ?? 6));
+  for (let next = sl + step, index = 0; next <= maxSl + 1e-9; next += step, index++) {
+    const widerSl = round(Math.min(next, maxSl), 2);
+    add(index === 0 ? 'wider-stop' : `wider-stop-${String(widerSl).replace('.', '-')}`,
+      `Nới khoảng SL ${sl}% → ${widerSl}%`, { 'risk.slPercent': widerSl },
       'Lệnh thua thường có khoảng SL hẹp hơn phần còn lại, tức SL nằm trong biên độ nhiễu.');
   }
 

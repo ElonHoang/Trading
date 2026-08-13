@@ -14,6 +14,7 @@ data/strategy-backups/
 data/loss-learning/
 
 # Log & file tạm
+.tmp/
 *.log
 npm-debug.log*
 .DS_Store

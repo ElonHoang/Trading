@@ -71,10 +71,11 @@ function median(values) {
  * nến nên không được phép tính nó là "suýt thắng".
  *
  * @returns { kind, mfeBeforeSlR, maxAdverseR, neededSlPercent, barsToSl,
- *            barsAfterSl, reachedTp1After, widerStopSaves }
+ *            barsAfterSl, reachedTp1After, barsToTp1AfterSl, widerStopSaves }
  */
 export function replayStoppedCall(trade, candles, {
-  maxHoldBars = 96, widerSlMultiple = 1.5, minBarsAfterStop = 6, noFavorMoveR = 0.15,
+  maxHoldBars = 96, widerSlMultiple = 1.5, minBarsAfterStop = 6,
+  sweepRecoveryBars = 6, noFavorMoveR = 0.15,
 } = {}) {
   const entry = num(trade.entry);
   const stop = num(trade.stopLoss);
@@ -116,9 +117,13 @@ export function replayStoppedCall(trade, candles, {
     return { ...base, kind: KINDS.unknown, reason: 'không khớp được nến chạm SL' };
   }
 
-  // Giá có quay lại chạm TP1 trong phần còn lại của hạn giữ không?
+  // Chỉ một lần quay lại sớm mới là bằng chứng bị quét. TP1 xuất hiện hàng
+  // chục nến sau có thể thuộc một nhịp khác và không chứng minh entry cũ là đúng.
   const rest = after.slice(slIndex + 1);
-  const reachedTp1After = rest.some((c) => hitsTp1(c));
+  const tp1AfterIndex = rest.findIndex((c) => hitsTp1(c));
+  const reachedTp1After = tp1AfterIndex >= 0;
+  const barsToTp1AfterSl = reachedTp1After ? tp1AfterIndex + 1 : null;
+  const reachedTp1Soon = reachedTp1After && barsToTp1AfterSl <= sweepRecoveryBars;
 
   // Phản chứng: giữ nguyên entry/TP, chỉ đẩy SL ra xa `widerSlMultiple` lần.
   const widerStop = isLong ? entry - risk * widerSlMultiple : entry + risk * widerSlMultiple;
@@ -140,15 +145,17 @@ export function replayStoppedCall(trade, candles, {
     barsToSl: slIndex + 1,
     barsAfterSl,
     reachedTp1After,
+    barsToTp1AfterSl,
+    reachedTp1Soon,
     widerStopSaves,
   };
 
-  // Chưa đủ nến sau SL thì chỉ kết luận khi đã có bằng chứng KHẲNG ĐỊNH (giá đã
-  // quay lại chạm TP1). Không có bằng chứng đó thì để ngỏ, đừng đếm vội.
-  if (barsAfterSl < minBarsAfterStop && !reachedTp1After && !widerStopSaves) {
+  // Chưa đủ nến sau SL thì chỉ kết luận khi đã có bằng chứng KHẲNG ĐỊNH: TP1
+  // quay lại sớm, hoặc SL rộng hơn thật sự sống được tới TP1.
+  if (barsAfterSl < minBarsAfterStop && !reachedTp1Soon && !widerStopSaves) {
     return { ...out, kind: KINDS.unknown, reason: `mới ${barsAfterSl} nến sau SL` };
   }
-  if (widerStopSaves || reachedTp1After) return { ...out, kind: KINDS.swept };
+  if (widerStopSaves || reachedTp1Soon) return { ...out, kind: KINDS.swept };
   if (mfeBeforeSlR < noFavorMoveR) return { ...out, kind: KINDS.wrongWay };
   return { ...out, kind: KINDS.reversed };
 }
@@ -196,7 +203,7 @@ function verdictOf(summary) {
   const swept = summary.sweptSharePercent ?? 0;
   const wrong = summary.wrongWaySharePercent ?? 0;
   const reversed = summary.reversedSharePercent ?? 0;
-  if (swept >= 50) {
+  if (swept > 50) {
     return {
       id: 'noi-sl',
       text: `${swept}% số kèo thua là bị quét rồi giá đi đúng hướng — SL đang nằm trong vùng nhiễu. `
@@ -204,7 +211,7 @@ function verdictOf(summary) {
         + 'Hướng sửa là NỚI SL, và nó phải qua backtest bên dưới mới được áp.',
     };
   }
-  if (wrong >= 50) {
+  if (wrong > 50) {
     return {
       id: 'sai-huong',
       text: `${wrong}% số kèo thua đi ngược ngay từ nến đầu — vấn đề nằm ở chỗ CHỌN LỆNH, `
@@ -212,7 +219,7 @@ function verdictOf(summary) {
         + 'bằng chứng entry để sinh cổng phù hợp rồi chỉ áp dụng nếu backtest holdout xác nhận.',
     };
   }
-  if (reversed >= 50) {
+  if (reversed > 50) {
     return {
       id: 'dao-chieu',
       text: `${reversed}% số kèo thua đã đi đúng hướng rồi đảo chiều thật — entry có lợi thế `
@@ -222,7 +229,7 @@ function verdictOf(summary) {
   }
   return {
     id: 'hon-hop',
-    text: 'Nguyên nhân trộn lẫn, không nhóm nào quá bán — chưa có hướng sửa nào được số liệu chống đỡ rõ.',
+    text: 'Nguyên nhân trộn lẫn, không nhóm nào quá nửa — chưa có hướng sửa nào được số liệu chống đỡ rõ.',
   };
 }
 
