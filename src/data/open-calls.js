@@ -11,6 +11,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { INTERVAL_MS } from './binance.js';
 
 const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const FILE = path.join(DIR, 'open-calls.json');
@@ -77,6 +78,14 @@ async function updateCall(symbol, patch) {
   return save(map);
 }
 
+function closedAtCandleEnd(candle, interval) {
+  const openTime = Number(candle?.openTime);
+  const intervalMs = INTERVAL_MS[interval];
+  if (!Number.isFinite(openTime) || !Number.isFinite(intervalMs)) return null;
+  // Binance biểu diễn thời điểm đóng bằng mili-giây cuối cùng của cây nến.
+  return new Date(openTime + intervalMs - 1).toISOString();
+}
+
 /**
  * Đối chiếu kèo đang mở với các nến ĐÃ ĐÓNG xuất hiện sau khi mở kèo.
  *
@@ -93,7 +102,7 @@ async function updateCall(symbol, patch) {
  * ở TP1. Nó KHÁC `stopped` và không được tính vào chuỗi SL của auto-retune.
  *
  * @returns { status: 'open'|'stopped'|'breakeven'|'target'|'expired',
- *            hitTps, lastPrice, bars, slMovedToEntry }
+ *            hitTps, lastPrice, bars, slMovedToEntry, closedAt? }
  */
 export async function checkCall(call, candles, { maxHoldBars = 96 } = {}) {
   const isLong = call.side === 'long';
@@ -124,6 +133,7 @@ export async function checkCall(call, candles, { maxHoldBars = 96 } = {}) {
         lastPrice: stop,
         bars: after.length,
         slMovedToEntry: movedSl,
+        closedAt: closedAtCandleEnd(c, call.interval),
       };
     }
     for (const tp of targets) {
@@ -143,6 +153,7 @@ export async function checkCall(call, candles, { maxHoldBars = 96 } = {}) {
         lastPrice: finalTp.price,
         bars: after.length,
         slMovedToEntry: movedSl,
+        closedAt: closedAtCandleEnd(c, call.interval),
       };
     }
   }
@@ -151,12 +162,14 @@ export async function checkCall(call, candles, { maxHoldBars = 96 } = {}) {
 
   // Hết hạn giữ: nếu không có mốc này thì một kèo lửng lơ sẽ chặn token mãi mãi.
   if (after.length >= maxHoldBars) {
+    const expiryCandle = after[maxHoldBars - 1];
     return {
       status: 'expired',
       hitTps: merged,
       lastPrice: candles[candles.length - 1]?.close ?? null,
       bars: after.length,
       slMovedToEntry: movedSl,
+      closedAt: closedAtCandleEnd(expiryCandle, call.interval),
     };
   }
 

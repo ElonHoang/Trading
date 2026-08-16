@@ -4,7 +4,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DATA_DIR, saveStrategy } from '../config.js';
-import { fetchKlinesHistory } from '../data/binance.js';
+import { fetchKlinesHistory, INTERVAL_MS } from '../data/binance.js';
 import { closedCandles } from './engine.js';
 import { backtest } from '../backtest.js';
 import { entryMarketContext } from './entry-quality.js';
@@ -98,7 +98,14 @@ export function stopLossStreak(trades) {
 
 export async function recordClosedTrade({ call, result, snapshot, historyLimit = 200 }) {
   const state = await readAutoRetuneState();
-  const closedAt = snapshot?.lastClosedCandleTime ?? new Date().toISOString();
+  const candleStart = Date.parse(snapshot?.lastClosedCandleTime ?? '');
+  const intervalMs = INTERVAL_MS[call.interval ?? snapshot?.interval];
+  const fallbackClosedAt = Number.isFinite(candleStart) && Number.isFinite(intervalMs)
+    ? new Date(candleStart + intervalMs - 1).toISOString()
+    : (snapshot?.generatedAt ?? snapshot?.lastClosedCandleTime ?? new Date().toISOString());
+  // Ưu tiên cây nến thật sự chạm SL/TP. Không dùng openTime của nến cuối vì
+  // một nến 4H có thể mở trước 00:00 nhưng chỉ đóng vào ngày hôm sau.
+  const closedAt = result?.closedAt ?? fallbackClosedAt;
   const trade = {
     id: `${call.symbol}|${call.interval}|${call.openedAtCandle}|${closedAt}|${result.status}`,
     symbol: call.symbol,

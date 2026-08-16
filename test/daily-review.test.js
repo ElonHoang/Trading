@@ -6,6 +6,7 @@ import {
   buildReviewCandidates, compareDailyPerformance, formatDailyReview, runDailyReview, summarizeCalls,
 } from '../src/analysis/daily-review.js';
 import { recordDailyLossLog } from '../src/analysis/daily-loss-log.js';
+import { checkCall } from '../src/data/open-calls.js';
 import { evaluateEntryQuality } from '../src/analysis/entry-quality.js';
 import { buildLearningRecord } from '../src/analysis/learning-log.js';
 import { KINDS, replayStoppedCall, summarizePostMortem } from '../src/analysis/post-mortem.js';
@@ -259,6 +260,96 @@ test('review-only mode never runs backtest or changes tuning', async () => {
   assert.equal(persisted.activeTuning, undefined);
 });
 
+test('daily overview is isolated to one Vietnam calendar day', async () => {
+  const state = {
+    trades: [
+      { ...trade('2026-08-10', 'target', { index: 1 }), closedAt: '2026-08-10T16:59:59.999Z' },
+      { ...trade('2026-08-10', 'target', { index: 2 }), closedAt: '2026-08-10T17:00:00.000Z' },
+      { ...trade('2026-08-11', 'stopped', { index: 3 }), closedAt: '2026-08-11T16:59:59.999Z' },
+      { ...trade('2026-08-11', 'target', { index: 4 }), closedAt: '2026-08-11T17:00:00.000Z' },
+    ],
+    attempts: [], reviews: [],
+  };
+  const strategy = {
+    risk: { partialFraction: 0.5 },
+    alerts: { maxHoldBars: 96 },
+    learning: { enabled: false },
+    dailyReview: {
+      enabled: true,
+      // Dù cấu hình cũ có giá trị khác, phần Overview vẫn phải là một ngày.
+      windowMode: 'all', dayOffsetHours: 7, dayOffsetDays: -1,
+    },
+  };
+  const deps = {
+    force: true, skipTraining: true,
+    fetchRecentCandles: async () => [],
+    saveState: async () => {},
+  };
+
+  const report = await runDailyReview({ strategy, state, now, deps });
+  assert.equal(report.window.mode, 'calendar-day');
+  assert.equal(report.window.since, '2026-08-10T17:00:00.000Z');
+  assert.equal(report.window.untilMs, Date.parse('2026-08-11T17:00:00.000Z'));
+  assert.deepEqual([report.summary.closed, report.summary.win, report.summary.loss], [2, 1, 1]);
+  assert.equal(report.comparison.aggregate.closed, 3);
+  assert.match(formatDailyReview(report), /Tổng số lệnh: <b>2<\/b>/);
+  assert.match(formatDailyReview(report), /Tỉ lệ W\/L: <b>1 W - 1 L<\/b>/);
+
+  const nextDay = await runDailyReview({
+    strategy, state, now: Date.parse('2026-08-13T01:00:00.000Z'), deps,
+  });
+  assert.deepEqual([nextDay.summary.closed, nextDay.summary.win, nextDay.summary.loss], [1, 1, 0]);
+});
+
+test('an empty daily overview does not discard historical errors for backtest review', async () => {
+  const state = {
+    trades: [
+      ...day('2026-08-09', 3, 0),
+      ...day('2026-08-10', 3, 0),
+      { ...trade('2026-08-11', 'expired', { index: 99 }), closedAt: '2026-08-11T05:00:00.000Z' },
+    ],
+    attempts: [], reviews: [],
+  };
+  const report = await runDailyReview({
+    strategy: {
+      risk: { partialFraction: 0.5 },
+      alerts: { maxHoldBars: 96 },
+      learning: { enabled: false },
+      dailyReview: {
+        enabled: true, windowMode: 'all', dayOffsetHours: 7, dayOffsetDays: -1,
+        comparisonDays: 7, minClosedTradesPerDay: 3, minBadDays: 2,
+        minClosedTrades: 3, targetLossRatePercent: 30,
+      },
+    },
+    state,
+    now,
+    deps: {
+      force: true,
+      fetchRecentCandles: async () => [],
+      saveState: async () => {},
+    },
+  });
+
+  assert.equal(report.summary.rated, 0);
+  assert.equal(report.comparison.aggregate.rated, 6);
+  assert.equal(report.status, 'no-supported-change');
+});
+
+test('a closed 4h call uses the terminal candle end for its daily timestamp', async () => {
+  const openedAt = Date.parse('2026-08-11T12:00:00.000Z');
+  const terminalOpen = Date.parse('2026-08-11T16:00:00.000Z');
+  const result = await checkCall({
+    symbol: 'BTCUSDT', interval: '4h', side: 'long', entry: 100, stopLoss: 96,
+    targets: [{ label: 'TP1', price: 103 }], openedAtCandle: openedAt,
+  }, [
+    { openTime: openedAt, high: 101, low: 99, close: 100 },
+    { openTime: terminalOpen, high: 101, low: 95, close: 96 },
+  ]);
+
+  assert.equal(result.status, 'stopped');
+  assert.equal(result.closedAt, '2026-08-11T19:59:59.999Z');
+});
+
 test('runDailyReview backtests and persists a safe fix from repeated daily losses', async () => {
   const trades = [
     ...day('2026-08-08', 2, 1),
@@ -460,10 +551,12 @@ test('daily summary counts TP1+ as wins and pre-TP1 stops as losses', () => {
     status: 'on-target', summary, target: 30,
     window: { label: 'NGÀY 11/08/2026' }, comparison: null,
   });
+  assert.match(text, /📅 <b>NGÀY 11\/08\/2026<\/b>/);
   assert.match(text, /🌟 <b>Tổng Quan Hiệu Suất<\/b>/);
   assert.match(text, /Tổng số lệnh: <b>5<\/b>/);
   assert.match(text, /Tỉ lệ W\/L: <b>3 W - 1 L<\/b>/);
-  assert.match(text, /Tỉ lệ thắng 75% · tỷ lệ thua 25%/);
   assert.match(text, /Giả định vốn vào mọi lệnh bằng nhau \(200\$\)/);
-  assert.doesNotMatch(text, /Thị trường chung/);
+  assert.doesNotMatch(text, /Tỉ lệ thắng 75% · tỷ lệ thua 25%/);
+  assert.doesNotMatch(text, /RÀ SOÁT/);
+  assert.doesNotMatch(text, /Mục tiêu tỉ lệ thua/);
 });

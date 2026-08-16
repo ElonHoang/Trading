@@ -514,14 +514,19 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   const force = Boolean(deps.force);
 
   const everyHours = Math.max(1, Number(cfg.everyHours ?? 24));
-  const window = reviewWindow(cfg, now);
+  // Cửa sổ này vẫn giữ nguyên cho ngữ cảnh và dữ liệu lịch sử của việc rà soát/
+  // backtest. Nó không quyết định số liệu hiển thị trong Tổng Quan Hiệu Suất.
+  const analysisWindow = reviewWindow(cfg, now);
+  // Tổng Quan Hiệu Suất luôn là đúng một ngày lịch, không cho phép cấu hình
+  // rolling/all làm lẫn số liệu của ngày trước hoặc ngày sau vào tin nhắn.
+  const overviewWindow = reviewWindow({ ...cfg, windowMode: 'calendar-day' }, now);
   const activeTuning = state.activeTuning?.changes ? {
     source: state.activeTuning.source ?? null,
     appliedAt: state.activeTuning.appliedAt ?? null,
     changes: state.activeTuning.changes,
   } : null;
   const base = {
-    enabled: cfg.enabled !== false, everyHours, window,
+    enabled: cfg.enabled !== false, everyHours, window: overviewWindow,
     at: new Date(now).toISOString(), activeTuning,
   };
   if (!base.enabled) return { status: 'disabled', ...base };
@@ -534,20 +539,27 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     };
   }
 
-  const summary = summarizeCalls(state.trades ?? [], {
-    sinceMs: window.sinceMs,
-    untilMs: window.untilMs,
+  const pnlOptions = {
     // Cùng cách thoát lệnh mà tin nhắn đã dặn và backtest đang đo, không phải
     // một quy ước riêng cho báo cáo.
     partialFraction: Number(strategy.risk?.partialFraction ?? 0.5),
     feePercent: Number(cfg.feePercent ?? 0.06),
     capitalPerTradeUsd: Number(cfg.assumedCapitalPerTradeUsd ?? 200),
+  };
+  const summary = summarizeCalls(state.trades ?? [], {
+    sinceMs: overviewWindow.sinceMs,
+    untilMs: overviewWindow.untilMs,
+    ...pnlOptions,
   });
-  const comparison = compareDailyPerformance(state.trades ?? [], cfg, now, {
-    partialFraction: Number(strategy.risk?.partialFraction ?? 0.5),
-    feePercent: Number(cfg.feePercent ?? 0.06),
-    capitalPerTradeUsd: Number(cfg.assumedCapitalPerTradeUsd ?? 200),
-  });
+  const analysisSummary = analysisWindow.sinceMs === overviewWindow.sinceMs
+    && analysisWindow.untilMs === overviewWindow.untilMs
+    ? summary
+    : summarizeCalls(state.trades ?? [], {
+      sinceMs: analysisWindow.sinceMs,
+      untilMs: analysisWindow.untilMs,
+      ...pnlOptions,
+    });
+  const comparison = compareDailyPerformance(state.trades ?? [], cfg, now, pnlOptions);
   base.comparison = compactComparison(comparison);
   const minTrades = Math.max(3, Number(cfg.minClosedTrades ?? 10));
   const target = Number(cfg.targetLossRatePercent ?? 30);
@@ -556,7 +568,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
 
   // Bối cảnh thị trường của kỳ. Đặt trước mọi nhánh return để báo cáo nào cũng
   // có dòng này, kể cả bản "chưa đủ mẫu".
-  base.market = await readMarketTrend(cfg, window, {
+  base.market = await readMarketTrend(cfg, analysisWindow, {
     fetchCandles: deps.fetchRecentCandles ?? fetchKlines,
     now,
   });
@@ -566,7 +578,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   // không nhắc lại ở đây thì cả cơ chế chỉ nằm trong log của runner. Hai bên đọc
   // chung `data/auto-retune.json` nên không cần thêm nguồn trạng thái nào.
   const attempts = Array.isArray(state.attempts) ? state.attempts : [];
-  const freshFrom = window.sinceMs ?? now - 7 * DAY_MS;
+  const freshFrom = analysisWindow.sinceMs ?? now - 7 * DAY_MS;
   const lastAttempt = [...attempts].reverse().find((a) => (
     ['applied', 'proposed', 'no-safe-change'].includes(a.status)
     && Date.parse(a.at ?? '') >= freshFrom
@@ -637,9 +649,10 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
     return report;
   }
 
-  // Không có W/L mới trong ngày đang rà thì chỉ hiển thị chuỗi so sánh. Kèo hết
-  // hạn trắng tay vẫn nằm trong tổng số/PnL nhưng không đủ để kích hoạt optimizer.
-  if (!summary.rated) {
+  // Tổng quan theo ngày có thể trống, nhưng không được làm mất bộ lỗi lịch sử
+  // mà cửa sổ phân tích đã chọn để backtest. Kèo hết hạn trắng tay không đủ để
+  // kích hoạt optimizer.
+  if (!analysisSummary.rated) {
     const report = {
       status: 'no-new-data', ...base, target,
       summary: compactCallSummary(summary), minClosedTrades: minTrades,
@@ -918,7 +931,6 @@ function pushActiveTuning(L, report) {
 export function formatDailyReview(report) {
   const L = [];
   const s = report.summary;
-  const pct = (v) => (v == null ? '—' : `${v}%`);
   // Số trong tin dùng dấu phẩy thập phân như mọi tin nhắn khác.
   const vi = (v) => String(v).replace('.', ',');
 
@@ -934,6 +946,7 @@ export function formatDailyReview(report) {
     : `${pnlUsd >= 0 ? '🟢 +' : '🔴 '}${vi(pnlUsd.toFixed(2))}$ `
       + `(${pnl >= 0 ? '+' : ''}${vi(pnl.toFixed(2))}%)`;
 
+  L.push(`📅 <b>${report.window?.label ?? 'NGÀY HIỆN TẠI'}</b>`);
   L.push('🌟 <b>Tổng Quan Hiệu Suất</b>');
   L.push(`Tổng số lệnh: <b>${s.closed}</b>`);
   L.push('<i>Không bao gồm các kèo đang mở.</i>');
@@ -944,122 +957,5 @@ export function formatDailyReview(report) {
   L.push('');
   L.push(`Tổng Lợi nhuận (PnL): <b>${s.closed ? pnlText : '0,00$ (+0,00%)'}</b>`);
   L.push(`Điều kiện tính toán: Giả định vốn vào mọi lệnh bằng nhau (${vi(capital)}$) và chưa nhân đòn bẩy. Đã trừ phí sàn cho mỗi lần thoát lệnh.`);
-
-  // Chỉ đếm kèo ĐÃ CHỐT trong kỳ; kèo còn chạy nằm ngoài mọi con số dưới đây.
-  if (!s.closed) {
-    L.push('');
-    L.push(`Không có kèo nào chốt trong ${report.window?.label ?? 'kỳ này'} — kèo đang mở `
-      + 'chưa tính, chờ chạm SL/TP.');
-    pushDailyComparison(L, report);
-    pushActiveTuning(L, report);
-    pushRetune(L, report);
-    return L.join('\n');
-  }
-
-  pushDailyComparison(L, report);
-  pushActiveTuning(L, report);
-
-  L.push('');
-  L.push(`📋 <b>RÀ SOÁT ${report.window?.label ?? `${report.everyHours}H`}</b> — chỉ tính kèo đã chốt, `
-    + 'kèo đang mở chưa vào sổ');
-  L.push(`Đã đóng ${s.closed} kèo: ✅ ${s.won} đã chạm TP1+ · 🛑 ${s.lost} chạm SL trước TP1`
-    + ` · ⏱ ${s.unrated} chưa TP1 và không chạm SL`);
-  L.push(`<b>Tỉ lệ thắng ${pct(s.winRatePercent)} · tỷ lệ thua ${pct(s.lossRatePercent)}</b> `
-    + `(mẫu số ${s.rated} kèo W + L)`);
-  if (pnl != null && s.pnlFromTrades != null && s.pnlFromTrades < s.closed) {
-    L.push(`⚠️ Chỉ cộng được PnL của ${s.pnlFromTrades}/${s.closed} kèo; số còn lại thiếu giá thoát trong nhật ký.`);
-  }
-  L.push(`Mục tiêu tỉ lệ thua ≤ ${report.target}%`);
-
-  pushPostMortem(L, report);
-  pushRetune(L, report);
-
-  if (report.status === 'not-enough-data') {
-    L.push('');
-    L.push(`ℹ️ Chuỗi so sánh mới có ${report.comparison?.aggregate?.rated ?? s.rated} kèo W/L, `
-      + `cần tối thiểu ${report.minClosedTrades} mới đủ mẫu để đem đi backtest. Chỉ báo cáo, <b>không chỉnh gì</b>.`);
-    return L.join('\n');
-  }
-
-  const d = report.diagnosis;
-  if (d?.numeric?.length) {
-    L.push('');
-    L.push('🔍 <b>LỆNH THUA KHÁC LỆNH CÒN LẠI Ở ĐÂU</b>');
-    for (const row of d.numeric.slice(0, 4)) {
-      const arrow = row.deltaPercent > 0 ? 'cao hơn' : 'thấp hơn';
-      L.push(`   · ${row.label}: ${row.lost} so với ${row.rest} — ${arrow} ${Math.abs(row.deltaPercent ?? 0)}%`);
-    }
-  }
-  if (d?.byInterval?.length > 1) {
-    L.push(`   · Theo khung: ${d.byInterval.map((r) => `${r.key} ${r.lossRatePercent}% (${r.lost}/${r.total})`).join(' · ')}`);
-  }
-  if (d?.bySide?.length > 1) {
-    L.push(`   · Theo hướng: ${d.bySide.map((r) => `${r.key} ${r.lossRatePercent}% (${r.lost}/${r.total})`).join(' · ')}`);
-  }
-  if (d?.supportingGroups?.length) {
-    L.push(`   · Nhóm hay ủng hộ lệnh thua: ${d.supportingGroups.slice(0, 3).map((g) => `${g.label} (${g.count})`).join(' · ')}`);
-  }
-
-  L.push('');
-  if (report.status === 'on-target') {
-    L.push('✅ Tỉ lệ thua gộp nhiều ngày đang trong mục tiêu — <b>không chỉnh gì</b>.');
-    return L.join('\n');
-  }
-  if (report.status === 'monitoring-pattern') {
-    L.push(`⏳ Tỉ lệ SL gộp đang cao nhưng lỗi mới xuất hiện ở ${report.comparison?.badDays ?? 0} ngày đủ mẫu; `
-      + `cần ít nhất ${report.comparison?.minBadDays ?? 2} ngày để xác nhận lỗi lặp lại. Chưa chỉnh cấu hình.`);
-    return L.join('\n');
-  }
-  if (report.status === 'cooldown') {
-    L.push(`⏳ Lỗi đã lặp lại nhưng đang trong thời gian chờ sau lần tự sửa trước. `
-      + `Lần kiểm tra chỉnh tiếp theo: ${report.nextTuneAt}.`);
-    return L.join('\n');
-  }
-  if (report.status === 'no-supported-change') {
-    L.push(`🧠 Tỉ lệ SL đang cao nhưng nguyên nhân ${report.cause?.id ?? 'chưa xác định'} chưa hỗ trợ `
-      + 'một điều chỉnh cụ thể. Giữ nguyên cấu hình thay vì thử tham số không liên quan.');
-    return L.join('\n');
-  }
-  if (report.status === 'review-only') {
-    L.push('📝 Chỉ ghi nhận kèo thua và nguyên nhân. Không training, không backtest, không sửa cấu hình.');
-    return L.join('\n');
-  }
-  if (report.status === 'failed') {
-    L.push(`⚠️ Không kiểm chứng được đề xuất: ${report.error}. Giữ nguyên cấu hình.`);
-    return L.join('\n');
-  }
-  if (report.status === 'no-safe-change') {
-    L.push('🧪 Đã backtest các phương án chỉnh điều kiện vào lệnh/rủi ro (75% chọn / 25% mới hơn xác nhận) nhưng <b>không phương án nào</b> vừa giảm tỉ lệ SL vừa giữ được kỳ vọng dương. Giữ nguyên cấu hình.');
-    if ((report.candidates ?? []).length) {
-      for (const c of report.candidates) {
-        const reasons = [];
-        if (!c.improves) reasons.push('không giảm đủ tỉ lệ SL trên các cặp vừa thua');
-        if (!c.guardOk) reasons.push(`làm xấu phần đang chạy tốt (khung ${report.guardInterval ?? '4h'}: kỳ vọng ${c.guardHoldout.expectancyPercent}%)`);
-        const why = reasons.join('; ');
-        L.push(`   · ${c.label}: SL ${pct(c.holdout.slRatePercent)}, PF ${c.holdout.profitFactor}, `
-          + `kỳ vọng ${c.holdout.expectancyPercent}% → ${why}`);
-      }
-    }
-  } else {
-    const sel = report.selected;
-    const verb = report.status === 'applied' ? 'ĐÃ ÁP DỤNG' : 'ĐỀ XUẤT';
-    L.push(`🧪 <b>${verb}: ${sel.label}</b>`);
-    L.push(`   Lý do: ${sel.because}`);
-    L.push(`   Trên các cặp vừa thua (đoạn giữ lại): tỉ lệ SL ${pct(sel.holdout.slRatePercent)}, PF ${sel.holdout.profitFactor}, kỳ vọng ${sel.holdout.expectancyPercent}%/lệnh`);
-    L.push(`   Trên bộ canh gác khung 4h: PF ${sel.guardHoldout.profitFactor}, kỳ vọng ${sel.guardHoldout.expectancyPercent}%/lệnh — không làm xấu phần đang chạy tốt`);
-    L.push(`   Thay đổi: ${Object.entries(sel.changes).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join(' · ')}`);
-    if (report.status === 'proposed') {
-      L.push('   ⚠️ <b>Chưa tự ghi</b> — bot chạy trên runner tạm, ghi cấu hình sẽ mất ở lượt sau. Sửa <code>config/strategy.json</code> rồi commit để áp dụng.');
-    } else if (!report.autoApply && report.runtimeApply) {
-      L.push('   ✅ Thay đổi đã lưu trong state và có hiệu lực từ lượt quét sau.');
-    }
-  }
-
-  if (report.worstInterval && report.worstInterval.lossRatePercent > report.target) {
-    L.push('');
-    L.push(`📌 Khung <b>${report.worstInterval.key}</b> đang thua ${report.worstInterval.lossRatePercent}% `
-      + `(${report.worstInterval.lost}/${report.worstInterval.total}). Danh sách khung nằm trong code `
-      + '(<code>CALL_INTERVALS</code>), không sửa được qua cấu hình — cần quyết định thủ công.');
-  }
   return L.join('\n');
 }
