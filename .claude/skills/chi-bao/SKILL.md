@@ -141,13 +141,15 @@ Top trader long nhiều hơn đám đông thì nghiêng tăng, và ngược lạ
 
 ## 8. Mẫu hình lịch sử
 
-**Bản chất:** chỉ chạy khi token có đủ `historicalPattern.requiredHistoryMonths` tháng lịch sử liên tục (mặc định 6 tháng). Khi đủ điều kiện, bot so đường giá đóng nến đã chuẩn hoá và biên độ high/low của `historicalPattern.lookbackBars` nến gần nhất với các đoạn nến trong tối đa `historicalPattern.maxMonths` tháng. Giá tuyệt đối không được dùng để so, nên BTC ở hai mức giá khác nhau vẫn có thể có cùng hình dạng/biên độ tương đối. Token mới list dưới 6 tháng thì nhóm này bị loại hoàn toàn, không cộng/trừ điểm.
+**Bản chất:** chỉ chạy khi token có đủ `historicalPattern.requiredHistoryMonths` tháng lịch sử (mặc định 6 tháng). Bot quét **mọi cửa sổ hợp lệ** trong tối đa `historicalPattern.maxMonths` tháng của chính token đó, không phải chỉ đối chiếu với đúng một ngày cách đây sáu tháng. Mỗi cửa sổ gồm `historicalPattern.lookbackBars` nến được đổi thành log OHLC tương đối theo close đầu cửa sổ, nên không dùng giá tuyệt đối: BTC ở hai mức giá khác nhau vẫn có thể có cùng hình dạng. Token chưa đủ lịch sử thì nhóm này bị loại hoàn toàn, không cộng/trừ điểm.
 
-**Điều kiện cộng điểm:** chỉ lấy tối đa `topMatches` mẫu không chồng lấp, có độ giống tối thiểu `minSimilarity`. Bot nhìn tiếp `futureBars` nến sau từng mẫu cũ; chỉ cộng điểm long hoặc short khi có ít nhất `minMatches` mẫu, tỷ lệ cùng hướng đạt `minDirectionalAgreement`, và mức đi trung bình đạt `minForwardMovePct`. Mẫu giống nhưng kết quả sau đó lẫn lộn **không được cộng điểm**.
+**Cổng tương đồng:** một mẫu cũ chỉ được nhận nếu đồng thời qua correlation đường close (`minPathCorrelation`), biên độ high/low (`minAmplitudeSimilarity`), sai số hình dạng OHLC trung bình (`maxRelativePathError`), sai số P95 để chặn một wick lệch mạnh (`maxRelativePathP95Error`), và tỷ lệ nến có sai số dưới tolerance (`minBarsWithinRelativeTolerance`). Với cấu hình hiện tại: correlation ≥85%, biên độ ≥70%, sai số TB ≤20% biên độ mẫu, P95 ≤45%, và ≥75% nến nằm trong tolerance 25%. `minSimilarity` chỉ dùng để xếp hạng/giữ ngưỡng tổng hợp; correlation cao một mình không đủ qua cổng.
+
+**Điều kiện cộng điểm:** chỉ lấy tối đa `topMatches` mẫu không chồng lấp. Bot nhìn tiếp `futureBars` nến sau từng mẫu cũ; chỉ cộng điểm long hoặc short khi có ít nhất `minMatches` mẫu, tỷ lệ cùng hướng đạt `minDirectionalAgreement`, và mức đi trung bình đạt `minForwardMovePct`. Mẫu giống nhưng kết quả sau đó lẫn lộn **không được cộng điểm**.
 
 **Lấy ở đâu:** `fetchKlinesHistory()` và `analyzeHistoricalPattern()` trong `src/analysis/historical-pattern.js`. Luôn dùng nến đã đóng. Khi backtest, matcher nhận `endIndex = i`, vì vậy mọi nến dùng để đánh giá mẫu cũ đều phải tồn tại trước nến mô phỏng hiện tại — không look-ahead.
 
-**Đã đo, đừng tắt:** nhóm này góp mặt ở 72/279 lệnh khi backtest 4 cặp khung 4h (3000 nến, chia 75/25). Đặt `weights.historicalPattern` về 0 kéo PF đoạn giữ lại từ 1,42 xuống 1,03 và kỳ vọng từ +0,379% xuống −0,07%/lệnh. Nới `minSimilarity` xuống 0,75 không tốt hơn, tăng trọng số lên 16 thì xấu đi. Con số "đóng góp 0" trong tài liệu cũ là của khung 1h/15m, nơi cửa sổ 3000 nến không phủ nổi 6 tháng.
+**Kiểm chứng trước khi tin:** các số backtest cũ của matcher close+range không còn là bằng chứng cho cổng OHLC chặt hơn này. Dùng `npm run research:patterns` để báo cáo read-only cho đúng `alerts.tradeSymbols`, sau đó walk-forward từng token/khung trước khi đổi trọng số hoặc ngưỡng. `backtest()` tự tải phần warm-up lịch sử cho matcher; phải xem `historicalPatternHistoryLimitedByApi` với khung ngắn, vì giới hạn API có thể làm đoạn đánh giá thực tế ngắn hơn số nến yêu cầu.
 
 **Giới hạn:** đây là thống kê mẫu nhỏ trên riêng một token/khung, không phải xác suất chắc chắn và không phải lý do vào lệnh độc lập. Cache lịch sử chỉ giảm request; nến mới nhất vẫn được tải riêng ở mỗi lần phân tích. Nến ĐANG CHẠY phải bị loại trước khi so khớp — `engine.analyze()` từng đưa thẳng nó vào đoạn hiện tại, làm bản chạy thật so một thứ khác với thứ backtest đã kiểm chứng.
 
@@ -172,7 +174,7 @@ Xung đột thì **nói rõ là xung đột**, đừng ép ra kết luận dứt
 - **Volume chỉ của Binance spot**, không phải tổng toàn thị trường.
 - Cần ≥ `MIN_CANDLES` (30) nến đã đóng để chấm điểm; ML cần ≥ `features.WARMUP` (60).
 - **Cổ phiếu token hoá (bStocks) không có futures** → mất cả `derivatives` và `positioning`, chỉ còn 4 nhóm. Cổng đồng thuận tính trên mẫu nhỏ hơn nên **dễ đạt hơn một cách giả tạo** — cảnh giác khi thấy chúng trong danh sách quét.
-- **Chi phí request**: phân tích đầy đủ 1 mã tốn 56 request-weight (riêng `depth limit=1000` đã 50), giới hạn Binance 6.000/phút. Đừng gọi `analyze` trong vòng lặp rộng — sàng lọc trước bằng `screenSymbols()` (1 request, 80 weight cho cả sàn).
+- **Chi phí request**: phân tích đầy đủ 1 mã tốn 56 request-weight (riêng `depth limit=1000` đã 50), giới hạn Binance 6.000/phút. Chỉ gọi `analyze` cho danh sách bắt buộc `alerts.tradeSymbols`; không mở rộng sang `screenSymbols()` hay token top-volume/top-mover.
 
 ## Vào điểm tổng như thế nào
 

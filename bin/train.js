@@ -2,6 +2,7 @@
 // Phần I/O (đọc cấu hình, ghi model) nằm ở đây, không nằm trong module lõi.
 
 import { loadStrategy } from '../src/config.js';
+import { assertAllowedTradeSymbol } from '../src/data/trading-universe.js';
 import { trainModel } from '../src/ml/train.js';
 import { saveModel } from '../src/ml/model-store.js';
 
@@ -14,7 +15,8 @@ if (!symbolArg) {
 
 const strategy = await loadStrategy();
 try {
-  const { payload, verdict } = await trainModel(symbolArg, intervalArg, strategy, (m) => console.log(m));
+  const symbol = assertAllowedTradeSymbol(symbolArg, strategy);
+  const { payload, verdict } = await trainModel(symbol, intervalArg, strategy, (m) => console.log(m));
   const file = await saveModel(payload.symbol, payload.interval, payload);
 
   console.log('\n=== KẾT QUẢ ===');

@@ -4,6 +4,7 @@ import { loadStrategy } from '../src/config.js';
 import { backtest } from '../src/backtest.js';
 import { loadModel } from '../src/ml/model-store.js';
 import { normalizeSymbol } from '../src/data/binance.js';
+import { assertAllowedTradeSymbol } from '../src/data/trading-universe.js';
 import { fmtNum } from '../src/analysis/engine.js';
 import { applyActiveTuning, readAutoRetuneState } from '../src/analysis/auto-retune.js';
 
@@ -17,6 +18,7 @@ const state = await readAutoRetuneState();
 const strategy = applyActiveTuning(await loadStrategy(), state);
 try {
   const symbol = normalizeSymbol(symbolArg);
+  assertAllowedTradeSymbol(symbol, strategy);
   const r = await backtest(symbol, intervalArg, strategy, {
     candles: candlesArg ? Number(candlesArg) : 3000,
     storedModel: await loadModel(symbol, intervalArg),
@@ -25,6 +27,10 @@ try {
 
   console.log(`\n=== BACKTEST ${r.symbol} ${r.interval} ===`);
   console.log(`Giai đoạn: ${r.period.from.slice(0, 10)} → ${r.period.to.slice(0, 10)} (${r.period.candles} nến)`);
+  if (r.settings.historicalPatternWarmupApplied) {
+    console.log(`Mẫu lịch sử: dùng ${r.period.warmupCandles} nến warm-up; đánh giá thực tế ${r.settings.effectiveEvaluationCandles}/${r.settings.requestedEvaluationCandles} nến`
+      + (r.settings.historicalPatternHistoryLimitedByApi ? ' (bị giới hạn 20.000 nến API)' : ''));
+  }
   console.log(`Cấu hình : phí ${r.settings.feePercent}%/chiều, giữ tối đa ${r.settings.maxHoldBars} nến, `
     + `thoát "${r.settings.exitStrategy}", `
     + `trọng số ML ${r.settings.mlWeight}${r.settings.usedModel ? '' : ' (chưa có model)'}`);

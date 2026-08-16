@@ -8,9 +8,9 @@ import { buildContext } from '../analysis/context.js';
 import { buildSetup, buildProjections, buildLimitPlan } from '../analysis/setup.js';
 import { renderAnalysisPng } from '../chart/png.js';
 import { loadStrategy } from '../config.js';
-import { resolveSymbol, screenSymbols } from '../data/binance.js';
+import { resolveSymbol, fetchFuturesSymbols } from '../data/binance.js';
 import { loadModel } from '../ml/model-store.js';
-import { readWatchlist } from '../data/watchlist.js';
+import { assertAllowedTradeSymbol, automaticTradeTargets } from '../data/trading-universe.js';
 import { readMonitorState, saveMonitorState } from '../data/monitor-state.js';
 import { setCallMessages } from '../data/open-calls.js';
 import { buildCaption, buildClosedNote, buildTpUpdate, splitCaption } from './caption.js';
@@ -49,6 +49,13 @@ const bot = new Bot(token);
 const CALL_INTERVALS = ['4h', '1h'];
 const CANDLES = 300;
 
+async function configuredTradeTargets(strategy) {
+  const futures = strategy.alerts?.requireFutures === false
+    ? null
+    : await fetchFuturesSymbols().catch(() => null);
+  return automaticTradeTargets(strategy, { futures });
+}
+
 /**
  * GitHub runners bị huỷ sau mỗi lượt, nên cấu hình tự ghi sẽ mất ở lượt sau.
  * Trước đây cả cơ chế `auto-retune` bị TẮT vì lý do đó — hệ quả là phần tự kiểm
@@ -67,6 +74,7 @@ async function loadActionStrategy() {
 
 async function runAnalyze(symbolInput, interval, strategy) {
   const symbol = await resolveSymbol(symbolInput);
+  assertAllowedTradeSymbol(symbol, strategy);
   const storedModel = await loadModel(symbol, interval).catch(() => null);
   return analyze(symbol, interval, strategy, {
     storedModel,
@@ -113,18 +121,7 @@ const monitor = createMonitor({
   log: (message) => console.error(message),
   listTargets: async () => {
     const strategy = await loadActionStrategy();
-    const cfg = strategy.alerts ?? {};
-    const [screen, watch] = await Promise.all([
-      screenSymbols({
-        topVolume: cfg.scanTopVolume ?? 15,
-        topMovers: cfg.scanTopMovers ?? 15,
-        minQuoteVolumeUsd: cfg.scanMinQuoteVolumeUsd ?? 3e6,
-        requireFutures: cfg.requireFutures !== false,
-      }).catch(() => ({ symbols: [] })),
-      readWatchlist(),
-    ]);
-    const symbols = [...new Set([...watch, ...screen.symbols])];
-    return symbols.map((symbol) => ({ symbol, interval: null }));
+    return configuredTradeTargets(strategy);
   },
   evaluate: async ({ symbol, interval }) => {
     const strategy = await loadActionStrategy();

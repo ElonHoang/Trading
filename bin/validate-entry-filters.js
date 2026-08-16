@@ -4,6 +4,7 @@
 import { loadStrategy } from '../src/config.js';
 import { backtest } from '../src/backtest.js';
 import { fetchKlinesHistory, normalizeSymbol } from '../src/data/binance.js';
+import { assertAllowedTradeSymbol } from '../src/data/trading-universe.js';
 import { closedCandles } from '../src/analysis/engine.js';
 
 const [symbolArg, interval = '4h', candlesArg = '3000'] = process.argv.slice(2);
@@ -14,6 +15,7 @@ if (!symbolArg) {
 
 const symbol = normalizeSymbol(symbolArg);
 const strategy = await loadStrategy();
+assertAllowedTradeSymbol(symbol, strategy);
 // Nghiên cứu phải tách riêng cổng production đang bật, để baseline và từng
 // candidate được đo công bằng trên cùng một luật gốc.
 const researchStrategy = structuredClone(strategy);

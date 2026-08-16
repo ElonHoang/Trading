@@ -26,7 +26,7 @@ Repo dùng 7 nhóm dữ liệu, mô tả chi tiết trong
 | Định vị đám đông | 14 | tỉ lệ long/short tài khoản, vị thế top trader, taker ratio |
 | Hỗ trợ / kháng cự | 12 | pivot gom cụm, kèm số lần chạm |
 | Sổ lệnh | 6 | lệch mua/bán, tường lệnh, độ mỏng |
-| Mẫu hình lịch sử | 10 | so đường giá + biên độ với tối đa 6 tháng nến Binance; chỉ cộng điểm nếu các mẫu giống có diễn biến sau đó đồng thuận |
+| Mẫu hình lịch sử | 10 | quét mọi cửa sổ trong tối đa 6 tháng, so log OHLC tương đối bằng correlation, biên độ và sai số từng nến; chỉ cộng điểm nếu diễn biến sau đó đồng thuận |
 
 **EMA, RSI, MACD, Bollinger, ATR, ADX, Stochastic, VWAP, OBV và phân kỳ RSI đã bị xoá
 khỏi codebase.** Đây là quyết định có chủ ý, không phải thiếu sót. Lấy lại từ commit
@@ -70,6 +70,7 @@ Các lệnh khác:
 npm run analyze -- BTC 1h --no-ai   # phân tích trong terminal
 npm run train -- BTC 4h             # train model, lưu vào models/
 npm run backtest -- BTC 4h 3000     # backtest có SL/TP
+npm run research:patterns -- BTC 4h # báo cáo mẫu hình 6 tháng, chỉ đọc dữ liệu
 npm run diagnose:sl -- BTC 4h 3000  # tìm đặc điểm chung của lệnh bị SL
 npm run learn:losses                 # học kèo thua hôm qua, backtest và lưu log local
 npm run validate:filters -- BTC 4h 3000 # kiểm chứng bộ lọc theo thời gian
@@ -123,13 +124,12 @@ khi có nến mới đóng** — chỉ báo tính trên nến đã đóng nên p
 
 Cách chọn mã để quét:
 
-1. Một request lấy ticker toàn sàn (~3.700 symbol, 80 request-weight).
-2. Lọc cặp USDT đang giao dịch có khối lượng ≥ `alerts.scanMinQuoteVolumeUsd` ($3M).
-3. Lấy hợp của top 15 khối lượng và top 15 biến động, cộng watchlist bạn tự thêm.
+1. Chỉ lấy các cặp trong `alerts.tradeSymbols` — đây là whitelist bắt buộc cho kèo mới.
+2. Quét toàn bộ các cặp trong whitelist, không lấy thêm token top-volume/top-mover hoặc từ watchlist.
+3. Khi `alerts.requireFutures=true`, chỉ dùng các cặp có perpetual futures nếu Binance trả được danh sách futures; lỗi mạng thì không tự loại mã.
 
-Kết quả khoảng 24 mã, tốn ~1.400 weight/lượt (24% giới hạn 6.000/phút). Phân tích đầy đủ
-một mã tốn 56 weight — riêng `depth limit=1000` đã 50 — nên quét cả 479 cặp USDT sẽ tốn
-~26.800 weight/lượt, vượt xa giới hạn.
+Với 13 mã hiện tại, một lượt tối đa phân tích hai khung cho mỗi mã, vẫn thấp hơn đáng kể giới hạn
+6.000 request-weight/phút. Phân tích đầy đủ một mã tốn 56 weight — riêng `depth limit=1000` đã 50.
 
 ### Điều kiện call kèo
 
@@ -219,7 +219,7 @@ Mọi tham số ở `config/strategy.json`, không hardcode trong code. `setStra
 | `indicators.*` | Chu kỳ `volumeAvg` và `cvdSlope` (đều 20) |
 | `risk.*` | `slPercent` 4% (thay cho bội số ATR trước đây), mốc TP theo R, `displayLeverage` chỉ để quy đổi hiển thị |
 | `alerts.*` | Chu kỳ quét, ngưỡng báo, phạm vi sàng lọc, hạn giữ kèo |
-| `historicalPattern.*` | Số nến so mẫu, tối đa 6 tháng lịch sử, ngưỡng giống nhau và mức đồng thuận của diễn biến sau mẫu |
+| `historicalPattern.*` | Số nến so mẫu, tối đa 6 tháng lịch sử, cổng correlation/biên độ/sai số OHLC tương đối và mức đồng thuận của diễn biến sau mẫu |
 | `entryQuality.*` | Cổng bỏ qua lệnh khi CVD không đủ mạnh/cùng chiều hoặc volume dưới mức xác nhận; không tạo thêm nội dung Telegram |
 | `autoRetune.*` | Sau chuỗi SL, kiểm chứng nhanh và ghi chẩn đoán; chưa tự áp dụng vì chưa đủ nến để biết bị quét hay sai hướng |
 | `dailyReview.*` | So sánh 7 ngày, chỉ tự sửa khi lỗi lặp lại ít nhất 2 ngày đủ mẫu và candidate vượt train/holdout cùng bộ canh gác |
@@ -392,6 +392,9 @@ src/analysis/entry-quality.js  src/ml/train.js     src/backtest.js
 
 - Dữ liệu từ **Binance spot**. `resolveSymbol` đối chiếu danh sách cặp thật nên `wbtc` →
   `WBTCUSDT` còn `ethbtc` → `ETHBTC`; mã không tồn tại thì báo lỗi rõ ràng.
+- Nếu một mã whitelist không có Spot nhưng có perpetual futures (hiện là `HYPEUSDT`), nến, giá 24h
+  và sổ lệnh tự chuyển sang **Binance Futures**; giao diện ghi rõ nguồn và không trộn hai thị trường
+  trong một cửa sổ mẫu lịch sử.
 - Funding rate, OI và định vị đám đông **chỉ có với token có hợp đồng futures**. Cổ phiếu
   token hoá (bStocks) không có → chỉ còn 4 nhóm, nên cổng đồng thuận tính trên mẫu nhỏ hơn
   và dễ đạt hơn một cách giả tạo.

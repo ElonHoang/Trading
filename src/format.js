@@ -22,6 +22,7 @@ export function formatSummary(s) {
   const L = [];
   const icon = SIGNAL_ICON[s.combined.signal] || '⚪';
   L.push(`${icon} ${s.symbol} · ${s.interval} · ${s.combined.signal}`);
+  if (s.market === 'futures') L.push('Nguồn nến/giá: Binance Futures (cặp spot không có dữ liệu).');
   L.push(`Giá hiện tại: ${fmtNum(s.price.live)}` +
     (s.price.change24hPercent != null ? `  (24h: ${s.price.change24hPercent > 0 ? '+' : ''}${s.price.change24hPercent}%)` : ''));
   const drift = ((s.price.live - s.price.lastClose) / s.price.lastClose) * 100;
@@ -206,6 +207,10 @@ export function formatBacktest(r) {
   const st = r.stats;
   const L = [`📉 BACKTEST ${r.symbol} ${r.interval}`];
   L.push(`${r.period.from.slice(0, 10)} → ${r.period.to.slice(0, 10)} (${r.period.candles} nến)`);
+  if (r.settings.historicalPatternWarmupApplied) {
+    L.push(`Mẫu lịch sử: ${r.period.warmupCandles} nến warm-up · đánh giá ${r.settings.effectiveEvaluationCandles}/${r.settings.requestedEvaluationCandles} nến`
+      + (r.settings.historicalPatternHistoryLimitedByApi ? ' (giới hạn API)' : ''));
+  }
   L.push(`Phí ${r.settings.feePercent}%/chiều · giữ tối đa ${r.settings.maxHoldBars} nến · `
     + `ML ${r.settings.usedModel ? `bật (trọng số ${r.settings.mlWeight})` : 'chưa có model'}`);
   L.push('');

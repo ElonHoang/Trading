@@ -7,11 +7,14 @@ import { Bot, InputFile, InlineKeyboard } from 'grammy';
 
 import { analyze } from '../analysis/engine.js';
 import { renderAnalysisPng } from '../chart/png.js';
-import { INTERVAL_MS, resolveSymbol, screenSymbols } from '../data/binance.js';
+import { INTERVAL_MS, resolveSymbol, fetchFuturesSymbols } from '../data/binance.js';
 import { loadStrategy as loadBaseStrategy } from '../config.js';
 import { applyActiveTuning, readAutoRetuneState } from '../analysis/auto-retune.js';
 import { loadModel } from '../ml/model-store.js';
 import { readWatchlist, addSymbol, removeSymbol } from '../data/watchlist.js';
+import {
+  assertAllowedTradeSymbol, automaticTradeTargets, tradeSymbols,
+} from '../data/trading-universe.js';
 import { readSubscribers, addSubscriber, removeSubscriber } from '../data/subscribers.js';
 import { createMonitor } from './monitor.js';
 import { buildContext } from '../analysis/context.js';
@@ -50,6 +53,13 @@ const DEFAULT_INTERVAL = CALL_INTERVALS[0];
 const CANDLES = 300;
 // Các khung hay dùng, hiện thành hàng nút dưới ảnh chart.
 const QUICK_INTERVALS = ['15m', '1h', '4h', '1d', '1w'];
+
+async function configuredTradeTargets(strategy) {
+  const futures = strategy.alerts?.requireFutures === false
+    ? null
+    : await fetchFuturesSymbols().catch(() => null);
+  return automaticTradeTargets(strategy, { futures });
+}
 
 // Chỉ những user id này được dùng lệnh GHI (/canhbao, /tatcanhbao, /add, /del).
 // Mặc định FAIL-CLOSED: chưa khai báo thì chặn hết, vì bot có thể đang ở trong
@@ -112,11 +122,12 @@ function parseArgs(text) {
 }
 
 /** Gọi engine dùng chung: cùng số liệu với CLI, bot AI và dashboard. */
-async function runAnalyze(symbolInput, interval) {
+async function runAnalyze(symbolInput, interval, strategy = null) {
+  const activeStrategy = strategy ?? await loadStrategy();
   const symbol = await resolveSymbol(symbolInput);
-  const strategy = await loadStrategy();
+  assertAllowedTradeSymbol(symbol, activeStrategy);
   const storedModel = await loadModel(symbol, interval).catch(() => null);
-  return analyze(symbol, interval, strategy, {
+  return analyze(symbol, interval, activeStrategy, {
     storedModel, includeSeries: true, seriesBars: CANDLES,
   });
 }
@@ -126,7 +137,7 @@ async function runAnalyze(symbolInput, interval) {
  * không được làm mất phần kỹ thuật.
  */
 async function evaluateOn(symbolInput, interval, strategy) {
-  const snapshot = await runAnalyze(symbolInput, interval);
+  const snapshot = await runAnalyze(symbolInput, interval, strategy);
   const consensusPercent = strategy.thresholds?.consensusPercent ?? null;
   // Chạy khan trước để biết có kèo hay không — chỉ gọi Kĩ năng 2 khi cần, vì
   // CoinGecko giới hạn vài chục request/phút.
@@ -272,7 +283,7 @@ bot.command('canhbao', async (ctx) => {
   if (!await requireOwner(ctx)) return;
   const list = await addSubscriber(ctx.chat.id);
   const strategy = await loadStrategy();
-  const watch = await readWatchlist();
+  const symbols = tradeSymbols(strategy);
   const pollSeconds = Math.max(30, strategy.alerts?.pollSeconds ?? 300);
   const pollLabel = pollSeconds % 60 === 0 ? `${pollSeconds / 60} phút` : `${pollSeconds} giây`;
   await ctx.reply(
@@ -280,7 +291,7 @@ bot.command('canhbao', async (ctx) => {
     + `Quét mỗi ${pollLabel}, `
     + `chỉ đánh giá lại khi có nến mới đóng.\n`
     + `Báo khi |điểm| ≥ ${strategy.alerts?.minAbsScore ?? 35} hoặc khi bối cảnh phủ quyết.\n`
-    + `Đang theo dõi ${watch.length} mã (khung ${DEFAULT_INTERVAL}) — thêm bằng /add.\n`
+    + `Đang quét ${symbols.length} mã trong whitelist (khung ${DEFAULT_INTERVAL}).\n`
     + 'Tắt bằng /tatcanhbao.',
   );
 });
@@ -300,23 +311,9 @@ const monitor = createMonitor({
     if (!chats.length) return [];
 
     const strategy = await loadStrategy();
-    const cfg = strategy.alerts ?? {};
-    // Sàng lọc rẻ: 1 request lấy ticker toàn sàn (80 weight) rồi chọn ra ít mã
-    // đáng đào sâu. Gọi analyze cho cả 479 cặp sẽ tốn ~26.800 weight/lượt,
-    // vượt xa giới hạn 6.000/phút của Binance.
-    const [screen, watch] = await Promise.all([
-      screenSymbols({
-        topVolume: cfg.scanTopVolume ?? 15,
-        topMovers: cfg.scanTopMovers ?? 15,
-        minQuoteVolumeUsd: cfg.scanMinQuoteVolumeUsd ?? 3e6,
-        requireFutures: cfg.requireFutures !== false,
-      }).catch(() => ({ symbols: [] })),
-      readWatchlist(),
-    ]);
-    // Mã người dùng tự thêm luôn được theo, kể cả khi không qua sàng lọc.
-    const symbols = [...new Set([...watch, ...screen.symbols])];
-    // interval = null -> monitor tu chon khung theo CALL_INTERVALS.
-    return symbols.map((symbol) => ({ symbol, interval: null }));
+    // Chỉ quét toàn bộ whitelist đã cấu hình; không dùng screener toàn sàn hoặc
+    // watchlist làm nguồn tạo kèo mới.
+    return configuredTradeTargets(strategy);
   },
   evaluate: async ({ symbol, interval }) => {
     const strategy = await loadStrategy();

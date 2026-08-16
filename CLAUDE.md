@@ -35,7 +35,7 @@ Cần Node ≥ 20. Các script dùng `--env-file-if-exists=.env`, nên không c�
 
 ## Bộ chỉ báo bị giới hạn cố ý
 
-Repo dùng 7 nhóm: CVD, volume, phái sinh (funding + OI), định vị đám đông, hỗ trợ/kháng cự, order book và mẫu hình lịch sử. Mẫu hình lịch sử so đường giá + biên độ hiện tại với tối đa 6 tháng dữ liệu; chỉ được cộng điểm nếu diễn biến sau các mẫu cũ đủ đồng thuận. Chi tiết bản chất và cách diễn giải từng cái nằm ở [`.claude/skills/chi-bao/SKILL.md`](.claude/skills/chi-bao/SKILL.md) — đọc trước khi làm bất cứ gì liên quan phân tích.
+Repo dùng 7 nhóm: CVD, volume, phái sinh (funding + OI), định vị đám đông, hỗ trợ/kháng cự, order book và mẫu hình lịch sử. Mẫu hình lịch sử quét các cửa sổ trong tối đa 6 tháng, so log OHLC tương đối bằng các cổng correlation, biên độ và sai số từng nến; chỉ được cộng điểm nếu diễn biến sau các mẫu cũ đủ đồng thuận. Chi tiết bản chất và cách diễn giải từng cái nằm ở [`.claude/skills/chi-bao/SKILL.md`](.claude/skills/chi-bao/SKILL.md) — đọc trước khi làm bất cứ gì liên quan phân tích.
 
 EMA, RSI, MACD, Bollinger, ATR, ADX, Stochastic, VWAP, OBV, phân kỳ RSI **đã bị xoá khỏi codebase** theo yêu cầu. Đừng thêm lại, đừng tự tính, đừng đề xuất. Lấy lại từ git commit `2155bd4` nếu thật sự cần.
 
@@ -147,7 +147,7 @@ Browser giữ bản ghi đè riêng trong localStorage (`web/store.js`), mặc �
 - **`resolveSymbol()` đối chiếu danh sách cặp thật** (cache 6h), không đoán bằng hậu tố. Đoán từng làm `wbtc` → `WBTC` (mã không tồn tại). Giờ `wbtc` → `WBTCUSDT`, `ethbtc` → `ETHBTC`, `btctry` → `BTCTRY`; mã bịa báo lỗi rõ ràng.
 - **`MIN_CANDLES` = 30** nến đã đóng để chấm điểm, `features.WARMUP` = 60 cho ML, ≥ 600 để train.
 - Funding, OI và định vị đám đông **chỉ có với token có futures** — trả `null` chứ không lỗi. Cổ phiếu token hoá (bStocks) không có, nên chỉ còn 4 nhóm và cổng đồng thuận dễ đạt hơn một cách giả tạo.
-- **Chi phí request-weight**: phân tích đầy đủ 1 mã = 56 (riêng `depth limit=1000` đã 50). Giới hạn Binance 6.000/phút. Vì vậy vòng quét sàng lọc bằng 1 request ticker toàn sàn (80 weight) rồi chỉ đào sâu ~24 mã.
+- **Chi phí request-weight**: phân tích đầy đủ 1 mã = 56 (riêng `depth limit=1000` đã 50). Giới hạn Binance 6.000/phút. Vòng quét chỉ đào sâu các mã trong `alerts.tradeSymbols`; không dùng ticker toàn sàn để thêm mã mới.
 
 `models/` **được commit** để dashboard browser có model sẵn. `models/index.json` là manifest cho browser; chạy `npm run models:index` sau khi thêm hoặc xoá model để giữ khớp với thư mục.
 
@@ -215,20 +215,20 @@ Hai cạm bẫy đã đo, đừng lặp lại:
 
 Gói này từng bị chính `autoRetune` đe doạ: candidate `smaller-stop` siết `slPercent` và sàn `minSlPercent` là 1,5, tức cơ chế có quyền kéo 4 xuống 1,5 và xoá sạch thay đổi. Cả candidate đó lẫn ba candidate siết điểm/CVD/volume **đã bị xoá**; sàn giờ là 3.
 
-### `historicalPattern` KHÔNG chết — nó gánh phần lớn khoảng cách giữa lãi và lỗ
+### `historicalPattern` phải được đo lại sau khi siết cổng OHLC
 
-Chỗ này trong tài liệu từng ghi ngược. Đo lại trên 4 cặp (BTC/ETH/SOL/BNB) khung 4h, 3000 nến, chia 75% chọn / 25% mới hơn xác nhận:
+Các số dưới đây là baseline của matcher close+range cũ trên 4 cặp (BTC/ETH/SOL/BNB) khung 4h, 3000 nến, chia 75% chọn / 25% mới hơn xác nhận. Chúng **không** chứng minh hiệu quả của matcher mới có cổng sai số OHLC tương đối từng nến:
 
 | | tổng số lệnh (holdout) | tỉ lệ SL | PF | kỳ vọng | tổng đoạn giữ lại |
 |---|---|---|---|---|---|
 | giữ nguyên (trọng số 10) | 60 | 36,7% | **1,42** | **+0,379%** | **+21,8%** |
 | tắt hẳn (trọng số 0) | 68 | 42,7% | 1,03 | −0,07% | −7,4% |
 
-Nhóm này góp mặt ở **72/279 lệnh**. Tắt nó đi là đưa kỳ vọng về âm. Hai biến thể khác đã thử và **không** tốt hơn: nới `minSimilarity` xuống 0,75 cho kết quả ngang bằng (PF holdout 1,53 nhưng kỳ vọng 0,37 và tổng y hệt), còn tăng trọng số lên 16 thì holdout xấu đi (kỳ vọng 0,254%, tổng +10,8%). Vì vậy giữ `minSimilarity: 0,82` và trọng số 10.
+Vì vậy các biến thể cũ cũng không phải cơ sở để đổi `minSimilarity` hay trọng số mới. Không đổi `weights.historicalPattern` hoặc ngưỡng từ một lần chạy toàn bộ dữ liệu.
 
-Con số cũ ("đóng góp đúng 0") đến từ phép đo trên 1h/15m, nơi cửa sổ 3000 nến không phủ nổi `requiredHistoryMonths: 6`. Đừng suy con số của khung nhỏ ra cho 4h.
+Con số cũ ("đóng góp đúng 0") đến từ phép đo trên 1h/15m, nơi cửa sổ 3000 nến không phủ nổi `requiredHistoryMonths: 6`. `backtest()` hiện tự nạp warm-up lịch sử; với khung ngắn vẫn phải kiểm tra `historicalPatternHistoryLimitedByApi` và `effectiveEvaluationCandles` trước khi so kết quả.
 
-Cổng lọc cũng không quá chặt như vẻ ngoài: đo 320 điểm thời gian trên 8 cặp khung 4h, mẫu giống nhất có độ giống trung vị 0,913, và ở ngưỡng 0,82 thì 268/320 điểm có đủ ≥ 3 mẫu, 141/320 (44%) ra được điểm. Phần bị chặn chủ yếu là **cổng đồng thuận** của diễn biến sau đó, không phải cổng độ giống.
+Chạy `npm run research:patterns` cho đúng whitelist 13 token, rồi backtest walk-forward ít nhất 4h/1h. So baseline và cổng mới trên cùng train/holdout: tỷ lệ có mẫu, số lệnh, PF, kỳ vọng, drawdown và phân bố theo token. Chỉ sau đó mới có thể đánh giá mức chặt phù hợp.
 
 Hai thứ còn lại, biết để khỏi mất thời gian:
 

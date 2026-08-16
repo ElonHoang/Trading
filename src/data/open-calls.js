@@ -12,6 +12,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { INTERVAL_MS } from './binance.js';
+import { assertAllowedTradeSymbol } from './trading-universe.js';
 
 const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const FILE = path.join(DIR, 'open-calls.json');
@@ -34,10 +35,11 @@ async function save(map) {
 
 export async function openCall(symbol, {
   interval, side, entry, stopLoss, targets, candleTime, evidence = null,
-}) {
+}, { allowedSymbols } = {}) {
+  const allowedSymbol = assertAllowedTradeSymbol(symbol, allowedSymbols);
   const map = await readOpenCalls();
-  map[symbol] = {
-    symbol,
+  map[allowedSymbol] = {
+    symbol: allowedSymbol,
     interval,
     side,
     entry,

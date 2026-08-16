@@ -9,6 +9,7 @@ const SPOT_HOSTS = [
 ];
 
 const FUTURES_HOSTS = ['https://fapi.binance.com'];
+const isInvalidSymbolError = (error) => /code -1121|Invalid symbol/i.test(error?.message || '');
 
 export const INTERVALS = [
   '1m', '3m', '5m', '15m', '30m',
@@ -188,17 +189,19 @@ export async function resolveSymbol(input) {
   const raw = String(input || '').trim().toUpperCase().replace(/[/\-_\s]/g, '');
   if (!raw) throw new Error('Thiếu mã token');
 
-  let set;
-  try {
-    set = await fetchTradingSymbols();
-  } catch {
+  const [spot, futures] = await Promise.all([
+    fetchTradingSymbols().catch(() => null),
+    fetchFuturesSymbols().catch(() => null),
+  ]);
+  if (!spot && !futures) {
     return normalizeSymbol(input);
   }
+  const set = new Set([...(spot ?? []), ...(futures ?? [])]);
 
   for (const candidate of [raw, `${raw}USDT`, normalizeSymbol(input)]) {
     if (set.has(candidate)) return candidate;
   }
-  throw new Error(`Không tìm thấy cặp giao dịch nào cho "${raw}" trên Binance spot`);
+  throw new Error(`Không tìm thấy cặp giao dịch nào cho "${raw}" trên Binance spot hoặc futures`);
 }
 
 async function getJson(hosts, path, { timeoutMs = 15000 } = {}) {
@@ -225,7 +228,7 @@ async function getJson(hosts, path, { timeoutMs = 15000 } = {}) {
       return JSON.parse(text);
     } catch (err) {
       lastErr = err;
-      if (/code -1121|Invalid symbol/i.test(err.message)) throw err;
+      if (isInvalidSymbolError(err)) throw err;
     } finally {
       clearTimeout(timer);
     }
@@ -237,12 +240,7 @@ async function getJson(hosts, path, { timeoutMs = 15000 } = {}) {
  * Lấy nến. Trả về mảng { openTime, open, high, low, close, volume, closeTime, trades, closed }
  * Nến cuối cùng có thể chưa đóng -> đánh dấu closed=false.
  */
-export async function fetchKlines(symbol, interval = '4h', limit = 500) {
-  if (!INTERVAL_MS[interval]) throw new Error(`Khung thời gian không hợp lệ: ${interval}`);
-  const capped = Math.min(Math.max(limit, 50), 1000);
-  const path = `/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${capped}`;
-  const raw = await getJson(SPOT_HOSTS, path);
-  const now = Date.now();
+function mapKlines(raw, { market, now = Date.now() } = {}) {
   return raw.map((k) => ({
     openTime: k[0],
     open: +k[1],
@@ -255,11 +253,35 @@ export async function fetchKlines(symbol, interval = '4h', limit = 500) {
     trades: +k[8],
     takerBuyVolume: +k[9],
     closed: k[6] < now,
+    market,
   }));
 }
 
+async function fetchKlinesFrom(hosts, endpoint, symbol, interval, limit, market) {
+  if (!INTERVAL_MS[interval]) throw new Error(`Khung thời gian không hợp lệ: ${interval}`);
+  const capped = Math.min(Math.max(limit, 50), 1000);
+  const path = `${endpoint}?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${capped}`;
+  return mapKlines(await getJson(hosts, path), { market });
+}
+
+/** Lấy nến perpetual futures trực tiếp, dùng khi một mã whitelist không có spot. */
+export function fetchFuturesKlines(symbol, interval = '4h', limit = 500) {
+  return fetchKlinesFrom(FUTURES_HOSTS, '/fapi/v1/klines', symbol, interval, limit, 'futures');
+}
+
+export async function fetchKlines(symbol, interval = '4h', limit = 500) {
+  try {
+    return await fetchKlinesFrom(SPOT_HOSTS, '/api/v3/klines', symbol, interval, limit, 'spot');
+  } catch (error) {
+    // Không pha trộn nguồn khi mạng spot gặp lỗi; chỉ chuyển sang futures nếu
+    // Binance khẳng định cặp spot không tồn tại (ví dụ HYPEUSDT).
+    if (!isInvalidSymbolError(error)) throw error;
+    return fetchFuturesKlines(symbol, interval, limit);
+  }
+}
+
 /** Lấy nhiều trang nến để có lịch sử dài (dùng cho training). */
-export async function fetchKlinesHistory(symbol, interval = '4h', total = 3000) {
+async function fetchKlinesHistoryFrom(hosts, endpoint, symbol, interval, total, market) {
   const step = INTERVAL_MS[interval];
   if (!step) throw new Error(`Khung thời gian không hợp lệ: ${interval}`);
   const want = Math.min(Math.max(total, 200), 20000);
@@ -267,23 +289,11 @@ export async function fetchKlinesHistory(symbol, interval = '4h', total = 3000) 
   let endTime = Date.now();
   while (out.length < want) {
     const limit = Math.min(1000, want - out.length);
-    const path = `/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}` +
+    const path = `${endpoint}?symbol=${encodeURIComponent(symbol)}&interval=${interval}` +
       `&limit=${limit}&endTime=${endTime}`;
-    const raw = await getJson(SPOT_HOSTS, path);
+    const raw = await getJson(hosts, path);
     if (!raw.length) break;
-    const page = raw.map((k) => ({
-      openTime: k[0],
-      open: +k[1],
-      high: +k[2],
-      low: +k[3],
-      close: +k[4],
-      volume: +k[5],
-      closeTime: k[6],
-      quoteVolume: +k[7],
-      trades: +k[8],
-      takerBuyVolume: +k[9],
-      closed: true,
-    }));
+    const page = mapKlines(raw, { market });
     out.unshift(...page);
     endTime = page[0].openTime - 1;
     if (page.length < limit) break;
@@ -293,9 +303,28 @@ export async function fetchKlinesHistory(symbol, interval = '4h', total = 3000) 
   return out;
 }
 
+export function fetchFuturesKlinesHistory(symbol, interval = '4h', total = 3000) {
+  return fetchKlinesHistoryFrom(FUTURES_HOSTS, '/fapi/v1/klines', symbol, interval, total, 'futures');
+}
+
+export async function fetchKlinesHistory(symbol, interval = '4h', total = 3000) {
+  try {
+    return await fetchKlinesHistoryFrom(SPOT_HOSTS, '/api/v3/klines', symbol, interval, total, 'spot');
+  } catch (error) {
+    if (!isInvalidSymbolError(error)) throw error;
+    return fetchFuturesKlinesHistory(symbol, interval, total);
+  }
+}
+
 /** Giá & thống kê 24h. */
 export async function fetchTicker24h(symbol) {
-  const j = await getJson(SPOT_HOSTS, `/api/v3/ticker/24hr?symbol=${encodeURIComponent(symbol)}`);
+  let j;
+  try {
+    j = await getJson(SPOT_HOSTS, `/api/v3/ticker/24hr?symbol=${encodeURIComponent(symbol)}`);
+  } catch (error) {
+    if (!isInvalidSymbolError(error)) throw error;
+    j = await getJson(FUTURES_HOSTS, `/fapi/v1/ticker/24hr?symbol=${encodeURIComponent(symbol)}`);
+  }
   return {
     lastPrice: +j.lastPrice,
     priceChangePercent: +j.priceChangePercent,
@@ -318,7 +347,13 @@ export async function fetchTicker24h(symbol) {
  */
 export async function fetchOrderBookImbalance(symbol, limit = 1000, wallMult = 4) {
   try {
-    const j = await getJson(SPOT_HOSTS, `/api/v3/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
+    let j;
+    try {
+      j = await getJson(SPOT_HOSTS, `/api/v3/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
+    } catch (error) {
+      if (!isInvalidSymbolError(error)) throw error;
+      j = await getJson(FUTURES_HOSTS, `/fapi/v1/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
+    }
     const value = ([p, q]) => +p * +q;
     const bid = j.bids.reduce((s, lv) => s + value(lv), 0);
     const ask = j.asks.reduce((s, lv) => s + value(lv), 0);

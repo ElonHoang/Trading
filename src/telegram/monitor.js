@@ -9,6 +9,7 @@
 
 import { INTERVAL_MS } from '../data/binance.js';
 import { readOpenCalls, openCall, closeCall, checkCall } from '../data/open-calls.js';
+import { assertAllowedTradeSymbol, tradeSymbols } from '../data/trading-universe.js';
 import {
   buildCallEvidence, recordClosedTrade, runAutoRetune, formatAutoRetuneReport,
 } from '../analysis/auto-retune.js';
@@ -91,10 +92,35 @@ export function createMonitor({
           + `còn ${Math.ceil(pause.leftMs / 60e3)} phút.`);
       }
 
-      const targets = await listTargets();
+      const allowedSymbols = tradeSymbols(strategy);
+      const configuredTargets = await listTargets();
       const open = await readOpenCalls();
 
-      for (const target of targets) {
+      // Kèo đã mở phải được theo dõi đến lúc đóng, kể cả khi nó thuộc universe
+      // cũ. Chúng chỉ là mục theo dõi vòng đời: không thể sinh kèo mới ngoài
+      // whitelist sau khi kèo cũ đã đóng.
+      const targets = new Map();
+      for (const target of configuredTargets) {
+        try {
+          const symbol = assertAllowedTradeSymbol(target.symbol, allowedSymbols);
+          // Nếu token đã có kèo mở, dùng đúng khung gốc bên dưới để theo dõi.
+          if (open[symbol]) continue;
+          targets.set(`${symbol}|${target.interval ?? 'auto'}`, { ...target, symbol });
+        } catch (error) {
+          log(`[monitor] bỏ target ngoài whitelist: ${error.message}`);
+        }
+      }
+      for (const call of Object.values(open)) {
+        if (!call?.symbol) continue;
+        const key = `${call.symbol}|${call.interval ?? 'auto'}`;
+        targets.set(key, {
+          symbol: call.symbol,
+          interval: call.interval ?? null,
+          trackingOnly: true,
+        });
+      }
+
+      for (const target of targets.values()) {
         const key = `${target.symbol}|${target.interval ?? 'auto'}`;
         const prev = state.get(key) ?? {};
         try {
@@ -189,6 +215,9 @@ export function createMonitor({
           if (Math.abs(score) < minAbs) continue;
           if (onlyOnChange && !changed) continue;
 
+          // Mục theo dõi kèo cũ không bao giờ được dùng để mở một kèo thay thế.
+          if (target.trackingOnly) continue;
+
           // Entry, SL và TP đều neo vào giá ĐÓNG của nến đã đóng, còn vòng quét
           // thật cách nhau hàng giờ. Giá đã trôi xa thì người vào theo giá thị
           // trường có khoảng cách tới SL khác hẳn con số in trong tin, nên kèo
@@ -210,7 +239,7 @@ export function createMonitor({
             targets: setup.targets,
             candleTime,
             evidence: buildCallEvidence(snapshot, setup),
-          });
+          }, { allowedSymbols });
           open[snapshot.symbol] = { symbol: snapshot.symbol };
 
           await notify({

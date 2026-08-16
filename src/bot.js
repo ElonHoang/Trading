@@ -17,6 +17,7 @@
 
 import { Bot, GrammyError, HttpError } from 'grammy';
 import { resolveSymbol, INTERVAL_MS } from './data/binance.js';
+import { assertAllowedTradeSymbol, isAllowedTradeSymbol } from './data/trading-universe.js';
 import {
   loadStrategy, setStrategyValue, flattenStrategy, loadPrompt, savePrompt,
   loadWatchlist, saveWatchlist,
@@ -73,7 +74,7 @@ async function send(ctx, text) {
 
 /** Phân tích tham số "BTC 4h" -> { symbol, interval }. Async vì symbol được đối chiếu
  *  với danh sách cặp thật của Binance thay vì đoán. */
-async function parseArgs(text, fallbackInterval = DEFAULT_INTERVAL) {
+async function parseArgs(text, fallbackInterval = DEFAULT_INTERVAL, { requireAllowed = true } = {}) {
   const parts = String(text || '').trim().split(/\s+/).filter(Boolean);
   if (!parts.length) throw new Error('Thiếu mã token. Ví dụ: /a BTC 4h');
   let interval = fallbackInterval;
@@ -82,7 +83,9 @@ async function parseArgs(text, fallbackInterval = DEFAULT_INTERVAL) {
     if (INTERVAL_MS[parts[1]]) interval = parts[1];
     else throw new Error(`Khung "${parts[1]}" không hợp lệ. Hợp lệ: ${Object.keys(INTERVAL_MS).join(', ')}`);
   }
-  return { symbol: await resolveSymbol(symbolPart), interval, rest: parts.slice(2).join(' ') };
+  const symbol = await resolveSymbol(symbolPart);
+  if (requireAllowed) assertAllowedTradeSymbol(symbol, await loadStrategy());
+  return { symbol, interval, rest: parts.slice(2).join(' ') };
 }
 
 async function guard(ctx, key, fn) {
@@ -304,7 +307,7 @@ bot.command('watch', (ctx) => guard(ctx, 'watch', async () => {
 }));
 
 bot.command('unwatch', (ctx) => guard(ctx, 'watch', async () => {
-  const { symbol, interval } = await parseArgs(ctx.match);
+  const { symbol, interval } = await parseArgs(ctx.match, DEFAULT_INTERVAL, { requireAllowed: false });
   const chatId = String(ctx.chat.id);
   const list = await loadWatchlist();
   const next = list.filter((w) => !(w.chatId === chatId && w.symbol === symbol && w.interval === interval));
@@ -348,6 +351,9 @@ async function checkAlerts() {
   let changed = false;
 
   for (const w of list) {
+    // File này từng dùng chung hai schema watchlist; bỏ qua dữ liệu cũ và mọi
+    // token ngoài whitelist thay vì để chúng tạo cảnh báo mới.
+    if (!w || typeof w !== 'object' || !isAllowedTradeSymbol(w.symbol, strategy)) continue;
     try {
       const snapshot = await analyze(w.symbol, w.interval, strategy, {
         candles: 300,

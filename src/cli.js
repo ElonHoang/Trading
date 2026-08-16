@@ -3,6 +3,7 @@
 //   npm run analyze -- ETH 1h --no-ai      (chỉ chỉ báo + ML, không gọi Claude)
 
 import { resolveSymbol, INTERVAL_MS } from './data/binance.js';
+import { assertAllowedTradeSymbol } from './data/trading-universe.js';
 import { loadStrategy } from './config.js';
 import { loadModel } from './ml/model-store.js';
 import { analyze } from './analysis/engine.js';
@@ -22,6 +23,7 @@ if (!symbolArg) {
 
 const symbol = await resolveSymbol(symbolArg);
 const strategy = await loadStrategy();
+assertAllowedTradeSymbol(symbol, strategy);
 
 try {
   console.log(`Đang phân tích ${symbol} ${intervalArg}...\n`);

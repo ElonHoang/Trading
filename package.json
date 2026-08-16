@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node test/daily-review.test.js",
+    "test": "node --test",
     "start": "node --env-file-if-exists=.env src/server.js",
     "bot": "node --env-file-if-exists=.env src/telegram/bot.js",
     "alerts:once": "node --env-file-if-exists=.env src/telegram/alerts-once.js",
@@ -22,6 +22,7 @@
     "train:losses": "node --env-file-if-exists=.env bin/daily-review.js --force --yesterday --log-learning",
     "diagnose:sl": "node --env-file-if-exists=.env bin/diagnose-stoploss.js",
     "validate:filters": "node --env-file-if-exists=.env bin/validate-entry-filters.js",
+    "research:patterns": "node --env-file-if-exists=.env bin/research-patterns.js",
     "models:index": "node bin/build-model-index.js"
   },
   "dependencies": {

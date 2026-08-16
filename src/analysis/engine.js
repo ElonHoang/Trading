@@ -735,6 +735,7 @@ export async function analyze(symbolInput, interval, strategy, opts = {}) {
   return {
     symbol,
     interval,
+    market: raw[0]?.market ?? 'spot',
     generatedAt: new Date().toISOString(),
     lastClosedCandleTime: new Date(candles[i].openTime).toISOString(),
     price: {

@@ -5,6 +5,7 @@ import { loadStrategy } from '../src/config.js';
 import { backtest } from '../src/backtest.js';
 import { loadModel } from '../src/ml/model-store.js';
 import { normalizeSymbol } from '../src/data/binance.js';
+import { assertAllowedTradeSymbol } from '../src/data/trading-universe.js';
 
 const [symbolArg, interval = '4h', candlesArg = '3000'] = process.argv.slice(2);
 if (!symbolArg) {
@@ -48,6 +49,7 @@ function summarize(rows) {
 
 const strategy = await loadStrategy();
 const symbol = normalizeSymbol(symbolArg);
+assertAllowedTradeSymbol(symbol, strategy);
 const result = await backtest(symbol, interval, strategy, {
   candles: Number(candlesArg),
   storedModel: await loadModel(symbol, interval),

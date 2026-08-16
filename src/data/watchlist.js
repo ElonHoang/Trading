@@ -4,6 +4,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeSymbol } from './binance.js';
+import { loadStrategy } from '../config.js';
+import { assertAllowedTradeSymbol } from './trading-universe.js';
 
 const FILE = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'watchlist.json',
@@ -26,7 +28,8 @@ async function save(list) {
 
 /** Thêm mã (đã chuẩn hoá). Trả về danh sách mới; thêm trùng thì không đổi gì. */
 export async function addSymbol(input) {
-  const symbol = normalizeSymbol(input);
+  const strategy = await loadStrategy();
+  const symbol = assertAllowedTradeSymbol(normalizeSymbol(input), strategy);
   const list = await readWatchlist();
   if (list.includes(symbol)) return list;
   list.push(symbol);

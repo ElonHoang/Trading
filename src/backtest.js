@@ -12,7 +12,7 @@ import { computeIndicators, supportResistance } from './indicators/index.js';
 import { featureVector } from './features.js';
 import { predictProba } from './ml/gbdt.js';
 import { scoreSignals, labelForScore, buildLevels, closedCandles } from './analysis/engine.js';
-import { analyzeHistoricalPattern } from './analysis/historical-pattern.js';
+import { analyzeHistoricalPattern, historicalPatternCandleCount } from './analysis/historical-pattern.js';
 import { evaluateEntryQuality } from './analysis/entry-quality.js';
 
 const round = (v, d = 2) => (v == null || !Number.isFinite(v) ? null : Number(v.toFixed(d)));
@@ -94,10 +94,42 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
     onProgress = () => {},
   } = opts;
 
-  onProgress(`Đang tải ${wantCandles} nến ${symbol} ${interval}...`);
-  const raw = candlesData ?? await fetchKlinesHistory(symbol, interval, wantCandles);
+  const historicalPatternCfg = strategy.historicalPattern ?? {};
+  const useHistoricalPattern = historicalPatternCfg.enabled !== false;
+  // Backtest cần phần lịch sử đứng TRƯỚC đoạn đánh giá. Trước đây chỉ tải 3.000
+  // nến nên 1h/15m không hề có đủ sáu tháng như lúc chạy thật, khiến matcher
+  // luôn unavailable hoặc chỉ có ở cuối mẫu.
+  const patternWarmupBars = useHistoricalPattern
+    ? historicalPatternCandleCount(INTERVAL_MS[interval], historicalPatternCfg)
+    : 0;
+  const requestedFetchCandles = candlesData
+    ? candlesData.length
+    : wantCandles + patternWarmupBars;
+  const maxFetchCandles = 20000; // giới hạn cứng của fetchKlinesHistory/Binance
+  const fetchCandles = candlesData ? 0 : Math.min(requestedFetchCandles, maxFetchCandles);
+  const historyLimitedByApi = !candlesData && requestedFetchCandles > maxFetchCandles;
+
+  onProgress(
+    candlesData
+      ? `Dùng ${candlesData.length} nến ${symbol} ${interval} đã cung cấp...`
+      : `Đang tải ${fetchCandles} nến ${symbol} ${interval}`
+        + (patternWarmupBars ? ` (gồm ${patternWarmupBars} nến lịch sử cho so mẫu)...` : '...'),
+  );
+  const raw = candlesData ?? await fetchKlinesHistory(symbol, interval, fetchCandles);
   const candles = closedCandles(raw);
   if (candles.length < 400) throw new Error(`Chỉ tải được ${candles.length} nến — cần tối thiểu 400.`);
+
+  // Với dữ liệu tự tải, giữ nguyên đúng `wantCandles` gần nhất làm đoạn đánh
+  // giá và chỉ dùng phần đầu làm warmup. Dữ liệu fixture/candlesData giữ nguyên
+  // semantics cũ để các bài nghiên cứu chủ động quyết định điểm bắt đầu.
+  const effectiveStartIndex = candlesData
+    ? Math.max(220, startIndex)
+    : Math.max(220, startIndex, patternWarmupBars);
+  if (effectiveStartIndex >= candles.length - 1) {
+    throw new Error(
+      `Không còn đủ nến để backtest sau phần lịch sử so mẫu (${patternWarmupBars} nến warmup).`,
+    );
+  }
 
   const ind = computeIndicators(candles, strategy.indicators);
   const stored = storedModel;
@@ -105,8 +137,6 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
 
   const t = strategy.thresholds;
   const entryQualityCfg = strategy.entryQuality ?? {};
-  const historicalPatternCfg = strategy.historicalPattern ?? {};
-  const useHistoricalPattern = historicalPatternCfg.enabled !== false;
   const trades = [];
   let position = null;
   let skippedConsensus = 0;
@@ -117,7 +147,7 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
 
   onProgress(`Đang mô phỏng trên ${candles.length} nến${mlWeight > 0 ? ' (có model ML)' : ' (chỉ quy tắc)'}...`);
 
-  for (let i = Math.max(220, startIndex); i < candles.length; i++) {
+  for (let i = effectiveStartIndex; i < candles.length; i++) {
     const c = candles[i];
 
     // --- Quản lý vị thế đang mở ---
@@ -270,20 +300,26 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
   }
 
   // --- Thống kê ---
-  const stats = summarize(trades, candles, feePercent);
+  const stats = summarize(trades, candles, feePercent, effectiveStartIndex);
   return {
     symbol,
     interval,
     period: {
-      from: new Date(candles[0].openTime).toISOString(),
+      from: new Date(candles[effectiveStartIndex].openTime).toISOString(),
       to: new Date(candles[candles.length - 1].openTime).toISOString(),
-      candles: candles.length,
+      candles: candles.length - effectiveStartIndex,
+      warmupCandles: effectiveStartIndex,
     },
     settings: {
       feePercent, maxHoldBars, mlWeight, usedModel: mlWeight > 0, storedModelAvailable: Boolean(stored), srEvery,
       exitStrategy, partialFraction: exitStrategy === 'scaled' ? partialFraction : null,
       consensusPercent: t.consensusPercent ?? null,
       historicalPatternEnabled: useHistoricalPattern,
+      historicalPatternWarmupBars: patternWarmupBars,
+      historicalPatternWarmupApplied: !candlesData && useHistoricalPattern,
+      historicalPatternHistoryLimitedByApi: historyLimitedByApi,
+      requestedEvaluationCandles: wantCandles,
+      effectiveEvaluationCandles: candles.length - effectiveStartIndex,
       entryQualityEnabled: entryQualityCfg.enabled === true,
       skippedByEntryQuality,
       skippedByEntryFilter,
@@ -299,7 +335,7 @@ export async function backtest(symbolInput, interval, strategy, opts = {}) {
   };
 }
 
-function summarize(trades, candles, feePercent) {
+function summarize(trades, candles, feePercent, evaluationStartIndex = 220) {
   if (!trades.length) {
     return { trades: 0, note: 'Không có lệnh nào — ngưỡng tín hiệu có thể quá cao. Thử giảm thresholds.buy / thresholds.sell.' };
   }
@@ -321,7 +357,8 @@ function summarize(trades, candles, feePercent) {
     curve.push(round(equity, 2));
   }
 
-  const buyHold = ((candles[candles.length - 1].close - candles[220].close) / candles[220].close) * 100;
+  const buyHold = ((candles[candles.length - 1].close - candles[evaluationStartIndex].close)
+    / candles[evaluationStartIndex].close) * 100;
   const mean = nets.reduce((a, b) => a + b, 0) / nets.length;
   const sd = Math.sqrt(nets.reduce((s, v) => s + (v - mean) ** 2, 0) / nets.length);
 

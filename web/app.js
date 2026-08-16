@@ -6,6 +6,7 @@
 
 import { analyze } from '../src/analysis/engine.js';
 import { normalizeSymbol, resolveSymbol, INTERVAL_MS } from '../src/data/binance.js';
+import { assertAllowedTradeSymbol } from '../src/data/trading-universe.js';
 import {
   loadStrategy, setStrategyValue, flattenStrategy, resetStrategy, overrideCount, isOverridden,
   loadPrompt, savePrompt, resetPrompt, promptIsCustom,
@@ -796,6 +797,7 @@ function renderIndicators(snap) {
   if (snap.historicalPattern?.available) {
     const hp = snap.historicalPattern;
     rows.push(['Mẫu hình lịch sử', `${hp.matched} mẫu, giống TB ${hp.avgSimilarity}%`]);
+    rows.push(['Sai số chart tương đối', `TB ${hp.avgRelativePathError}% · P95 ${hp.avgP95RelativePathError}% · ${hp.avgBarsWithinRelativeTolerancePercent}% nến trong tolerance`]);
     rows.push(['Diễn biến sau mẫu', `${hp.side === 'long' ? 'Tăng' : 'Giảm'} TB ${fmtSigned(hp.avgForwardReturnPct)}% sau ${hp.futureBars} nến`]);
   }
   for (const [k, v] of rows) {
@@ -830,7 +832,10 @@ async function selectedSymbol() {
   if (!raw) throw new Error('Nhập mã token trước đã (ví dụ BTC, ETH, SOL).');
   // Đối chiếu danh sách cặp thật của Binance thay vì đoán, để "wbtc" ra WBTCUSDT
   // còn "ethbtc" ra ETHBTC.
-  return resolveSymbol(raw);
+  const symbol = await resolveSymbol(raw);
+  const strategy = state.strategy ?? await loadStrategy();
+  assertAllowedTradeSymbol(symbol, strategy);
+  return symbol;
 }
 
 /** Cho người dùng thấy train/backtest sẽ chạy trên token nào. */

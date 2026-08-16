@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import { analyze } from './analysis/engine.js';
 import { INTERVALS, resolveSymbol } from './data/binance.js';
+import { assertAllowedTradeSymbol } from './data/trading-universe.js';
 import { loadStrategy } from './config.js';
 import { loadModel } from './ml/model-store.js';
 import { readWatchlist, addSymbol, removeSymbol } from './data/watchlist.js';
@@ -42,6 +43,7 @@ app.get('/api/analyze', async (req, res) => {
     // Đối chiếu danh sách cặp thật của Binance, không đoán.
     const normalized = await resolveSymbol(symbol);
     const strategy = await loadStrategy();
+    assertAllowedTradeSymbol(normalized, strategy);
     // Chưa train model cho cặp này thì engine tự báo trong ml.reason.
     const storedModel = await loadModel(normalized, interval).catch(() => null);
     res.json(await analyze(normalized, interval, strategy, {
