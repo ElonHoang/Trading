@@ -8,7 +8,7 @@ Có ba mặt sử dụng, tất cả dùng **cùng một engine** nên số li�
 | Mặt | Lệnh | Ghi chú |
 |---|---|---|
 | Bot Telegram (chart) | `npm run bot` | Call kèo kèm ảnh chart, theo dõi liên tục |
-| Web local | `npm start` | Dashboard tĩnh tại `/` và giao diện realtime tại `/realtime/` |
+| Web local | `npm start` | Java server, dashboard tại `/` và đăng nhập tại `/login/` |
 | CLI | `npm run analyze -- BTC 1h` | Phân tích trong terminal |
 
 ---
@@ -53,7 +53,7 @@ Hai điều đi kèm với lựa chọn đó, đo được chứ không phỏng 
 
 ## Chạy ở máy mình
 
-Yêu cầu Node.js ≥ 20.
+Yêu cầu Node.js ≥ 20 cho engine hiện có; Java 17+ và Maven 3.6.3+ cho web server đăng nhập.
 
 ```bash
 git clone <repo-url>
@@ -61,8 +61,35 @@ cd <repo>
 npm install
 cp .env.example .env     # điền TELEGRAM_BOT_TOKEN và TELEGRAM_OWNER_IDS
 npm run bot              # bot Telegram
-npm start                # web local, mặc định http://localhost:3000
+npm start                # Java server + web, mặc định http://localhost:8080
+npm run start:node       # API phân tích realtime cũ, mặc định http://localhost:3000
 ```
+
+### Đăng nhập Google / GitHub
+
+Màn đăng nhập nằm tại `http://localhost:8080/login/` và API chạy bằng Java Spring Boot trong
+`server-java/`. Sao chép `server-java/.env.example` thành `server-java/.env`, sau đó tạo ứng
+dụng trong Google Cloud Console hoặc GitHub Developer Settings và điền:
+
+```env
+JAVA_SERVER_PORT=8080
+SESSION_COOKIE_SECURE=false
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+```
+
+Khai báo callback URL là `http://localhost:8080/login/oauth2/code/google` cho Google và
+`http://localhost:8080/login/oauth2/code/github` cho GitHub. Khi deploy sau reverse proxy,
+forward đúng các header `X-Forwarded-*`, đăng ký callback theo origin HTTPS công khai và đặt
+`SESSION_COOKIE_SECURE=true`. Session phía server có thời hạn 7 ngày.
+
+Dashboard có thêm biểu đồ **Hiệu suất dòng tiền** theo 7 ngày, 30 ngày và 12 tháng.
+Java API `GET /api/trading-performance?range=week|month|year` đọc trực tiếp các lệnh đã đóng
+trong `data/auto-retune.json`; không nhúng dữ liệu giả vào giao diện. Nếu chạy server ở một
+thư mục khác, có thể đặt `TRADING_STATE_FILE`, `TRADING_STRATEGY_FILE` và
+`TRADING_TIMEZONE` trong `server-java/.env` để chỉ rõ nguồn dữ liệu và múi giờ.
 
 Các lệnh khác:
 

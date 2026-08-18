@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Đăng nhập vào AI phân tích kỹ thuật bằng Google hoặc GitHub.">
+  <title>Đăng nhập · Dòng Tiền AI</title>
+  <link rel="stylesheet" href="/login/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%2311100e'/><path d='M8 20l5-5 4 3 7-8' fill='none' stroke='%23d7ff57' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+  <main class="shell">
+    <section class="visual" aria-label="Giới thiệu Dòng Tiền AI">
+      <a class="brand brand-light" href="/" aria-label="Dòng Tiền AI — về trang chủ">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 28 28"><path d="M5 18.5 10.5 13l4.2 3.5L23 8"/></svg>
+        </span>
+        <span>Dòng Tiền AI</span>
+      </a>
+
+      <div class="visual-copy">
+        <p class="eyebrow">PHÂN TÍCH THỊ TRƯỜNG THÔNG MINH</p>
+        <h1>Nhìn thấy tín hiệu.<br><em>Hiểu rõ dòng tiền.</em></h1>
+        <p class="intro">Biến dữ liệu thị trường phức tạp thành những góc nhìn rõ ràng, ngay khi bạn cần.</p>
+      </div>
+
+      <div class="market-card" aria-hidden="true">
+        <div class="market-top">
+          <div>
+            <span class="market-label">BTC / USDT</span>
+            <strong>$118,420.50</strong>
+          </div>
+          <span class="gain">+2.48%</span>
+        </div>
+        <svg class="market-chart" viewBox="0 0 560 180" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#d7ff57" stop-opacity=".32"/>
+              <stop offset="1" stop-color="#d7ff57" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <g class="grid-lines">
+            <path d="M0 35H560M0 90H560M0 145H560"/>
+          </g>
+          <path class="area" d="M0 145 C30 133 42 144 67 125 S104 120 130 105 S174 122 205 92 S244 103 272 78 S318 91 349 69 S392 80 419 53 S468 72 498 40 S536 51 560 20 L560 180 L0 180Z"/>
+          <path class="line" d="M0 145 C30 133 42 144 67 125 S104 120 130 105 S174 122 205 92 S244 103 272 78 S318 91 349 69 S392 80 419 53 S468 72 498 40 S536 51 560 20"/>
+          <circle cx="560" cy="20" r="5"/>
+        </svg>
+        <div class="market-bottom">
+          <span><i class="live-dot"></i>Dữ liệu trực tiếp</span>
+          <span>Cập nhật vừa xong</span>
+        </div>
+      </div>
+
+      <p class="visual-foot">Dữ liệu rõ ràng · Quyết định có cơ sở</p>
+    </section>
+
+    <section class="auth-panel">
+      <a class="brand brand-dark" href="/" aria-label="Dòng Tiền AI — về trang chủ">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 28 28"><path d="M5 18.5 10.5 13l4.2 3.5L23 8"/></svg>
+        </span>
+        <span>Dòng Tiền AI</span>
+      </a>
+
+      <div class="auth-wrap">
+        <div id="signed-out">
+          <p class="kicker">CHÀO MỪNG TRỞ LẠI</p>
+          <h2>Đăng nhập để tiếp tục</h2>
+          <p class="auth-subtitle">Truy cập dashboard và xem lại phân tích của bạn.</p>
+
+          <div id="notice" class="notice" role="alert" hidden></div>
+
+          <div class="providers" aria-label="Các phương thức đăng nhập">
+            <a class="provider-button" id="google-login" href="/auth/google">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.92h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.41Z"/>
+                <path fill="#34A853" d="M12 22c2.7 0 4.98-.9 6.63-2.42l-3.24-2.54c-.9.6-2.05.96-3.39.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.62A10 10 0 0 0 12 22Z"/>
+                <path fill="#FBBC05" d="M6.39 13.87A6 6 0 0 1 6.07 12c0-.65.11-1.28.32-1.87V7.51H3.04A10 10 0 0 0 2 12c0 1.61.38 3.14 1.04 4.49l3.35-2.62Z"/>
+                <path fill="#EA4335" d="M12 6c1.47 0 2.79.5 3.83 1.5l2.87-2.87A9.62 9.62 0 0 0 12 2a10 10 0 0 0-8.96 5.51l3.35 2.62C7.18 7.76 9.39 6 12 6Z"/>
+              </svg>
+              <span>Tiếp tục với Google</span>
+              <span class="arrow" aria-hidden="true">→</span>
+            </a>
+
+            <a class="provider-button" id="github-login" href="/auth/github">
+              <svg class="github-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.7-1.28-1.7-1.06-.71.08-.7.08-.7 1.16.09 1.78 1.2 1.78 1.2 1.04 1.78 2.72 1.27 3.38.97.1-.76.4-1.27.74-1.56-2.57-.29-5.27-1.28-5.27-5.68 0-1.25.44-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.63 1.58.23 2.75.11 3.04.74.8 1.19 1.83 1.19 3.08 0 4.41-2.7 5.38-5.28 5.67.42.36.78 1.06.78 2.14v3.18c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>
+              <span>Tiếp tục với GitHub</span>
+              <span class="arrow" aria-hidden="true">→</span>
+            </a>
+          </div>
+
+          <p class="terms">Đăng nhập được bảo vệ bởi OAuth 2.0. Ứng dụng không nhận hoặc lưu mật khẩu Google/GitHub của bạn.</p>
+        </div>
+
+        <div id="signed-in" class="signed-in" hidden>
+          <p class="kicker">BẠN ĐÃ ĐĂNG NHẬP</p>
+          <img id="user-avatar" alt="" width="72" height="72">
+          <h2 id="user-name">Xin chào</h2>
+          <p class="auth-subtitle" id="user-email"></p>
+          <a class="continue-button" id="continue-button" href="/">Mở dashboard <span aria-hidden="true">→</span></a>
+          <button class="logout-button" id="logout-button" type="button">Đăng xuất</button>
+        </div>
+      </div>
+
+      <p class="support">Chưa muốn đăng nhập? <a href="/">Quay lại dashboard</a></p>
+    </section>
+  </main>
+
+  <script type="module" src="/login/login.js"></script>
+</body>
+</html>

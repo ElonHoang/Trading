@@ -17,6 +17,7 @@ data/loss-learning/
 .tmp/
 *.log
 npm-debug.log*
+server-java/target/
 .DS_Store
 Thumbs.db
 

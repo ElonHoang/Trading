@@ -9,7 +9,9 @@
   },
   "scripts": {
     "test": "node --test",
-    "start": "node --env-file-if-exists=.env src/server.js",
+    "test:java": "mvn -f server-java/pom.xml test",
+    "start": "mvn -f server-java/pom.xml spring-boot:run",
+    "start:node": "node --env-file-if-exists=.env src/server.js",
     "bot": "node --env-file-if-exists=.env src/telegram/bot.js",
     "alerts:once": "node --env-file-if-exists=.env src/telegram/alerts-once.js",
     "scan:github": "node --env-file-if-exists=.env src/telegram/alerts-once.js",

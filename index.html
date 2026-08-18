@@ -12,15 +12,16 @@
 
 <header>
   <h1>AI phân tích kỹ thuật</h1>
-  <div class="controls">
+  <div class="controls analysis-controls">
     <input type="text" id="symbol" value="BTC" placeholder="BTC" aria-label="Mã token" autocomplete="off">
     <select id="interval" aria-label="Khung thời gian"></select>
     <button class="primary" id="btn-analyze">Phân tích</button>
     <button id="btn-ai">Phân tích bằng AI</button>
   </div>
   <div class="spacer"></div>
-  <div class="controls">
+  <div class="controls account-controls">
     <span id="status" class="small muted" role="status" aria-live="polite"></span>
+    <a class="auth-link" id="auth-link" href="/login/">Đăng nhập</a>
     <button id="btn-theme" aria-label="Đổi sáng/tối" title="Đổi sáng/tối">◐</button>
   </div>
 </header>
@@ -53,8 +54,40 @@
     <ul class="notes" id="conflicts"></ul>
   </section>
 
-  <div class="chart-row">
-    <section class="card">
+  <section class="card performance-card" aria-labelledby="performance-title">
+    <div class="performance-head">
+      <div>
+        <h2 id="performance-title">Hiệu suất dòng tiền</h2>
+        <p class="sub">Lãi/lỗ từ các lệnh đã đóng, tổng hợp theo dữ liệu thực tế hằng ngày</p>
+      </div>
+      <div class="performance-ranges" aria-label="Khoảng thời gian biểu đồ">
+        <button type="button" class="performance-range active" data-range="week">7 ngày</button>
+        <button type="button" class="performance-range" data-range="month">30 ngày</button>
+        <button type="button" class="performance-range" data-range="year">12 tháng</button>
+      </div>
+    </div>
+    <div class="performance-kpis" id="performance-kpis" aria-live="polite">
+      <div class="performance-kpi"><span>P&amp;L</span><strong>—</strong></div>
+      <div class="performance-kpi"><span>Tỷ lệ thắng</span><strong>—</strong></div>
+      <div class="performance-kpi"><span>Thắng / thua</span><strong>—</strong></div>
+      <div class="performance-kpi"><span>TB mỗi lệnh</span><strong>—</strong></div>
+      <div class="performance-kpi"><span>Lệnh đã đóng</span><strong>—</strong></div>
+    </div>
+    <div class="performance-legend">
+      <span><i class="performance-swatch profit"></i>P&amp;L từng kỳ</span>
+      <span><i class="performance-line-swatch"></i>P&amp;L tích lũy</span>
+    </div>
+    <div class="chart-wrap performance-chart-wrap" id="performance-wrap">
+      <svg class="chart" id="performance-chart" viewBox="0 0 1200 260" role="img"
+           aria-label="Biểu đồ lãi lỗ và dòng tiền tích lũy từ các lệnh đã đóng"></svg>
+      <div class="tooltip" id="performance-tip" role="tooltip"></div>
+      <div class="performance-empty" id="performance-empty">Đang tải dữ liệu lệnh…</div>
+    </div>
+    <p class="performance-note" id="performance-note"></p>
+  </section>
+
+  <div class="market-layout">
+    <section class="card price-card">
       <h2>Giá &amp; vùng hỗ trợ/kháng cự</h2>
       <p class="sub" id="price-chart-sub">—</p>
       <div class="legend" id="price-legend"></div>
@@ -69,32 +102,37 @@
       </details>
     </section>
 
-    <div style="display:grid; gap:14px; align-content:start; min-width:0">
+    <aside class="market-side" aria-label="Thông tin thị trường quan trọng">
       <section class="card">
-        <h2>Dòng tiền chủ động</h2>
-        <p class="sub">CVD luỹ tiến và mua chủ động ròng mỗi nến</p>
-        <div class="legend" id="osc-legend"></div>
-        <div class="chart-wrap" id="cvd-wrap">
-          <svg class="chart" id="cvd-chart" viewBox="0 0 420 130" role="img"
-               aria-label="CVD luỹ tiến theo thời gian"></svg>
-          <div class="tooltip" id="cvd-tip" role="tooltip"></div>
-        </div>
-        <div class="chart-wrap" id="flow-wrap" style="margin-top:6px">
-          <svg class="chart" id="flow-chart" viewBox="0 0 420 120" role="img"
-               aria-label="Mua chủ động ròng mỗi nến, tính theo phần trăm khối lượng"></svg>
-          <div class="tooltip" id="flow-tip" role="tooltip"></div>
-        </div>
+        <h2>Vùng giá quan trọng</h2>
+        <p class="sub" id="levels-sub">—</p>
+        <div id="levels-body" class="small muted">Đang tải…</div>
       </section>
-
       <section class="card">
-        <h2>Model học máy</h2>
-        <p class="sub" id="ml-sub">—</p>
-        <div id="ml-body" class="small muted">Đang tải…</div>
+        <h2>Số liệu chỉ báo</h2>
+        <p class="sub">Thông tin kỹ thuật tại nến gần nhất</p>
+        <div id="indicators-body" class="small muted">Đang tải…</div>
       </section>
-    </div>
+    </aside>
   </div>
 
-  <div class="grid-2">
+  <div class="analysis-layout">
+    <section class="card flow-card">
+      <h2>Dòng tiền chủ động</h2>
+      <p class="sub">CVD luỹ tiến và mua chủ động ròng mỗi nến</p>
+      <div class="legend" id="osc-legend"></div>
+      <div class="chart-wrap" id="cvd-wrap">
+        <svg class="chart" id="cvd-chart" viewBox="0 0 420 130" role="img"
+             aria-label="CVD luỹ tiến theo thời gian"></svg>
+        <div class="tooltip" id="cvd-tip" role="tooltip"></div>
+      </div>
+      <div class="chart-wrap" id="flow-wrap">
+        <svg class="chart" id="flow-chart" viewBox="0 0 420 120" role="img"
+             aria-label="Mua chủ động ròng mỗi nến, tính theo phần trăm khối lượng"></svg>
+        <div class="tooltip" id="flow-tip" role="tooltip"></div>
+      </div>
+    </section>
+
     <section class="card">
       <h2>Đóng góp của từng nhóm tín hiệu</h2>
       <p class="sub">Điểm âm nghiêng về giảm, điểm dương nghiêng về tăng. Trọng số sửa được ở tab Cấu hình.</p>
@@ -105,18 +143,6 @@
       </div>
       <div id="breakdown-reasons" style="margin-top:10px"></div>
     </section>
-
-    <div style="display:grid; gap:14px; align-content:start; min-width:0">
-      <section class="card">
-        <h2>Vùng giá quan trọng</h2>
-        <p class="sub" id="levels-sub">—</p>
-        <div id="levels-body" class="small muted">Đang tải…</div>
-      </section>
-      <section class="card">
-        <h2>Số liệu chỉ báo</h2>
-        <div id="indicators-body" class="small muted">Đang tải…</div>
-      </section>
-    </div>
   </div>
 
   <section class="card">
