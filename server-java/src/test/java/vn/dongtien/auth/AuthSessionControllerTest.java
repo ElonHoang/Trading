@@ -4,7 +4,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.ActiveProfiles;
+import tools.jackson.databind.JsonNode;
+
+import java.util.List;
+import java.util.Optional;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -14,8 +22,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "spring.datasource.url=jdbc:postgresql://localhost:1/test",
+        "spring.datasource.username=test",
+        "spring.datasource.password=test"
+})
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
+@Import(AuthSessionControllerTest.DatabaseTestConfiguration.class)
 class AuthSessionControllerTest {
     @Autowired
     private MockMvc mockMvc;
@@ -50,5 +64,31 @@ class AuthSessionControllerTest {
         mockMvc.perform(get("/api/trading-performance").param("range", "quarter"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("range chỉ nhận week, month hoặc year"));
+    }
+
+    @TestConfiguration
+    static class DatabaseTestConfiguration {
+        @Bean
+        DocumentStore documentStore() {
+            return new DocumentStore() {
+                @Override
+                public Optional<JsonNode> find(String key) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public List<StoredDocument> findByPrefix(String prefix) {
+                    return List.of();
+                }
+
+                @Override
+                public void put(String key, JsonNode value) {}
+
+                @Override
+                public boolean delete(String key) {
+                    return false;
+                }
+            };
+        }
     }
 }

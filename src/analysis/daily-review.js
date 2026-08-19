@@ -13,7 +13,7 @@
 // Trước đây auto-retune siết đúng những núm mà repo đã đo là làm xấu thêm, tức
 // hai đường kích hoạt đề xuất hai chiều ngược nhau cho cùng một cấu hình.
 //
-// Chỉ chạy ở Node: đọc/ghi file trạng thái và tải dữ liệu lịch sử.
+// Chỉ chạy ở Node: đọc/ghi trạng thái PostgreSQL và tải dữ liệu lịch sử.
 
 import { fetchKlines, fetchKlinesHistory } from '../data/binance.js';
 import { saveStrategy } from '../config.js';
@@ -576,7 +576,7 @@ export async function runDailyReview({ strategy, state, now = Date.now(), deps =
   // Kết quả tự kiểm chứng sau chuỗi SL (auto-retune) ĐI NHỜ báo cáo này. Nó chạy
   // ở vòng quét — nơi không có đường ra Telegram nào ngoài ba mẫu tin — nên nếu
   // không nhắc lại ở đây thì cả cơ chế chỉ nằm trong log của runner. Hai bên đọc
-  // chung `data/auto-retune.json` nên không cần thêm nguồn trạng thái nào.
+  // chung document `data:auto-retune` nên không cần thêm nguồn trạng thái nào.
   const attempts = Array.isArray(state.attempts) ? state.attempts : [];
   const freshFrom = analysisWindow.sinceMs ?? now - 7 * DAY_MS;
   const lastAttempt = [...attempts].reverse().find((a) => (
@@ -872,7 +872,7 @@ function pushRetune(L, report) {
   L.push(`   · Canh gác ${rt.guardInterval ?? '4h'}: PF ${g.profitFactor} · kỳ vọng ${g.expectancyPercent}%/lệnh`);
   L.push(`   · Thay đổi: ${Object.entries(rt.selected.changes ?? {}).map(([k, val]) => `${k} = ${JSON.stringify(val)}`).join(' · ')}`);
   if (rt.status !== 'applied') {
-    L.push('   · <b>Chưa tự ghi</b> — sửa <code>config/strategy.json</code> rồi commit để áp dụng.');
+    L.push('   · <b>Chưa tự ghi</b> — dùng lệnh quản trị cấu hình để áp dụng vào database.');
   }
 }
 

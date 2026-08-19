@@ -1,14 +1,12 @@
 // Lưu cấu hình phía browser.
 //
-// Mặc định đọc từ config/strategy.json trong repo; những gì người dùng sửa được
+// Mặc định đọc từ PostgreSQL qua API; những gì người dùng sửa được
 // lưu riêng thành map "đường dẫn → giá trị" trong localStorage. Nhờ vậy khi repo
 // cập nhật mặc định mới, thay đổi của người dùng vẫn còn, và reset rất gọn.
 
 const OVERRIDES_KEY = 'ta.strategy.overrides';
 const PROMPT_KEY = 'ta.prompt';
 const APIKEY_KEY = 'ta.anthropicKey';
-
-const url = (rel) => new URL(rel, import.meta.url).href;
 
 let defaults = null;
 let defaultPrompt = null;
@@ -33,8 +31,8 @@ function writeJson(key, value) {
 
 async function getDefaults() {
   if (defaults) return defaults;
-  const res = await fetch(url('../config/strategy.json'), { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`Không tải được config/strategy.json (HTTP ${res.status})`);
+  const res = await fetch('/api/content/strategy', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Không tải được strategy từ database (HTTP ${res.status})`);
   defaults = await res.json();
   return defaults;
 }
@@ -129,7 +127,7 @@ export async function loadPrompt() {
   const saved = localStorage.getItem?.(PROMPT_KEY);
   if (saved) return saved;
   if (defaultPrompt == null) {
-    const res = await fetch(url('../config/prompt.md'), { cache: 'no-cache' });
+    const res = await fetch('/api/content/prompt', { cache: 'no-store' });
     defaultPrompt = res.ok ? await res.text() : '';
   }
   return defaultPrompt;

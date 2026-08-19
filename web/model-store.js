@@ -1,13 +1,10 @@
 // Kho model phía browser.
 //
 // Hai nguồn:
-//  1. Model đóng gói sẵn trong repo (models/*.json, liệt kê trong models/index.json)
-//     — dùng ngay khi mở trang, không cần train.
-//  2. Model người dùng tự train — lưu localStorage, ưu tiên hơn bản đóng gói.
+//  1. Model dùng chung trong PostgreSQL — dùng ngay khi mở trang, không cần train.
+//  2. Model người dùng tự train — lưu localStorage, ưu tiên hơn bản database.
 
 const LS_PREFIX = 'ta.model.';
-const url = (rel) => new URL(rel, import.meta.url).href;
-
 const key = (symbol, interval) => `${String(symbol).toUpperCase()}_${interval}`;
 
 let manifest = null;
@@ -15,7 +12,7 @@ let manifest = null;
 async function getManifest() {
   if (manifest) return manifest;
   try {
-    const res = await fetch(url('../models/index.json'), { cache: 'no-cache' });
+    const res = await fetch('/api/content/models', { cache: 'no-store' });
     manifest = res.ok ? await res.json() : [];
   } catch {
     manifest = [];
@@ -45,7 +42,11 @@ export async function loadModel(symbol, interval) {
   const list = await getManifest();
   if (!list.some((m) => key(m.symbol, m.interval) === k)) return null;
   try {
-    const res = await fetch(url(`../models/${k}.json`), { cache: 'no-cache' });
+    const [symbolPart, ...intervalParts] = k.split('_');
+    const intervalPart = intervalParts.join('_');
+    const res = await fetch(`/api/content/models/${encodeURIComponent(symbolPart)}/${encodeURIComponent(intervalPart)}`, {
+      cache: 'no-store',
+    });
     return res.ok ? await res.json() : null;
   } catch {
     return null;
@@ -96,7 +97,7 @@ export function deleteModel(symbol, interval) {
 export async function listModels() {
   const out = new Map();
   for (const m of await getManifest()) {
-    out.set(key(m.symbol, m.interval), { ...m, source: 'repo' });
+    out.set(key(m.symbol, m.interval), { ...m, source: 'database' });
   }
   for (const k of localKeys()) {
     try {

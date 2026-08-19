@@ -1,12 +1,7 @@
 // Nhật ký học từ kèo thua: giữ dữ liệu có cấu trúc để đối chiếu nguyên nhân và
 // quyết định optimizer giữa các ngày, đồng thời có bản text đọc nhanh.
 
-import { mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-
-import { DATA_DIR } from '../config.js';
-
-const DEFAULT_DIR = path.join(DATA_DIR, 'loss-learning');
+import { putDocument } from '../db.js';
 
 export const compactLoss = (row) => ({
   tradeId: row.tradeId ?? null,
@@ -86,7 +81,7 @@ export function buildLearningRecord(report, {
 }
 
 export async function writeLearningLog(report, {
-  strategy = {}, activeTuning = null, text = '', outputDir = DEFAULT_DIR,
+  strategy = {}, activeTuning = null, text = '',
 } = {}) {
   const record = buildLearningRecord(report, { strategy, activeTuning });
   const label = /^NGÀY\s+(\d{2})\/(\d{2})\/(\d{4})$/.exec(report.window?.label ?? '');
@@ -95,12 +90,7 @@ export async function writeLearningLog(report, {
   const date = label
     ? `${label[3]}-${label[2]}-${label[1]}`
     : report.window?.since?.slice(0, 10) ?? record.generatedAt.slice(0, 10);
-  await mkdir(outputDir, { recursive: true });
-  const jsonFile = path.join(outputDir, `${date}.json`);
-  const textFile = path.join(outputDir, `${date}.txt`);
-  await Promise.all([
-    writeFile(jsonFile, `${JSON.stringify(record, null, 2)}\n`, 'utf8'),
-    writeFile(textFile, `${text.trim()}\n`, 'utf8'),
-  ]);
-  return { jsonFile, textFile, record };
+  const key = `learning:loss:${date}`;
+  await putDocument(key, { record, text: text.trim() });
+  return { jsonFile: `database:${key}`, textFile: `database:${key}`, record };
 }

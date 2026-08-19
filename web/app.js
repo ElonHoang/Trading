@@ -1186,7 +1186,7 @@ function renderTrainResult(p, verdict, saved) {
     host.appendChild(det);
   }
 
-  // Cho tải model về để commit vào repo (dùng chung cho mọi người mở trang)
+  // Cho tải một bản model về để sao lưu thủ công.
   const dlBtn = document.createElement('button');
   dlBtn.textContent = 'Tải file model (.json)';
   dlBtn.style.marginTop = '12px';
@@ -1202,8 +1202,7 @@ function renderTrainResult(p, verdict, saved) {
   const hint = document.createElement('div');
   hint.className = 'small muted';
   hint.style.marginTop = '4px';
-  hint.textContent = 'Đặt file này vào thư mục models/ trong repo và thêm vào models/index.json '
-    + 'để mọi người mở trang đều dùng được model, không cần train lại.';
+  hint.textContent = 'Đây chỉ là bản sao lưu. Model dùng chung được lệnh train của server lưu thẳng vào database.';
   host.appendChild(hint);
 }
 

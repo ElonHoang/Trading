@@ -58,12 +58,22 @@ Yêu cầu Node.js ≥ 20 cho engine hiện có; Java 17+ và Maven 3.6.3+ cho w
 ```bash
 git clone <repo-url>
 cd <repo>
-npm install
-cp .env.example .env     # điền TELEGRAM_BOT_TOKEN và TELEGRAM_OWNER_IDS
-npm run bot              # bot Telegram
-npm start                # Java server + web, mặc định http://localhost:8080
-npm run start:node       # API phân tích realtime cũ, mặc định http://localhost:3000
+cp .env.example .env     # đặt mật khẩu DB và các secret
+docker compose up -d postgres
+docker compose --profile tools run --rm import-files # chỉ chạy một lần để nhập dữ liệu cũ
+docker compose up -d web
+docker compose --profile bot up -d bot
 ```
+
+PostgreSQL là nguồn dữ liệu runtime duy nhất. Ứng dụng không fallback về JSON khi thiếu
+database; `DATABASE_URL` dùng cho Node và `JDBC_DATABASE_URL` dùng cho Spring Boot.
+Volume `postgres-data` giữ dữ liệu qua các lần restart/redeploy.
+
+`migrate-db` tự chạy trước `web`, `bot` và công cụ import. Thiết kế bảng, ERD, constraint
+và lộ trình chuyển khỏi document store được mô tả tại
+[`docs/database-design.md`](docs/database-design.md). Có thể chạy migration thủ công bằng
+`npm run db:migrate`; các migration versioned được kiểm tra checksum và migration import
+repeatable có thể chạy nhiều lần mà không nhân đôi dữ liệu.
 
 ### Đăng nhập Google / GitHub
 
@@ -87,42 +97,36 @@ forward đúng các header `X-Forwarded-*`, đăng ký callback theo origin HTTP
 
 Dashboard có thêm biểu đồ **Hiệu suất dòng tiền** theo 7 ngày, 30 ngày và 12 tháng.
 Java API `GET /api/trading-performance?range=week|month|year` đọc trực tiếp các lệnh đã đóng
-trong `data/auto-retune.json`; không nhúng dữ liệu giả vào giao diện. Nếu chạy server ở một
-thư mục khác, có thể đặt `TRADING_STATE_FILE`, `TRADING_STRATEGY_FILE` và
-`TRADING_TIMEZONE` trong `server-java/.env` để chỉ rõ nguồn dữ liệu và múi giờ.
+trong document `data:auto-retune` của PostgreSQL; không nhúng dữ liệu giả vào giao diện.
+Đặt `TRADING_TIMEZONE` trong `server-java/.env` để chọn múi giờ tổng hợp.
 
 Các lệnh khác:
 
 ```bash
 npm run analyze -- BTC 1h --no-ai   # phân tích trong terminal
-npm run train -- BTC 4h             # train model, lưu vào models/
+npm run train -- BTC 4h             # train model, lưu vào PostgreSQL
 npm run backtest -- BTC 4h 3000     # backtest có SL/TP
 npm run research:patterns -- BTC 4h # báo cáo mẫu hình 6 tháng, chỉ đọc dữ liệu
 npm run diagnose:sl -- BTC 4h 3000  # tìm đặc điểm chung của lệnh bị SL
-npm run learn:losses                 # học kèo thua hôm qua, backtest và lưu log local
+npm run learn:losses                 # học kèo thua hôm qua, lưu learning log vào PostgreSQL
 npm run validate:filters -- BTC 4h 3000 # kiểm chứng bộ lọc theo thời gian
-npm run models:index                # BẮT BUỘC chạy sau khi thêm/xoá file trong models/
+npm run models:index                # in danh sách model hiện có trong PostgreSQL
 npm run bot:ai                      # bot Telegram bản có Claude (xem phần chi phí)
 ```
 
 **Hai bot không chạy đồng thời được.** Telegram chỉ cho một tiến trình long-poll trên mỗi
 token; chạy cả `npm run bot` và `npm run bot:ai` sẽ làm cả hai lỗi 409.
 
-`npm run learn:losses` đọc `data/auto-retune.json`, phát lại kèo thua của 7 ngày gần
-nhất, chạy candidate trên train/holdout và ghi `data/loss-learning/YYYY-MM-DD.json`
-cùng bản đọc nhanh `.txt`. Khi phân tích bản state tải từ production mà không muốn ghi
-ngược, dùng `npm run learn:losses -- --state <đường-dẫn-file-state>`.
+`npm run learn:losses` đọc lịch sử từ PostgreSQL, phát lại kèo thua của 7 ngày gần
+nhất, chạy candidate trên train/holdout và ghi learning log trở lại database.
 
 ### Cảnh báo 5 phút qua GitHub Actions
 
-Workflow `Telegram alerts every 5 minutes` trong chính repo này chạy `npm run alerts:once` một
-lần mỗi 5 phút rồi tự thoát. Trạng thái chống gửi trùng và kèo đang mở được lưu ở nhánh
-`bot-state` dưới dạng mã hoá AES-256 và xác thực HMAC; không commit trạng thái rõ vào source.
+Workflow cảnh báo, nếu còn dùng, phải kết nối cùng PostgreSQL bằng repository secret
+`DATABASE_URL`. Khi chạy bot thường trực trên Oracle Cloud thì không cần workflow fallback.
 
 Chế độ này **chỉ gửi cảnh báo**. Các lệnh Telegram như `/ta`, `/gia`, `/add` không phản hồi khi
-máy local tắt, vì không có tiến trình long-poll đang chạy. Workflow cần bốn repository secrets:
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_IDS`, `STATE_ENCRYPTION_KEY`, và
-`STATE_HMAC_KEY`; hai state key đều là 64 ký tự hexadecimal và phải được giữ riêng tư.
+máy local tắt, vì không có tiến trình long-poll đang chạy. Không lưu trạng thái bot trong Git.
 
 ---
 
@@ -174,8 +178,8 @@ Rồi mới tới ngưỡng báo `alerts.minAbsScore` (35). Bot **không** bắn
 
 ### Kèo đang mở
 
-Một mã đã được call thì **không call lại** cho tới khi kèo đó chốt. Trạng thái lưu ở
-`data/open-calls.json` (gitignored, phải ghi ra đĩa vì bot restart thường xuyên):
+Một mã đã được call thì **không call lại** cho tới khi kèo đó chốt. Trạng thái lưu trong
+document `data:open-calls` của PostgreSQL:
 
 | Xảy ra | Xử lý |
 |---|---|
@@ -236,7 +240,7 @@ Mẫu tin cập nhật khi chạm TP nằm ở cuối file này.
 
 ## Tinh chỉnh
 
-Mọi tham số ở `config/strategy.json`, không hardcode trong code. `setStrategyValue()` cố ý
+Mọi tham số runtime ở document `config:strategy` trong PostgreSQL. `setStrategyValue()` cố ý
 **chỉ cho ghi vào khoá đã tồn tại** để gõ sai không tạo khoá rác.
 
 | Nhóm | Việc |
@@ -271,9 +275,8 @@ bot sẽ tự làm các việc sau:
 
 Bot thử nới khoảng SL, bỏ bám SL vào S/R hoặc kéo TP1 gần lại.
 Các nhóm không có dữ liệu lịch sử theo nến như order book, phái sinh và định vị chỉ được nêu
-trong chẩn đoán live, không bị tự sửa trọng số bằng backtest. Cấu hình cũ được sao lưu ở
-`data/strategy-backups/`; nhật ký nằm ở `data/auto-retune.json`; cả hai chỉ ở máy chạy bot và
-không được commit. `autoRetune.cooldownHours` mặc định 168 giờ để bot không liên tục chỉnh theo
+trong chẩn đoán live, không bị tự sửa trọng số bằng backtest. Cấu hình cũ và nhật ký
+auto-retune đều được lưu trong PostgreSQL. `autoRetune.cooldownHours` mặc định 168 giờ để bot không liên tục chỉnh theo
 một giai đoạn nhiễu.
 
 Vòng rà soát ngày phát lại tối đa 12 kèo thua trên nến thật. Nếu chủ yếu **bị quét**, nó
@@ -387,12 +390,11 @@ src/                     LÕI — dùng chung browser & Node
   data/fundamentals.js   CoinGecko
   data/announcements.js  Thông báo delist Binance
   data/news.js           RSS
-  data/open-calls.js     Trạng thái kèo đang mở
+  data/open-calls.js     Repository kèo đang mở trong PostgreSQL
   bot.js, server.js, cli.js, config.js, format.js, llm/claude.js, ml/model-store.js
-bin/                     CLI: train, backtest, build-model-index
-config/strategy.json     Toàn bộ tham số
-config/prompt.md         System prompt của Claude (chỉ bot AI dùng)
-models/                  Model đóng gói sẵn + index.json
+bin/                     CLI: train, backtest, import dữ liệu cũ
+src/db.js                Kết nối và document store PostgreSQL
+config/, models/, data/  Dữ liệu legacy chỉ dùng cho lần import đầu
 .claude/skills/          Ba kĩ năng
 ```
 

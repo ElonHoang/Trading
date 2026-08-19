@@ -4,11 +4,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -22,33 +18,26 @@ import java.util.Locale;
 
 @Service
 public class TradingPerformanceService {
+    private static final String STATE_KEY = "data:auto-retune";
+    private static final String STRATEGY_KEY = "config:strategy";
     private static final DateTimeFormatter DAY_LABEL = DateTimeFormatter.ofPattern("dd/MM");
     private static final DateTimeFormatter MONTH_LABEL = DateTimeFormatter.ofPattern("MM/yyyy");
 
-    private final ObjectMapper mapper;
-    private final Path statePath;
-    private final Path strategyPath;
+    private final DocumentStore documents;
     private final Clock clock;
     private final ZoneId zone;
 
     @Autowired
-    public TradingPerformanceService(ObjectMapper mapper, Environment environment) {
+    public TradingPerformanceService(DocumentStore documents, Environment environment) {
         this(
-                mapper,
-                resolvePath(environment.getProperty("TRADING_STATE_FILE"),
-                        "data/auto-retune.json", "../data/auto-retune.json"),
-                resolvePath(environment.getProperty("TRADING_STRATEGY_FILE"),
-                        "config/strategy.json", "../config/strategy.json"),
+                documents,
                 Clock.systemUTC(),
                 ZoneId.of(environment.getProperty("TRADING_TIMEZONE", "Asia/Bangkok"))
         );
     }
 
-    TradingPerformanceService(ObjectMapper mapper, Path statePath, Path strategyPath,
-                              Clock clock, ZoneId zone) {
-        this.mapper = mapper;
-        this.statePath = statePath;
-        this.strategyPath = strategyPath;
+    TradingPerformanceService(DocumentStore documents, Clock clock, ZoneId zone) {
+        this.documents = documents;
         this.clock = clock;
         this.zone = zone;
     }
@@ -58,8 +47,9 @@ public class TradingPerformanceService {
         ZonedDateTime now = ZonedDateTime.now(clock).withZoneSameInstant(zone);
         Window window = Window.forRange(range, now);
         Options options = readOptions();
-        boolean sourceAvailable = Files.isRegularFile(statePath);
-        List<Trade> trades = sourceAvailable ? readTrades() : List.of();
+        JsonNode state = documents.find(STATE_KEY).orElse(null);
+        boolean sourceAvailable = state != null;
+        List<Trade> trades = sourceAvailable ? readTrades(state) : List.of();
         List<MutablePoint> buckets = window.buckets();
 
         for (Trade trade : trades) {
@@ -95,7 +85,7 @@ public class TradingPerformanceService {
         );
         String message = sourceAvailable
                 ? (total == 0 ? "Chưa có lệnh đóng trong khoảng thời gian này." : null)
-                : "Chưa có file data/auto-retune.json. Biểu đồ sẽ tự cập nhật khi bot ghi lệnh đóng.";
+                : "Database chưa có lịch sử giao dịch. Biểu đồ sẽ tự cập nhật khi bot ghi lệnh đóng.";
         return new PerformanceResponse(
                 range.value, window.granularity(), sourceAvailable,
                 window.from().toInstant().toString(), window.to().toInstant().toString(),
@@ -103,9 +93,8 @@ public class TradingPerformanceService {
         );
     }
 
-    private List<Trade> readTrades() {
+    private List<Trade> readTrades(JsonNode root) {
         try {
-            JsonNode root = mapper.readTree(statePath);
             JsonNode rows = root.path("trades");
             if (!rows.isArray()) return List.of();
             List<Trade> trades = new ArrayList<>();
@@ -123,15 +112,15 @@ public class TradingPerformanceService {
         double partial = 0.5;
         double fee = 0.06;
         double capital = 200;
-        if (Files.isRegularFile(strategyPath)) {
-            try {
-                JsonNode root = mapper.readTree(strategyPath);
+        try {
+            JsonNode root = documents.find(STRATEGY_KEY).orElse(null);
+            if (root != null) {
                 partial = finiteOr(root.path("risk").path("partialFraction"), partial);
                 fee = finiteOr(root.path("dailyReview").path("feePercent"), fee);
                 capital = finiteOr(root.path("dailyReview").path("assumedCapitalPerTradeUsd"), capital);
-            } catch (RuntimeException ignored) {
-                // Giữ mặc định tương thích với trade-pnl.js nếu file cấu hình lỗi.
             }
+        } catch (RuntimeException ignored) {
+            // Giữ mặc định tương thích với trade-pnl.js nếu document cấu hình lỗi.
         }
         return new Options(partial, fee, capital);
     }
@@ -139,13 +128,6 @@ public class TradingPerformanceService {
     private static double finiteOr(JsonNode node, double fallback) {
         double value = node.asDouble(Double.NaN);
         return Double.isFinite(value) ? value : fallback;
-    }
-
-    private static Path resolvePath(String configured, String first, String second) {
-        if (configured != null && !configured.isBlank()) return Paths.get(configured).toAbsolutePath().normalize();
-        Path preferred = Paths.get(first).toAbsolutePath().normalize();
-        if (Files.exists(preferred)) return preferred;
-        return Paths.get(second).toAbsolutePath().normalize();
     }
 
     private static double round(double value, int digits) {

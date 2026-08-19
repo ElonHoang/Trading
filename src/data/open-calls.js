@@ -1,58 +1,44 @@
-// Kèo đang mở, lưu ở data/open-calls.json (đã gitignore vì là trạng thái riêng
-// của từng máy).
+// Kèo đang mở được lưu trong PostgreSQL.
 //
 // Mục đích: một token đã được call thì KHÔNG call lại cho tới khi kèo đó chốt —
 // chạm SL, chạm TP cuối, hoặc quá hạn giữ. Không có phần này thì mỗi nến đóng lại
 // bắn một kèo mới cho cùng token.
 //
-// Phải ghi ra đĩa vì bot restart thường xuyên; giữ trong RAM sẽ mất trạng thái
-// và call lại toàn bộ.
+// Phải lưu bền vững vì bot restart thường xuyên; giữ trong RAM sẽ mất trạng thái.
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { INTERVAL_MS } from './binance.js';
+import { getDocument, updateDocument } from '../db.js';
 import { assertAllowedTradeSymbol } from './trading-universe.js';
 
-const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
-const FILE = path.join(DIR, 'open-calls.json');
+const KEY = 'data:open-calls';
 
 /** Mỗi symbol chỉ có tối đa một kèo mở. */
 export async function readOpenCalls() {
-  try {
-    const parsed = JSON.parse(await readFile(FILE, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-async function save(map) {
-  await mkdir(DIR, { recursive: true });
-  await writeFile(FILE, `${JSON.stringify(map, null, 2)}\n`);
-  return map;
+  const parsed = await getDocument(KEY, {});
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
 }
 
 export async function openCall(symbol, {
   interval, side, entry, stopLoss, targets, candleTime, evidence = null,
 }, { allowedSymbols } = {}) {
   const allowedSymbol = assertAllowedTradeSymbol(symbol, allowedSymbols);
-  const map = await readOpenCalls();
-  map[allowedSymbol] = {
-    symbol: allowedSymbol,
-    interval,
-    side,
-    entry,
-    stopLoss,
-    targets: (targets ?? []).map((t) => ({ label: t.label, price: t.price })),
-    openedAtCandle: candleTime,
-    openedAt: new Date(candleTime).toISOString(),
-    tpHit: [],
-    // Bằng chứng được chụp đúng lúc call để phân tích chuỗi SL sau này, không
-    // dùng số liệu mới hơn rồi gán ngược cho quyết định cũ.
-    evidence,
-  };
-  return save(map);
+  return updateDocument(KEY, {}, (map) => {
+    map[allowedSymbol] = {
+      symbol: allowedSymbol,
+      interval,
+      side,
+      entry,
+      stopLoss,
+      targets: (targets ?? []).map((t) => ({ label: t.label, price: t.price })),
+      openedAtCandle: candleTime,
+      openedAt: new Date(candleTime).toISOString(),
+      tpHit: [],
+      // Bằng chứng được chụp đúng lúc call để phân tích chuỗi SL sau này, không
+      // dùng số liệu mới hơn rồi gán ngược cho quyết định cũ.
+      evidence,
+    };
+    return map;
+  });
 }
 
 /**
@@ -60,24 +46,24 @@ export async function openCall(symbol, {
  * reply vào đúng kèo đó ("trích dẫn lại kèo gốc").
  */
 export async function setCallMessages(symbol, messages) {
-  const map = await readOpenCalls();
-  if (!map[symbol]) return map;
-  map[symbol].messages = messages;
-  return save(map);
+  return updateDocument(KEY, {}, (map) => {
+    if (map[symbol]) map[symbol].messages = messages;
+    return map;
+  });
 }
 
 export async function closeCall(symbol) {
-  const map = await readOpenCalls();
-  if (!(symbol in map)) return map;
-  delete map[symbol];
-  return save(map);
+  return updateDocument(KEY, {}, (map) => {
+    delete map[symbol];
+    return map;
+  });
 }
 
 async function updateCall(symbol, patch) {
-  const map = await readOpenCalls();
-  if (!map[symbol]) return map;
-  map[symbol] = { ...map[symbol], ...patch };
-  return save(map);
+  return updateDocument(KEY, {}, (map) => {
+    if (map[symbol]) map[symbol] = { ...map[symbol], ...patch };
+    return map;
+  });
 }
 
 function closedAtCandleEnd(candle, interval) {

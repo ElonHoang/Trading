@@ -1,33 +1,19 @@
 // Đọc/ghi cấu hình chiến lược. Đây là lớp "setting/training" cho AI:
 // mọi thay đổi trọng số, ngưỡng, tham số model đều đi qua đây.
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { getDocument, putDocument, requireDocument } from './db.js';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const CONFIG_DIR = path.join(ROOT, 'config');
-export const STRATEGY_FILE = path.join(CONFIG_DIR, 'strategy.json');
-export const PROMPT_FILE = path.join(CONFIG_DIR, 'prompt.md');
-export const DATA_DIR = path.join(ROOT, 'data');
+const STRATEGY_KEY = 'config:strategy';
+const PROMPT_KEY = 'config:prompt';
+const WATCHLIST_KEY = 'data:watchlist';
 
-let cache = null;
-let cacheMtime = 0;
-
-/** Đọc strategy.json (tự nạp lại khi file thay đổi trên đĩa). */
+/** Database là nguồn cấu hình duy nhất. */
 export async function loadStrategy() {
-  const stat = await fs.stat(STRATEGY_FILE);
-  if (cache && stat.mtimeMs === cacheMtime) return cache;
-  const raw = await fs.readFile(STRATEGY_FILE, 'utf8');
-  cache = JSON.parse(raw);
-  cacheMtime = stat.mtimeMs;
-  return cache;
+  return requireDocument(STRATEGY_KEY, 'cấu hình strategy');
 }
 
 export async function saveStrategy(obj) {
-  await fs.writeFile(STRATEGY_FILE, JSON.stringify(obj, null, 2), 'utf8');
-  cache = obj;
-  cacheMtime = (await fs.stat(STRATEGY_FILE)).mtimeMs;
+  return putDocument(STRATEGY_KEY, obj);
 }
 
 /**
@@ -88,27 +74,21 @@ export function flattenStrategy(obj, prefix = '') {
 }
 
 export async function loadPrompt() {
-  return fs.readFile(PROMPT_FILE, 'utf8');
+  const row = await requireDocument(PROMPT_KEY, 'system prompt');
+  return typeof row === 'string' ? row : row.text;
 }
 
 export async function savePrompt(text) {
-  await fs.writeFile(PROMPT_FILE, text, 'utf8');
+  return putDocument(PROMPT_KEY, { text });
 }
 
 // ---- Lưu watchlist ----
 
-const WATCH_FILE = path.join(DATA_DIR, 'watchlist.json');
-
 export async function loadWatchlist() {
-  try {
-    return JSON.parse(await fs.readFile(WATCH_FILE, 'utf8'));
-  } catch (err) {
-    if (err.code === 'ENOENT') return [];
-    throw err;
-  }
+  const list = await getDocument(WATCHLIST_KEY, []);
+  return Array.isArray(list) ? list : [];
 }
 
 export async function saveWatchlist(list) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(WATCH_FILE, JSON.stringify(list, null, 2), 'utf8');
+  return putDocument(WATCHLIST_KEY, list);
 }

@@ -1,25 +1,10 @@
-name: Telegram alerts (fallback, manual only)
+name: Telegram alerts (database fallback, manual only)
 
-# THE LIVE DEPLOYMENT IS ElonHoang/Trading-runner, NOT THIS WORKFLOW.
-#
-# The schedule is deliberately removed. Trading-runner checks this repository out
-# at `production` and runs `npm run scan:github` on its own five-minute cron. If
-# both were scheduled there would be two scanners posting into the same Telegram
-# chats while keeping SEPARATE open-call state — this repository's encrypted
-# `bot-state` branch versus the Trading-state repository — so the same symbol
-# would be called twice and its SL/TP tracked in two diverging copies.
-#
-# Kept dispatchable on purpose: if Trading-runner breaks, one manual run here
-# still scans and notifies. Be aware it reads and writes the `bot-state` branch,
-# which by then is stale relative to Trading-state.
 on:
   workflow_dispatch:
 
-# The bot-state branch contains only AES-256-encrypted, HMAC-authenticated
-# monitor state. Protect the default branch and restrict write access: a writer
-# could alter this workflow to expose its secrets.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: telegram-alert-monitor
@@ -29,195 +14,22 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 12
-
     steps:
-      - name: Validate required secrets
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_ALERT_CHAT_IDS: ${{ secrets.TELEGRAM_ALERT_CHAT_IDS }}
-          STATE_ENCRYPTION_KEY: ${{ secrets.STATE_ENCRYPTION_KEY }}
-          STATE_HMAC_KEY: ${{ secrets.STATE_HMAC_KEY }}
-        run: |
-          test -n "$TELEGRAM_BOT_TOKEN" || { echo 'Missing TELEGRAM_BOT_TOKEN.'; exit 1; }
-          test -n "$TELEGRAM_ALERT_CHAT_IDS" || { echo 'Missing TELEGRAM_ALERT_CHAT_IDS.'; exit 1; }
-          [[ "$STATE_ENCRYPTION_KEY" =~ ^[[:xdigit:]]{64}$ ]] || { echo 'STATE_ENCRYPTION_KEY must be 64 hexadecimal characters.'; exit 1; }
-          [[ "$STATE_HMAC_KEY" =~ ^[[:xdigit:]]{64}$ ]] || { echo 'STATE_HMAC_KEY must be 64 hexadecimal characters.'; exit 1; }
-
-      - name: Require the default branch
-        if: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
-        run: |
-          echo 'Run this workflow from the default branch only.'
-          exit 1
-
-      - name: Check out the application
-        uses: actions/checkout@v4
-        with:
-          path: app
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: app/package-lock.json
-
-      - name: Create the encrypted state branch if needed
+      - run: npm ci
+      - name: Run one alert scan against PostgreSQL
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh api --silent "repos/${GITHUB_REPOSITORY}/git/ref/heads/bot-state" > /dev/null; then
-            exit 0
-          fi
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-            -f ref='refs/heads/bot-state' \
-            -f sha="${GITHUB_SHA}"
-
-      - name: Check out persistent monitor state
-        uses: actions/checkout@v4
-        with:
-          ref: bot-state
-          path: state
-          persist-credentials: false
-
-      - name: Restore encrypted monitor state
-        shell: bash
-        env:
-          STATE_ENCRYPTION_KEY: ${{ secrets.STATE_ENCRYPTION_KEY }}
-          STATE_HMAC_KEY: ${{ secrets.STATE_HMAC_KEY }}
-        run: |
-          set -euo pipefail
-          files=(data/monitor-state.json data/open-calls.json data/auto-retune.json)
-          state_root='state/.encrypted-state/v1'
-
-          # Never use old plaintext or unauthenticated state after making this
-          # repository public. Recreate bot-state instead.
-          legacy_paths=("${files[@]}" telegram-monitor-state.tar.gz.enc)
-          for path in "${legacy_paths[@]}"; do
-            if git -C state ls-files --error-unmatch "$path" > /dev/null 2>&1; then
-              echo "Unsafe legacy state found on bot-state: $path"
-              echo 'Recreate/scrub bot-state before running the public workflow.'
-              exit 1
-            fi
-          done
-
-          mac() {
-            local relative="$1" ciphertext="$2"
-            { printf '%s\0' "$relative"; cat -- "$ciphertext"; } \
-              | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${STATE_HMAC_KEY}" -binary \
-              | base64 | tr -d '\n'
-          }
-
-          if [[ -d "$state_root" ]]; then
-            for file in "${files[@]}"; do
-              ciphertext="$state_root/$file.enc"
-              tag="$ciphertext.hmac"
-              [[ -f "$ciphertext" && -f "$tag" ]] || { echo "Incomplete encrypted state: $file"; exit 1; }
-              expected="$(tr -d '\r\n' < "$tag")"
-              actual="$(mac "$file" "$ciphertext")"
-              [[ "$expected" == "$actual" ]] || { echo "State authentication failed: $file"; exit 1; }
-
-              plaintext="$(mktemp "$RUNNER_TEMP/telegram-monitor-state.XXXXXX")"
-              openssl enc -d -aes-256-cbc -md sha256 -pbkdf2 -iter 600000 \
-                -in "$ciphertext" \
-                -out "$plaintext" \
-                -pass env:STATE_ENCRYPTION_KEY
-              node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$plaintext"
-              mkdir -p "app/$(dirname "$file")"
-              chmod 600 "$plaintext"
-              mv "$plaintext" "app/$file"
-            done
-          fi
-
-          state_fingerprint() {
-            (
-              cd app
-              for file in "${files[@]}"; do
-                if [[ -f "$file" ]]; then
-                  printf '%s\0' "$file"
-                  sha256sum "$file"
-                fi
-              done
-            ) | sha256sum | awk '{ print $1 }'
-          }
-          state_fingerprint > "$RUNNER_TEMP/telegram-monitor-state.before"
-
-      - name: Install dependencies
-        working-directory: app
-        run: npm ci
-
-      - name: Run one alert scan
-        working-directory: app
-        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_SSL: ${{ secrets.DATABASE_SSL }}
+          DATABASE_SSL_REJECT_UNAUTHORIZED: ${{ secrets.DATABASE_SSL_REJECT_UNAUTHORIZED }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ALERT_CHAT_IDS: ${{ secrets.TELEGRAM_ALERT_CHAT_IDS }}
-        run: npm run alerts:once
-
-      - name: Encrypt and save monitor state
-        if: ${{ success() }}
-        shell: bash
-        env:
-          STATE_ENCRYPTION_KEY: ${{ secrets.STATE_ENCRYPTION_KEY }}
-          STATE_HMAC_KEY: ${{ secrets.STATE_HMAC_KEY }}
-          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          files=(data/monitor-state.json data/open-calls.json data/auto-retune.json)
-          state_root='state/.encrypted-state/v1'
-
-          # Keep a complete, authenticated set after the first successful run.
-          # All three readers accept an empty JSON object as their initial state.
-          for file in "${files[@]}"; do
-            if [[ ! -f "app/$file" ]]; then
-              mkdir -p "app/$(dirname "$file")"
-              printf '{}\n' > "app/$file"
-            fi
-          done
-
-          state_fingerprint() {
-            (
-              cd app
-              for file in "${files[@]}"; do
-                if [[ -f "$file" ]]; then
-                  printf '%s\0' "$file"
-                  sha256sum "$file"
-                fi
-              done
-            ) | sha256sum | awk '{ print $1 }'
-          }
-          before="$(cat "$RUNNER_TEMP/telegram-monitor-state.before" 2>/dev/null || true)"
-          after="$(state_fingerprint)"
-          if [[ -n "$before" && "$before" == "$after" ]]; then
-            echo 'Monitor state did not change.'
-            exit 0
-          fi
-
-          mac() {
-            local relative="$1" ciphertext="$2"
-            { printf '%s\0' "$relative"; cat -- "$ciphertext"; } \
-              | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${STATE_HMAC_KEY}" -binary \
-              | base64 | tr -d '\n'
-          }
-
-          umask 077
-          for file in "${files[@]}"; do
-            ciphertext="$state_root/$file.enc"
-            tag="$ciphertext.hmac"
-            mkdir -p "$(dirname "$ciphertext")"
-            if [[ -f "app/$file" ]]; then
-              openssl enc -aes-256-cbc -md sha256 -pbkdf2 -iter 600000 -salt \
-                -in "app/$file" \
-                -out "$ciphertext" \
-                -pass env:STATE_ENCRYPTION_KEY
-              mac "$file" "$ciphertext" > "$tag"
-            fi
-          done
-
-          git -C state config user.name 'github-actions[bot]'
-          git -C state config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C state add -A -- .encrypted-state/v1
-          if ! git -C state diff --cached --quiet; then
-            git -C state commit -m 'chore: persist encrypted telegram monitor state'
-            git -C state remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-            git -C state push origin HEAD:bot-state
-          fi
+          test -n "$DATABASE_URL" || { echo 'Missing DATABASE_URL.'; exit 1; }
+          test -n "$TELEGRAM_BOT_TOKEN" || { echo 'Missing TELEGRAM_BOT_TOKEN.'; exit 1; }
+          test -n "$TELEGRAM_ALERT_CHAT_IDS" || { echo 'Missing TELEGRAM_ALERT_CHAT_IDS.'; exit 1; }
+          npm run alerts:once

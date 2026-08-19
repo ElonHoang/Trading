@@ -1,6 +1,14 @@
 spring:
   application:
     name: dong-tien-auth-server
+  datasource:
+    url: ${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/trading}
+    username: ${DATABASE_USER:trading}
+    password: ${DATABASE_PASSWORD:change-me}
+    hikari:
+      maximum-pool-size: ${DATABASE_POOL_SIZE:10}
+      minimum-idle: 1
+      connection-timeout: 10000
   config:
     import:
       - optional:file:.env[.properties]

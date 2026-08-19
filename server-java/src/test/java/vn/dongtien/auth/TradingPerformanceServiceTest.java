@@ -1,30 +1,29 @@
 package vn.dongtien.auth;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TradingPerformanceServiceTest {
-    @TempDir
-    Path tempDir;
-
     @Test
     void aggregatesClosedTradesByDayAndUsesTheSamePnlRulesAsNode() throws Exception {
-        Path strategy = tempDir.resolve("strategy.json");
-        Files.writeString(strategy, """
+        JsonMapper mapper = JsonMapper.builder().build();
+        MemoryDocumentStore documents = new MemoryDocumentStore();
+        documents.put("config:strategy", mapper.readTree("""
                 {"risk":{"partialFraction":0.5},"dailyReview":{"feePercent":0.06,"assumedCapitalPerTradeUsd":200}}
-                """);
-        Path state = tempDir.resolve("auto-retune.json");
-        Files.writeString(state, """
+                """));
+        documents.put("data:auto-retune", mapper.readTree("""
                 {"trades":[
                   {"closedAt":"2026-08-18T03:00:00Z","side":"long","entry":100,
                    "targets":[{"label":"TP1","price":104}],
@@ -38,10 +37,10 @@ class TradingPerformanceServiceTest {
                   {"closedAt":"2026-08-15T03:00:00Z","side":"short","entry":100,
                    "targets":[],"result":{"status":"expired","hitTps":[]}}
                 ]}
-                """);
+                """));
 
         TradingPerformanceService service = new TradingPerformanceService(
-                JsonMapper.builder().build(), state, strategy,
+                documents,
                 Clock.fixed(Instant.parse("2026-08-18T06:00:00Z"), ZoneOffset.UTC),
                 ZoneId.of("Asia/Bangkok")
         );
@@ -65,9 +64,9 @@ class TradingPerformanceServiceTest {
     }
 
     @Test
-    void returnsTwelveZeroFilledMonthsWhenHistoryFileDoesNotExist() {
+    void returnsTwelveZeroFilledMonthsWhenHistoryDocumentDoesNotExist() {
         TradingPerformanceService service = new TradingPerformanceService(
-                JsonMapper.builder().build(), tempDir.resolve("missing.json"), tempDir.resolve("missing-strategy.json"),
+                new MemoryDocumentStore(),
                 Clock.fixed(Instant.parse("2026-08-18T06:00:00Z"), ZoneOffset.UTC),
                 ZoneId.of("Asia/Bangkok")
         );
@@ -80,6 +79,33 @@ class TradingPerformanceServiceTest {
         assertThat(response.points().get(0).key()).isEqualTo("2025-09");
         assertThat(response.points().get(11).key()).isEqualTo("2026-08");
         assertThat(response.summary().totalTrades()).isZero();
-        assertThat(response.message()).contains("auto-retune.json");
+        assertThat(response.message()).contains("Database");
+    }
+
+    private static final class MemoryDocumentStore implements DocumentStore {
+        private final Map<String, JsonNode> values = new HashMap<>();
+
+        @Override
+        public Optional<JsonNode> find(String key) {
+            return Optional.ofNullable(values.get(key));
+        }
+
+        @Override
+        public List<StoredDocument> findByPrefix(String prefix) {
+            return values.entrySet().stream()
+                    .filter(row -> row.getKey().startsWith(prefix))
+                    .map(row -> new StoredDocument(row.getKey(), row.getValue()))
+                    .toList();
+        }
+
+        @Override
+        public void put(String key, JsonNode value) {
+            values.put(key, value);
+        }
+
+        @Override
+        public boolean delete(String key) {
+            return values.remove(key) != null;
+        }
     }
 }

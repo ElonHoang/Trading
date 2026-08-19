@@ -25,12 +25,16 @@
     "diagnose:sl": "node --env-file-if-exists=.env bin/diagnose-stoploss.js",
     "validate:filters": "node --env-file-if-exists=.env bin/validate-entry-filters.js",
     "research:patterns": "node --env-file-if-exists=.env bin/research-patterns.js",
-    "models:index": "node bin/build-model-index.js"
+    "models:index": "node bin/build-model-index.js",
+    "db:init": "node --env-file-if-exists=.env -e \"import('./src/db.js').then(async m => { await m.ensureDatabase(); await m.closeDatabase(); console.log('Database ready'); })\"",
+    "db:migrate": "node --env-file-if-exists=.env bin/migrate-db.js",
+    "db:import-files": "node --env-file-if-exists=.env bin/import-files-to-db.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@napi-rs/canvas": "^1.0.3",
     "express": "^5.2.1",
-    "grammy": "^1.45.1"
+    "grammy": "^1.45.1",
+    "pg": "^8.23.0"
   }
 }

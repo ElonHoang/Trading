@@ -1,16 +1,13 @@
-// Tự kiểm chứng sau chuỗi SL. Module này chỉ chạy ở Node vì lưu nhật ký local,
-// tải dữ liệu lịch sử và có thể ghi lại strategy.json sau khi đã qua điều kiện an toàn.
+// Tự kiểm chứng sau chuỗi SL. Trạng thái và cấu hình được lưu trong PostgreSQL.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-import { DATA_DIR, saveStrategy } from '../config.js';
+import { saveStrategy } from '../config.js';
+import { getDocument, putDocument } from '../db.js';
 import { fetchKlinesHistory, INTERVAL_MS } from '../data/binance.js';
 import { closedCandles } from './engine.js';
 import { backtest } from '../backtest.js';
 import { entryMarketContext } from './entry-quality.js';
 
-const STATE_FILE = path.join(DATA_DIR, 'auto-retune.json');
-const BACKUP_DIR = path.join(DATA_DIR, 'strategy-backups');
+const STATE_KEY = 'data:auto-retune';
 
 const GROUP_LABELS = {
   cvd: 'CVD',
@@ -33,28 +30,22 @@ function emptyState() {
 }
 
 export async function readAutoRetuneState() {
-  try {
-    const parsed = JSON.parse(await readFile(STATE_FILE, 'utf8'));
-    return {
-      ...emptyState(),
-      ...(parsed && typeof parsed === 'object' ? parsed : {}),
-      trades: Array.isArray(parsed?.trades) ? parsed.trades : [],
-      attempts: Array.isArray(parsed?.attempts) ? parsed.attempts : [],
-      lossLogs: Array.isArray(parsed?.lossLogs) ? parsed.lossLogs : [],
-      lossLogWeek: typeof parsed?.lossLogWeek === 'string' ? parsed.lossLogWeek : null,
-    };
-  } catch (error) {
-    if (error.code === 'ENOENT') return emptyState();
-    throw error;
-  }
+  const parsed = await getDocument(STATE_KEY, emptyState());
+  return {
+    ...emptyState(),
+    ...(parsed && typeof parsed === 'object' ? parsed : {}),
+    trades: Array.isArray(parsed?.trades) ? parsed.trades : [],
+    attempts: Array.isArray(parsed?.attempts) ? parsed.attempts : [],
+    lossLogs: Array.isArray(parsed?.lossLogs) ? parsed.lossLogs : [],
+    lossLogWeek: typeof parsed?.lossLogWeek === 'string' ? parsed.lossLogWeek : null,
+  };
 }
 
 async function saveState(state) {
-  await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(STATE_FILE, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  return putDocument(STATE_KEY, state);
 }
 
-/** Rà soát định kỳ dùng chung file trạng thái này nên cần ghi được từ ngoài. */
+/** Rà soát định kỳ dùng chung document trạng thái này nên cần ghi được từ ngoài. */
 export { saveState as saveAutoRetuneState };
 
 /** Chỉ lưu số liệu tại thời điểm call để sau này không suy diễn từ dữ liệu tương lai. */
@@ -329,11 +320,10 @@ async function runSegment(runBacktest, symbol, interval, strategy, candlesData, 
 }
 
 async function backupStrategy(strategy, report) {
-  await mkdir(BACKUP_DIR, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const file = path.join(BACKUP_DIR, `${stamp}.json`);
-  await writeFile(file, `${JSON.stringify({ strategy, report }, null, 2)}\n`, 'utf8');
-  return file;
+  const stamp = new Date().toISOString();
+  const key = `backup:strategy:${stamp}`;
+  await putDocument(key, { strategy, report });
+  return `database:${key}`;
 }
 
 /**
@@ -510,9 +500,9 @@ export function formatAutoRetuneReport(report) {
       + `Thay đổi: ${Object.entries(report.selected.changes).map(([k, val]) => `${k} = ${JSON.stringify(val)}`).join(' · ')}\n`
       + (report.status === 'applied'
         ? (report.backupFile
-          ? 'Cấu hình cũ đã được sao lưu cục bộ trước khi thay đổi.'
+          ? 'Cấu hình cũ đã được sao lưu trong database trước khi thay đổi.'
           : 'Thay đổi đã được lưu vào state và sẽ có hiệu lực từ lượt quét sau.')
-        : 'Sửa config/strategy.json rồi commit để áp dụng — bot chạy trên runner tạm nên tự ghi sẽ mất.');
+        : 'Dùng lệnh quản trị cấu hình để áp dụng đề xuất vào database.');
   }
   if (report.status === 'no-safe-change') {
     return `${title}\nNhóm cần xem xét: ${groups || 'chưa đủ dữ liệu nhóm'}.\n`

@@ -1,5 +1,5 @@
 // Danh sách mã được phép tạo kèo. Nguồn cấu hình là alerts.tradeSymbols
-// trong config/strategy.json để có thể mở rộng có chủ đích sau này.
+// trong strategy của database để có thể mở rộng có chủ đích sau này.
 
 import { normalizeSymbol } from './binance.js';
 

@@ -16,8 +16,8 @@ import { fileURLToPath } from 'node:url';
 import { analyze } from './analysis/engine.js';
 import { INTERVALS, resolveSymbol } from './data/binance.js';
 import { assertAllowedTradeSymbol } from './data/trading-universe.js';
-import { loadStrategy } from './config.js';
-import { loadModel } from './ml/model-store.js';
+import { loadPrompt, loadStrategy } from './config.js';
+import { listModels, loadModel } from './ml/model-store.js';
 import { readWatchlist, addSymbol, removeSymbol } from './data/watchlist.js';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,7 +25,7 @@ const PORT = Number(process.env.PORT) || 3000;
 
 // Dashboard tĩnh import trực tiếp module trong src/ qua HTTP, nên phải phục vụ
 // nguyên trạng các thư mục này.
-const ALLOWED_ROOTS = ['web', 'src', 'config', 'models'];
+const ALLOWED_ROOTS = ['web', 'src'];
 const ALLOWED_FILES = ['/', '/index.html', '/favicon.ico', '/README.md'];
 
 const app = express();
@@ -35,6 +35,28 @@ app.use(express.json());
 app.use('/realtime', express.static(path.join(rootDir, 'public')));
 
 app.get('/api/intervals', (req, res) => res.json(INTERVALS));
+
+app.get('/api/content/strategy', async (req, res, next) => {
+  try { res.json(await loadStrategy()); } catch (error) { next(error); }
+});
+
+app.get('/api/content/prompt', async (req, res, next) => {
+  try { res.type('text/plain; charset=utf-8').send(await loadPrompt()); } catch (error) { next(error); }
+});
+
+app.get('/api/content/models', async (req, res, next) => {
+  try { res.json(await listModels()); } catch (error) { next(error); }
+});
+
+app.get('/api/content/models/:symbol/:interval', async (req, res, next) => {
+  try {
+    const model = await loadModel(req.params.symbol, req.params.interval);
+    if (!model) return res.status(404).json({ error: 'Không tìm thấy model' });
+    return res.json(model);
+  } catch (error) {
+    return next(error);
+  }
+});
 
 app.get('/api/analyze', async (req, res) => {
   const { symbol, interval = '4h', bars } = req.query;
@@ -77,6 +99,11 @@ app.use((req, res, next) => {
   return res.status(404).type('text/plain; charset=utf-8').send(`Không tìm thấy: ${req.path}`);
 });
 app.use(express.static(rootDir, { index: 'index.html', dotfiles: 'deny' }));
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  return res.status(500).json({ error: error.message });
+});
 
 app.listen(PORT, () => {
   console.log(`Dashboard tĩnh:      http://localhost:${PORT}`);
