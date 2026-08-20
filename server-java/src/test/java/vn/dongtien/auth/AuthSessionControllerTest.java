@@ -23,9 +23,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:1/test",
+        "spring.datasource.url=jdbc:mysql://localhost:1/test",
         "spring.datasource.username=test",
-        "spring.datasource.password=test"
+        "spring.datasource.password=test",
+        "spring.flyway.enabled=false",
+        "spring.datasource.hikari.initialization-fail-timeout=-1"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("test")

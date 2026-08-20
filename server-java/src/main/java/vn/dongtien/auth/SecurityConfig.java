@@ -11,7 +11,10 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, OAuthSuccessHandler successHandler) throws Exception {
         http
-                .csrf(csrf -> csrf.ignoringRequestMatchers("/api/watchlist/**"))
+                // The dashboard is intentionally usable without an OAuth login.  These
+                // JSON endpoints replace the old same-origin Express/worker calls, so
+                // they need the same CSRF-free behavior as /api/watchlist.
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/api/watchlist/**", "/api/analyze", "/api/backtest", "/api/train", "/api/ai/**"))
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll())
                 .oauth2Login(oauth -> oauth
                         .loginPage("/login/")

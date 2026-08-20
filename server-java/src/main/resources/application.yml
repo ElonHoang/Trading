@@ -2,13 +2,18 @@ spring:
   application:
     name: dong-tien-ai
   datasource:
-    url: ${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/trading}
-    username: ${DATABASE_USER:trading}
-    password: ${DATABASE_PASSWORD:change-me}
+    # Paste the JDBC string shown by TiDB Cloud's Connect dialog into JDBC_DATABASE_URL.
+    # TiDB Cloud Starter requires TLS; the local default is only for TiDB self-managed.
+    url: ${JDBC_DATABASE_URL:jdbc:mysql://localhost:4000/trading?useSSL=false&connectionTimeZone=UTC}
+    username: ${DATABASE_USER:root}
+    password: ${DATABASE_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      maximum-pool-size: ${DATABASE_POOL_SIZE:10}
-      minimum-idle: 1
+      maximum-pool-size: ${DATABASE_POOL_SIZE:5}
+      minimum-idle: 0
       connection-timeout: 10000
+      # TiDB Cloud may close public connections during maintenance; recycle first.
+      max-lifetime: ${DATABASE_MAX_LIFETIME_MS:300000}
   flyway:
     enabled: ${DATABASE_MIGRATE:true}
     locations: classpath:db/migration
@@ -36,6 +41,8 @@ dongtien:
   telegram:
     token: ${TELEGRAM_BOT_TOKEN:}
     allowed-ids: ${TELEGRAM_ALLOWED_IDS:}
+    # Mutating Telegram commands fail closed until explicit owner IDs are configured.
+    owner-ids: ${TELEGRAM_OWNER_IDS:}
     alert-chat-ids: ${TELEGRAM_ALERT_CHAT_IDS:}
     polling-enabled: ${TELEGRAM_POLLING_ENABLED:false}
   anthropic:

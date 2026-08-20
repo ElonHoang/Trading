@@ -1,22 +1,45 @@
 # Dong Tien AI
 
-He thong phan tich dong tien crypto, dashboard, backtest, model ML va Telegram bot.
-Backend da duoc chuyen hoan toan sang Java 17/Spring Boot. Repository khong can
-Node.js, npm hay package npm de build va van hanh.
+He thong phan tich crypto da chuyen runtime tu Node.js sang Java 17 + Spring Boot, voi TiDB Cloud
+(MySQL-compatible) la database ben ngoai.
+Khong co package.json, npm script, Express, grammy hay Node source trong runtime.
+JavaScript chi con trong `web/`, `login/` va `public/` de ve giao dien tren trinh duyet.
 
-JavaScript con lai trong `web/`, `login/`, `public/` va mot tap module thuần trong
-`src/` chi chay truc tiep trong trinh duyet. Chung khong phai Node.js backend.
+## Chay
 
-## Yeu cau
+Yeu cau: Java 17+, Maven 3.6.3+, va mot TiDB Cloud cluster co the truy cap tu may chay app.
 
-- Java 17+
-- Maven 3.6.3+
-- PostgreSQL 15+
-- Docker/Compose (tuy chon)
+Sao chep `.env.example` thanh `.env`, sau do dien URL JDBC TLS, user va password cua cluster truoc
+khi chay bat ky lenh nao. Docker Compose khong khoi dong database local; `migrate-db` ket noi truc tiep
+toi TiDB Cloud, sau do `web`, `bot` va `import-files` giu nguyen quan he phu thuoc vao migration.
 
-## Chay local
+Luu y: Flyway tao schema TiDB moi. Neu ban dang co du lieu PostgreSQL cu, hay export/nhap du lieu
+truoc; TiDB Cloud khong the tu doc database PostgreSQL cu qua migration.
 
-Tao `.env` tu `.env.example`, sau do khoi tao database va import cau hinh:
+```dotenv
+JDBC_DATABASE_URL=jdbc:mysql://<tidb-cloud-endpoint>:4000/<database>?sslMode=VERIFY_IDENTITY&enabledTLSProtocols=TLSv1.2,TLSv1.3&connectionTimeZone=UTC
+DATABASE_USER=<tidb-cloud-username>
+DATABASE_PASSWORD=<tidb-cloud-password>
+DATABASE_POOL_SIZE=5
+DATABASE_MAX_LIFETIME_MS=300000
+```
+
+`sslMode=VERIFY_IDENTITY` bat TLS va kiem tra dung danh tinh endpoint. Dung dung endpoint/port trong
+trang **Connect** cua TiDB Cloud (thong thuong port `4000`).
+Voi cluster yeu cau CA rieng, import CA vao Java truststore va them `trustCertificateKeyStoreUrl` va
+`trustCertificateKeyStorePassword` vao URL theo [huong dan TLS JDBC cua TiDB Cloud](https://docs.pingcap.com/tidbcloud/tidb-cloud-tls-connect-to-dedicated/).
+
+Docker Compose (khuyen dung khi deploy):
+
+```powershell
+Copy-Item .env.example .env
+# Dien TiDB Cloud credentials vao .env truoc khi chay.
+docker compose up --build web
+docker compose --profile bot up -d bot
+docker compose --profile tools run --rm import-files
+```
+
+Khi chay JAR truc tiep, dat cung ba bien moi truong o tren trong shell/secret manager truoc:
 
 ```powershell
 mvn -f server-java/pom.xml clean package
@@ -25,110 +48,72 @@ java -jar server-java/target/dong-tien-ai.jar import-files --overwrite
 java -jar server-java/target/dong-tien-ai.jar
 ```
 
-Dashboard: `http://localhost:8080/`
-
-Trang realtime: `http://localhost:8080/realtime/`
-
-Dang nhap: `http://localhost:8080/login/`
-
-Chay thu UI khong can PostgreSQL (du lieu chi nam trong bo nho):
-
-```powershell
-java -jar server-java/target/dong-tien-ai.jar --spring.profiles.active=demo --spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
-```
+- Dashboard: `http://localhost:8080/`
+- Realtime UI: `http://localhost:8080/realtime/`
+- Login: `http://localhost:8080/login/`
 
 ## Lenh Java
 
-Tat ca tac vu cu dung chung mot executable JAR:
-
 ```powershell
 java -jar server-java/target/dong-tien-ai.jar analyze BTC 4h
-java -jar server-java/target/dong-tien-ai.jar backtest BTC 4h 3000
 java -jar server-java/target/dong-tien-ai.jar train BTC 4h
+java -jar server-java/target/dong-tien-ai.jar backtest BTC 4h 3000
 java -jar server-java/target/dong-tien-ai.jar diagnose-sl BTC 4h 3000
 java -jar server-java/target/dong-tien-ai.jar validate-filters BTC 4h 3000
-java -jar server-java/target/dong-tien-ai.jar research-patterns BTC 4h 3000
+java -jar server-java/target/dong-tien-ai.jar research-patterns --interval 4h
 java -jar server-java/target/dong-tien-ai.jar daily-review
-java -jar server-java/target/dong-tien-ai.jar models-index
+java -jar server-java/target/dong-tien-ai.jar daily-loss-log
+java -jar server-java/target/dong-tien-ai.jar auto-retune
 java -jar server-java/target/dong-tien-ai.jar alerts-once
 java -jar server-java/target/dong-tien-ai.jar bot
 ```
 
-`bot` long-poll Telegram. Khong chay dong thoi nhieu instance voi cung token vi
-Telegram chi cho mot consumer `getUpdates`.
-
-## Docker
-
-```powershell
-docker compose up --build postgres migrate-db import-files web
-docker compose --profile bot up --build bot
-```
-
-`migrate-db`, `web`, `bot` va `import-files` deu dung cung image Java. Flyway chay
-cac file trong `db/migrations` va khoa checksum cac migration versioned.
+`bot` su dung long polling. Khong chay hai instance voi cung Telegram token.
 
 ## Bien moi truong
 
 | Bien | Mo ta |
 |---|---|
-| `JDBC_DATABASE_URL` | JDBC URL PostgreSQL |
-| `DATABASE_USER` | Tai khoan database |
-| `DATABASE_PASSWORD` | Mat khau database |
-| `DATABASE_POOL_SIZE` | So connection toi da |
-| `JAVA_SERVER_PORT` | Cong local, mac dinh `8080` |
-| `PORT` | Cong container/Render |
-| `TELEGRAM_BOT_TOKEN` | Token Telegram bot |
-| `TELEGRAM_ALLOWED_IDS` | Danh sach chat ID cach nhau bang dau phay |
-| `TELEGRAM_ALERT_CHAT_IDS` | Noi nhan alert mot lan |
-| `ANTHROPIC_API_KEY` | API key cho tinh nang Claude phia browser/tich hop sau nay |
-| `GOOGLE_CLIENT_ID` | OAuth Google |
-| `GOOGLE_CLIENT_SECRET` | OAuth Google |
-| `GITHUB_CLIENT_ID` | OAuth GitHub |
-| `GITHUB_CLIENT_SECRET` | OAuth GitHub |
+| `JDBC_DATABASE_URL` | TiDB Cloud JDBC URL MySQL co `sslMode=VERIFY_IDENTITY` |
+| `DATABASE_USER`, `DATABASE_PASSWORD` | Tai khoan TiDB Cloud; khong dat secret trong JDBC URL |
+| `DATABASE_POOL_SIZE`, `DATABASE_MAX_LIFETIME_MS` | Pool JDBC; mac dinh 5 ket noi va tai tao sau 5 phut |
+| `JAVA_SERVER_PORT` | Port Java, mac dinh `8080` |
+| `TELEGRAM_BOT_TOKEN` | Token bot Telegram |
+| `TELEGRAM_ALLOWED_IDS` | Chat ID duoc phep doc/dung bot |
+| `TELEGRAM_OWNER_IDS` | Chat ID duoc phep dung lenh ghi; de trong se fail-closed |
+| `TELEGRAM_ALERT_CHAT_IDS` | Chat nhan alert da cau hinh |
+| `ANTHROPIC_API_KEY` | API key cho Anthropic service phia Java |
 
 ## API
 
 | Method | Path | Chuc nang |
 |---|---|---|
 | `GET` | `/api/intervals` | Khung thoi gian Binance |
-| `GET` | `/api/analyze?symbol=BTC&interval=4h&bars=180` | Snapshot phan tich |
-| `GET` | `/api/watchlist` | Danh sach theo doi |
-| `POST` | `/api/watchlist` | Them `{ "symbol": "BTC" }` |
-| `DELETE` | `/api/watchlist/{symbol}` | Xoa symbol |
-| `GET` | `/api/content/strategy` | Cau hinh dang active |
-| `GET` | `/api/content/prompt` | System prompt |
-| `GET` | `/api/content/models` | Model da train |
-| `GET` | `/api/trading-performance?range=week` | Hieu suat giao dich |
-| `GET` | `/api/auth/session` | User, OAuth provider va CSRF token |
+| `GET` / `POST` | `/api/analyze` | Phan tich thi truong |
+| `POST` | `/api/train` | Train va luu model TiDB Cloud |
+| `POST` | `/api/backtest` | Backtest trong Java runtime |
+| `POST` | `/api/ai/report`, `/api/ai/ask` | Claude qua Java service |
+| `GET` / `POST` / `DELETE` | `/api/watchlist` | Watchlist |
+| `GET` | `/api/content/strategy`, `/api/content/models` | Cau hinh va model |
 
 ## Kien truc
 
 ```text
 server-java/src/main/java/vn/dongtien/
-  auth/                 OAuth, session, dashboard performance
-  trading/api/          REST API thay Express
-  trading/market/       Binance Spot/Futures client
-  trading/analysis/     volume, CVD, S/R va scoring
-  trading/ml/           feature, GBDT predict/train
-  trading/backtest/     backtest theo thoi gian
-  trading/watchlist/    persistence watchlist
-  trading/telegram/     Telegram Bot API client
-  trading/runtime/      command dispatcher va import
-
-db/migrations/          Flyway PostgreSQL
-web/, login/, public/   giao dien browser
-src/                    ES module thuan browser cho che do tinh tai client
+  trading/analysis/    scoring, setup, context, lifecycle, review, research
+  trading/market/      Binance Spot/Futures
+  trading/ml/          dataset, GBDT, training
+  trading/backtest/    simulator
+  trading/chart/       PNG renderer Java2D
+  trading/telegram/    Telegram transport, captions, monitor
+  trading/runtime/     CLI command dispatcher
+  auth/                persistence, OAuth, dashboard APIs
+web/, login/, public/  browser UI only
+db/migrations/         Flyway migrations cho TiDB/MySQL
 ```
-
-Java backend la nguon chay production. Cac module `src/**/*.js` duoc dong goi lam
-static resource chi de dashboard co the train/backtest ngay trong Web Worker.
-Chung khong duoc import `node:*`, doc filesystem, doc environment hay dung package npm.
 
 ## Kiem thu
 
 ```powershell
 mvn -f server-java/pom.xml test
 ```
-
-Test hien bao phu OAuth/session, PnL dashboard, symbol normalization, whitelist,
-volume/CVD va kha nang doc model GBDT cu duoc tao boi browser.

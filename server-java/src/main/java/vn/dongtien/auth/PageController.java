@@ -9,4 +9,9 @@ public class PageController {
     String login() {
         return "forward:/login/index.html";
     }
+
+    @GetMapping({"/realtime", "/realtime/"})
+    String realtime() {
+        return "forward:/realtime/index.html";
+    }
 }

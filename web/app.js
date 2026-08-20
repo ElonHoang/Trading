@@ -4,9 +4,10 @@
 // dữ liệu lấy thẳng từ Binance, chỉ báo và model ML tính tại máy người dùng,
 // Claude gọi trực tiếp bằng API key của chính họ.
 
-import { analyze } from '../src/analysis/engine.js';
-import { normalizeSymbol, resolveSymbol, INTERVAL_MS } from '../src/data/binance.js';
-import { assertAllowedTradeSymbol } from '../src/data/trading-universe.js';
+// Analysis, models and backtests now run in the Java service.
+const INTERVALS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M'];
+const INTERVAL_MS = Object.fromEntries(INTERVALS.map((interval) => [interval, 1]));
+const normalizeSymbol = (input) => input.trim().toUpperCase().replace(/[\/_\-\s]/g, '');
 import {
   loadStrategy, setStrategyValue, flattenStrategy, resetStrategy, overrideCount, isOverridden,
   loadPrompt, savePrompt, resetPrompt, promptIsCustom,
@@ -905,10 +906,8 @@ async function selectedSymbol() {
   if (!raw) throw new Error('Nhập mã token trước đã (ví dụ BTC, ETH, SOL).');
   // Đối chiếu danh sách cặp thật của Binance thay vì đoán, để "wbtc" ra WBTCUSDT
   // còn "ethbtc" ra ETHBTC.
-  const symbol = await resolveSymbol(raw);
-  const strategy = state.strategy ?? await loadStrategy();
-  assertAllowedTradeSymbol(symbol, strategy);
-  return symbol;
+  // Java resolves the live Binance symbol and enforces its whitelist.
+  return raw;
 }
 
 /** Cho người dùng thấy train/backtest sẽ chạy trên token nào. */
@@ -940,11 +939,14 @@ async function runAnalyze() {
     state.symbol = symbol;
     state.interval = interval;
     state.strategy = await loadStrategy();
-    const snap = await analyze(symbol, interval, state.strategy, {
-      includeSeries: true,
-      seriesBars: 180,
-      storedModel: await loadModel(symbol, interval),
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ symbol, interval, bars: 180, strategy: state.strategy }),
     });
+    const snap = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(snap.error || `HTTP ${response.status}`);
     renderAll(snap);
     setStatus(`cập nhật ${new Date().toLocaleTimeString('vi-VN')}`);
     const q = new URLSearchParams({ symbol, interval });

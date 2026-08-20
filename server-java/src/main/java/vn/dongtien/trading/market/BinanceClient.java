@@ -4,7 +4,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
+import vn.dongtien.trading.analysis.AnalysisService;
 
 import java.io.IOException;
 import java.net.URI;
@@ -46,6 +48,8 @@ public class BinanceClient {
     private volatile long spotSymbolsAt;
     private volatile Set<String> futuresSymbols;
     private volatile long futuresSymbolsAt;
+    private volatile List<JsonNode> tickerCache;
+    private volatile long tickerCacheAt;
 
     @Autowired
     public BinanceClient(ObjectMapper mapper) {
@@ -98,6 +102,61 @@ public class BinanceClient {
         Set<String> result = new LinkedHashSet<>();
         fetchSymbolInfo().forEach((symbol, info) -> { if ("TRADING".equals(info.status())) result.add(symbol); });
         return result;
+    }
+
+    /** Uses Binance metadata instead of guessing where a base symbol ends. */
+    public String baseAssetOf(String symbol) {
+        SymbolInfo info = fetchSymbolInfo().get(symbol == null ? "" : symbol.toUpperCase(Locale.ROOT));
+        return info == null ? null : info.baseAsset();
+    }
+
+    public String symbolStatusOf(String symbol) {
+        SymbolInfo info = fetchSymbolInfo().get(symbol == null ? "" : symbol.toUpperCase(Locale.ROOT));
+        return info == null ? null : info.status();
+    }
+
+    /** Whole-market ticker cache used by the low-cost screener. */
+    public List<JsonNode> fetchAllTickers() {
+        long now = System.currentTimeMillis();
+        if (tickerCache != null && now - tickerCacheAt < 30_000) return tickerCache;
+        List<JsonNode> result = new ArrayList<>();
+        for (JsonNode row : getJson(SPOT_HOSTS, "/api/v3/ticker/24hr")) result.add(row);
+        tickerCache = List.copyOf(result);
+        tickerCacheAt = now;
+        return tickerCache;
+    }
+
+    /**
+     * Cheap pre-filter equivalent to the former Node screener.  It deliberately
+     * only selects symbols; deeper analysis still goes through {@link AnalysisService}.
+     */
+    public ScreenResult screenSymbols(int topVolume, int topMovers, double minQuoteVolumeUsd,
+                                      String quote, boolean requireFutures) {
+        String requestedQuote = quote == null || quote.isBlank() ? "USDT" : quote.toUpperCase(Locale.ROOT);
+        Set<String> futures = null;
+        if (requireFutures) {
+            try { futures = fetchFuturesSymbols(); } catch (RuntimeException ignored) { /* disclose below */ }
+        }
+        Map<String, SymbolInfo> metadata = fetchSymbolInfo();
+        List<ScreenRow> rows = new ArrayList<>();
+        Set<String> stableBases = Set.of("USDC", "FDUSD", "BUSD", "TUSD", "USDP", "DAI", "EUR", "USD1", "USDS",
+                "AEUR", "EURI", "XUSD", "PYUSD", "RLUSD");
+        for (JsonNode ticker : fetchAllTickers()) {
+            String symbol = ticker.path("symbol").asText();
+            SymbolInfo info = metadata.get(symbol);
+            if (info == null || !"TRADING".equals(info.status()) || !requestedQuote.equals(info.quoteAsset())
+                    || stableBases.contains(info.baseAsset()) || (futures != null && !futures.contains(symbol))) continue;
+            double volume = numberOrNaN(ticker.path("quoteVolume"));
+            if (!Double.isFinite(volume) || volume < minQuoteVolumeUsd) continue;
+            double move = numberOrNaN(ticker.path("priceChangePercent"));
+            rows.add(new ScreenRow(symbol, volume, Double.isFinite(move) ? Math.abs(move) : 0));
+        }
+        List<String> byVolume = rows.stream().sorted((a, b) -> Double.compare(b.quoteVolume(), a.quoteVolume()))
+                .limit(Math.max(0, topVolume)).map(ScreenRow::symbol).toList();
+        List<String> byMovers = rows.stream().sorted((a, b) -> Double.compare(b.changeAbs(), a.changeAbs()))
+                .limit(Math.max(0, topMovers)).map(ScreenRow::symbol).toList();
+        Set<String> selected = new LinkedHashSet<>(); selected.addAll(byVolume); selected.addAll(byMovers);
+        return new ScreenResult(List.copyOf(selected), rows.size(), fetchAllTickers().size(), futures != null);
     }
 
     public Set<String> fetchFuturesSymbols() {
@@ -196,6 +255,10 @@ public class BinanceClient {
     }
 
     public JsonNode fetchOrderBook(String symbol, int limit) {
+        return fetchOrderBook(symbol, limit, 4d);
+    }
+
+    public JsonNode fetchOrderBook(String symbol, int limit, double wallMultiple) {
         try {
             JsonNode book;
             try { book = getJson(SPOT_HOSTS, "/api/v3/depth?symbol=" + encode(symbol) + "&limit=" + limit); }
@@ -219,7 +282,9 @@ public class BinanceClient {
             result.put("midPrice", mid); result.put("spreadPct", (bestAsk - bestBid) / mid * 100);
             result.put("depthSpanPct", ((mid - lastBid) + (lastAsk - mid)) / mid * 50);
             result.put("levels", book.path("bids").size() + book.path("asks").size());
-            result.putArray("walls");
+            ArrayNode walls = result.putArray("walls");
+            appendWalls(walls, book.path("bids"), "bid", bidValue, mid, wallMultiple);
+            appendWalls(walls, book.path("asks"), "ask", askValue, mid, wallMultiple);
             return result;
         } catch (RemoteException ignored) { return null; }
     }
@@ -258,6 +323,27 @@ public class BinanceClient {
         double result = 0;
         for (JsonNode level : levels) result += number(level.get(0)) * number(level.get(1));
         return result;
+    }
+
+    private static void appendWalls(ArrayNode target, JsonNode levels, String side, double total, double mid, double multiple) {
+        if (levels == null || levels.isEmpty() || total <= 0 || mid <= 0) return;
+        double average = total / levels.size();
+        List<Wall> candidates = new ArrayList<>();
+        for (JsonNode level : levels) {
+            double price = numberOrNaN(level.get(0));
+            double value = price * numberOrNaN(level.get(1));
+            if (Double.isFinite(value) && value >= average * Math.max(1, multiple)) candidates.add(new Wall(price, value));
+        }
+        candidates.sort((a, b) -> Double.compare(b.value(), a.value()));
+        List<Wall> kept = new ArrayList<>();
+        for (Wall wall : candidates) {
+            if (kept.stream().anyMatch(existing -> Math.abs(wall.price() - existing.price()) / mid * 100 < .1)) continue;
+            kept.add(wall);
+            ObjectNode row = target.addObject();
+            row.put("side", side); row.put("price", wall.price()); row.put("value", wall.value());
+            row.put("ratioToAvg", wall.value() / average); row.put("distancePct", (wall.price() - mid) / mid * 100);
+            if (kept.size() == 3) break;
+        }
     }
 
     JsonNode getJson(List<String> hosts, String path) {
@@ -300,8 +386,15 @@ public class BinanceClient {
     }
     private static String encode(String value) { return URLEncoder.encode(value, StandardCharsets.UTF_8); }
     private static double number(JsonNode node) { return Double.parseDouble(node.asText()); }
+    private static double numberOrNaN(JsonNode node) {
+        try { return node == null ? Double.NaN : Double.parseDouble(node.asText()); }
+        catch (RuntimeException ignored) { return Double.NaN; }
+    }
 
     public record SymbolInfo(String baseAsset, String quoteAsset, String status) {}
+    public record ScreenResult(List<String> symbols, int scanned, int totalPairs, boolean futuresFiltered) {}
+    private record ScreenRow(String symbol, double quoteVolume, double changeAbs) {}
+    private record Wall(double price, double value) {}
     public static final class RemoteException extends RuntimeException {
         private final boolean invalidSymbol;
         RemoteException(String message, boolean invalidSymbol) { super(message); this.invalidSymbol = invalidSymbol; }

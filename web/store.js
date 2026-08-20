@@ -1,6 +1,6 @@
 // Lưu cấu hình phía browser.
 //
-// Mặc định đọc từ PostgreSQL qua API; những gì người dùng sửa được
+// Mặc định đọc từ TiDB Cloud qua API; những gì người dùng sửa được
 // lưu riêng thành map "đường dẫn → giá trị" trong localStorage. Nhờ vậy khi repo
 // cập nhật mặc định mới, thay đổi của người dùng vẫn còn, và reset rất gọn.
 

@@ -176,10 +176,59 @@
 
 <script type="module">
 // Cùng bộ vẽ mà bot Telegram dùng để xuất PNG -> chart trên web và trên bot giống nhau.
-import {
-  renderPricePanel, renderCvdPanel, PAD,
-  decimalsFor, fmt, pct, compact, timeLabel,
-} from '/src/chart/render.js';
+// Browser-only chart helpers. The former shared Node module is now rendered by
+// Java for Telegram PNGs; this lightweight canvas renderer keeps /realtime/
+// self-contained without serving /src/*.js.
+const PAD = { left: 8, right: 68, top: 10, bottom: 22 };
+const decimalsFor = (v) => {
+  const a = Math.abs(Number(v) || 0);
+  return !a ? 2 : a < .001 ? 8 : a < 1 ? 6 : a < 100 ? 4 : 2;
+};
+const fmt = (v, d = decimalsFor(v)) => v == null || Number.isNaN(v) ? '—'
+  : Number(v).toLocaleString('vi-VN', { minimumFractionDigits: d, maximumFractionDigits: d });
+const pct = (v, d = 2) => v == null ? '—' : `${Number(v).toFixed(d)}%`;
+const compact = (v) => {
+  if (v == null) return '—';
+  const a = Math.abs(v), unit = a >= 1e9 ? 1e9 : a >= 1e6 ? 1e6 : a >= 1e3 ? 1e3 : 1;
+  return `${(v / unit).toLocaleString('vi-VN', { maximumFractionDigits: 2 })}${unit === 1e9 ? 'B' : unit === 1e6 ? 'M' : unit === 1e3 ? 'K' : ''}`;
+};
+const timeLabel = (ms, interval) => {
+  const d = new Date(ms), p = (n) => String(n).padStart(2, '0');
+  return /m$|^\d+h$/.test(interval) ? `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`
+    : `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+};
+function renderPricePanel(ctx, { candles, volumeAvg = [], width, height, levels = {}, walls = [], hover }) {
+  ctx.fillStyle = '#0e1116'; ctx.fillRect(0, 0, width, height);
+  if (!candles.length) return;
+  const left = PAD.left, right = width - PAD.right, top = PAD.top, bottom = height - PAD.bottom - 58;
+  const min = Math.min(...candles.map((c) => c.low)), max = Math.max(...candles.map((c) => c.high));
+  const range = Math.max(max - min, Math.abs(max) * .001, 1e-9), x = (i) => left + (i + .5) * (right - left) / candles.length;
+  const y = (price) => bottom - (price - min) / range * (bottom - top), step = (right - left) / candles.length;
+  ctx.strokeStyle = '#1d232c'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) { const yy = top + (bottom - top) * i / 5; ctx.beginPath(); ctx.moveTo(left, yy); ctx.lineTo(right, yy); ctx.stroke(); }
+  const line = (price, color) => { if (!Number.isFinite(price)) return; ctx.strokeStyle = color; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(left, y(price)); ctx.lineTo(right, y(price)); ctx.stroke(); ctx.setLineDash([]); };
+  for (const level of levels.support ?? []) line(level.price, '#26a69a');
+  for (const level of levels.resistance ?? []) line(level.price, '#ef5350');
+  for (const wall of walls ?? []) line(wall.price, wall.side === 'bid' ? '#26a69a55' : '#ef535055');
+  const maxVol = Math.max(...candles.map((c) => c.volume || 0), 1), volTop = bottom + 10, volBottom = height - PAD.bottom;
+  candles.forEach((c, i) => {
+    const up = c.close >= c.open, color = up ? '#26a69a' : '#ef5350', xx = x(i), bodyW = Math.max(1, step * .62);
+    ctx.strokeStyle = color; ctx.beginPath(); ctx.moveTo(xx, y(c.high)); ctx.lineTo(xx, y(c.low)); ctx.stroke();
+    ctx.fillStyle = color; ctx.fillRect(xx - bodyW / 2, y(Math.max(c.open, c.close)), bodyW, Math.max(1, Math.abs(y(c.open) - y(c.close))));
+    const vh = (c.volume || 0) / maxVol * (volBottom - volTop); ctx.globalAlpha = .55; ctx.fillRect(xx - bodyW / 2, volBottom - vh, bodyW, vh); ctx.globalAlpha = 1;
+  });
+  if (volumeAvg.length) { ctx.strokeStyle = '#8b949e'; ctx.beginPath(); volumeAvg.forEach((v, i) => { const yy = volBottom - (v || 0) / maxVol * (volBottom - volTop); i ? ctx.lineTo(x(i), yy) : ctx.moveTo(x(i), yy); }); ctx.stroke(); }
+  ctx.fillStyle = '#8b949e'; ctx.font = '11px system-ui'; ctx.fillText(fmt(max), right + 5, top + 10); ctx.fillText(fmt(min), right + 5, bottom);
+  if (hover != null && candles[hover]) { ctx.strokeStyle = '#64748b'; ctx.beginPath(); ctx.moveTo(x(hover), top); ctx.lineTo(x(hover), volBottom); ctx.stroke(); }
+}
+function renderCvdPanel(ctx, { cvd: series = [], width, height, hover }) {
+  ctx.fillStyle = '#0e1116'; ctx.fillRect(0, 0, width, height); if (!series.length) return;
+  const min = Math.min(...series), max = Math.max(...series), range = Math.max(max - min, 1), left = PAD.left, right = width - PAD.right, top = PAD.top, bottom = height - PAD.bottom;
+  const x = (i) => left + i * (right - left) / Math.max(1, series.length - 1), y = (v) => bottom - (v - min) / range * (bottom - top);
+  ctx.strokeStyle = '#1d232c'; for (let i = 0; i <= 4; i++) { const yy = top + (bottom - top) * i / 4; ctx.beginPath(); ctx.moveTo(left, yy); ctx.lineTo(right, yy); ctx.stroke(); }
+  ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 1.5; ctx.beginPath(); series.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))); ctx.stroke();
+  if (hover != null && series[hover] != null) { ctx.strokeStyle = '#64748b'; ctx.beginPath(); ctx.moveTo(x(hover), top); ctx.lineTo(x(hover), bottom); ctx.stroke(); }
+}
 
 const $ = (id) => document.getElementById(id);
 const els = {

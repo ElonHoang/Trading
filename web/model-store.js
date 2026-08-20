@@ -1,7 +1,7 @@
 // Kho model phía browser.
 //
 // Hai nguồn:
-//  1. Model dùng chung trong PostgreSQL — dùng ngay khi mở trang, không cần train.
+//  1. Model dùng chung trong TiDB Cloud — dùng ngay khi mở trang, không cần train.
 //  2. Model người dùng tự train — lưu localStorage, ưu tiên hơn bản database.
 
 const LS_PREFIX = 'ta.model.';

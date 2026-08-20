@@ -19,6 +19,7 @@
 
   <properties>
     <java.version>17</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
   <dependencies>
@@ -44,11 +45,13 @@
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-database-postgresql</artifactId>
+      <artifactId>flyway-database-tidb</artifactId>
+      <!-- TiDB's community module is not one of the individual modules managed by Boot's BOM. -->
+      <version>${flyway.version}</version>
     </dependency>
     <dependency>
-      <groupId>org.postgresql</groupId>
-      <artifactId>postgresql</artifactId>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
       <scope>runtime</scope>
     </dependency>
     <dependency>
@@ -81,11 +84,16 @@
           <include>index.html</include>
           <include>login/**</include>
           <include>web/**</include>
-          <!-- ES modules loaded directly by the browser. -->
-          <include>src/**/*.js</include>
         </includes>
         <excludes>
         </excludes>
+      </resource>
+      <resource>
+        <directory>${project.basedir}/../public</directory>
+        <targetPath>static/realtime</targetPath>
+        <includes>
+          <include>**</include>
+        </includes>
       </resource>
       <resource>
         <directory>${project.basedir}/../db/migrations</directory>
