@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-@Profile("!test")
+@Profile("!test & !demo")
 public class PostgresDocumentStore implements DocumentStore {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -24,7 +24,7 @@ public class PostgresDocumentStore implements DocumentStore {
     @PostConstruct
     void createSchema() {
         jdbc.execute("""
-                CREATE TABLE IF NOT EXISTS app_documents (
+                CREATE TABLE IF NOT EXISTS public.app_documents (
                   document_key VARCHAR(255) PRIMARY KEY,
                   document_value JSONB NOT NULL,
                   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -32,14 +32,14 @@ public class PostgresDocumentStore implements DocumentStore {
                 """);
         jdbc.execute("""
                 CREATE INDEX IF NOT EXISTS app_documents_updated_at_idx
-                  ON app_documents (updated_at DESC)
+                  ON public.app_documents (updated_at DESC)
                 """);
     }
 
     @Override
     public Optional<JsonNode> find(String key) {
         List<JsonNode> rows = jdbc.query(
-                "SELECT document_value::text FROM app_documents WHERE document_key = ?",
+                "SELECT document_value::text FROM public.app_documents WHERE document_key = ?",
                 (result, row) -> read(result.getString(1)), key);
         return rows.stream().findFirst();
     }
@@ -48,7 +48,7 @@ public class PostgresDocumentStore implements DocumentStore {
     public List<StoredDocument> findByPrefix(String prefix) {
         return jdbc.query("""
                         SELECT document_key, document_value::text
-                        FROM app_documents
+                        FROM public.app_documents
                         WHERE document_key LIKE ?
                         ORDER BY updated_at DESC, document_key ASC
                         """,
@@ -59,7 +59,7 @@ public class PostgresDocumentStore implements DocumentStore {
     @Override
     public void put(String key, JsonNode value) {
         jdbc.update("""
-                INSERT INTO app_documents (document_key, document_value, updated_at)
+                INSERT INTO public.app_documents (document_key, document_value, updated_at)
                 VALUES (?, ?::jsonb, NOW())
                 ON CONFLICT (document_key) DO UPDATE
                   SET document_value = EXCLUDED.document_value, updated_at = NOW()
@@ -68,7 +68,7 @@ public class PostgresDocumentStore implements DocumentStore {
 
     @Override
     public boolean delete(String key) {
-        return jdbc.update("DELETE FROM app_documents WHERE document_key = ?", key) > 0;
+        return jdbc.update("DELETE FROM public.app_documents WHERE document_key = ?", key) > 0;
     }
 
     private JsonNode read(String json) {

@@ -44,19 +44,17 @@ services:
   bot:
     build:
       context: .
-      dockerfile: Dockerfile.node
+      dockerfile: Dockerfile
     restart: unless-stopped
     profiles: [bot]
     depends_on:
       migrate-db:
         condition: service_completed_successfully
+    command: ["java", "-jar", "/app/app.jar", "bot"]
     environment:
-      PGHOST: postgres
-      PGPORT: 5432
-      PGDATABASE: ${POSTGRES_DB:-trading}
-      PGUSER: ${POSTGRES_USER:-trading}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      DATABASE_SSL: "false"
+      JDBC_DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-trading}
+      DATABASE_USER: ${POSTGRES_USER:-trading}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_OWNER_IDS: ${TELEGRAM_OWNER_IDS:-}
@@ -68,37 +66,31 @@ services:
   import-files:
     build:
       context: .
-      dockerfile: Dockerfile.import
+      dockerfile: Dockerfile
     profiles: [tools]
     depends_on:
       migrate-db:
         condition: service_completed_successfully
-    command: ["npm", "run", "db:import-files"]
+    command: ["java", "-jar", "/app/app.jar", "import-files", "--overwrite"]
     environment:
-      PGHOST: postgres
-      PGPORT: 5432
-      PGDATABASE: ${POSTGRES_DB:-trading}
-      PGUSER: ${POSTGRES_USER:-trading}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      DATABASE_SSL: "false"
+      JDBC_DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-trading}
+      DATABASE_USER: ${POSTGRES_USER:-trading}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
     networks: [backend]
 
   migrate-db:
     build:
       context: .
-      dockerfile: Dockerfile.node
+      dockerfile: Dockerfile
     restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["npm", "run", "db:migrate"]
+    command: ["java", "-jar", "/app/app.jar", "migrate"]
     environment:
-      PGHOST: postgres
-      PGPORT: 5432
-      PGDATABASE: ${POSTGRES_DB:-trading}
-      PGUSER: ${POSTGRES_USER:-trading}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      DATABASE_SSL: "false"
+      JDBC_DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-trading}
+      DATABASE_USER: ${POSTGRES_USER:-trading}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
     networks: [backend]
 
 volumes:

@@ -11,6 +11,7 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, OAuthSuccessHandler successHandler) throws Exception {
         http
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/api/watchlist/**"))
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll())
                 .oauth2Login(oauth -> oauth
                         .loginPage("/login/")

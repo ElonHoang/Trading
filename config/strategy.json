@@ -15,7 +15,7 @@
     "historicalPattern": 10
   },
   "thresholds": {
-    "_note": "Ngưỡng phân loại tín hiệu trên thang -100..100. buy/sell càng cao càng ít lệnh nhưng chất lượng hơn. CHÚ Ý: các mức dưới đây được kế thừa từ bộ chỉ báo cũ và CHƯA được backtest lại với bộ chỉ báo dòng tiền — chạy npm run backtest trước khi tin.",
+    "_note": "Ngưỡng phân loại tín hiệu trên thang -100..100. buy/sell càng cao càng ít lệnh nhưng chất lượng hơn. CHÚ Ý: các mức dưới đây được kế thừa từ bộ chỉ báo cũ và CHƯA được backtest lại với bộ chỉ báo dòng tiền — chạy lệnh Java backtest trước khi tin.",
     "strongBuy": 50,
     "buy": 30,
     "sell": -30,
@@ -114,7 +114,7 @@
     "guardExpectancyTolerance": 0.02
   },
   "dailyReview": {
-    "_note": "Rà soát định kỳ: W = kèo đã chạm ít nhất TP1; L = kèo chạm SL khi chưa chạm TP1; tỷ lệ dùng mẫu số W + L. Production chỉ báo cáo và ghi nguyên nhân, không training. Người dùng chạy npm run train:losses ở local để kiểm chứng phương án bằng backtest 75%/25%. Kèo đang mở không bao giờ được tính.",
+    "_note": "Rà soát định kỳ: W = kèo đã chạm ít nhất TP1; L = kèo chạm SL khi chưa chạm TP1; tỷ lệ dùng mẫu số W + L. Production chỉ báo cáo và ghi nguyên nhân, không training. Người dùng chạy các lệnh Java train/backtest ở local để kiểm chứng phương án bằng backtest 75%/25%. Kèo đang mở không bao giờ được tính.",
     "enabled": true,
     "_noteOptimizeInScanner": "Đã tắt: alert runner chỉ ghi lossLogs hằng ngày; training/backtest do người dùng chạy local.",
     "optimizeInScanner": false,
@@ -189,7 +189,7 @@
   },
   "risk": {
     "_note": "Sinh mức entry / stoploss / take-profit. slPercent = SL cách entry bao nhiêu % giá (thay cho bội số ATR trước đây). exitStrategy: scaled | tp1 | tp2 (dùng cho backtest).",
-    "_noteTakeProfitR": "TP1 = 0,75R với SL 4% theo % cứng. Đo trên 8 cặp khung 4h, 3000 nến, chia 75% chọn / 25% mới hơn xác nhận, có áp cổng alerts.minAbsScore = 35 như production: dính SL 32,8% (trước 36,3%), win 67,2%, PF 1,43 (trước 1,084), kỳ vọng +0,580%/lệnh (trước +0,063%), tổng +67,3% ở đoạn giữ lại (trước +13,3%). Ba khoá slPercent + takeProfitR + preferSrLevels phải đổi CÙNG NHAU: nới slPercent mà vẫn bám cấu trúc thì tỉ lệ SL đứng yên (35,8% → 35,4% khi đi từ 2,5 lên 4). Đừng đổi mà không chạy lại npm run backtest trên khung 4h.",
+    "_noteTakeProfitR": "TP1 = 0,75R với SL 4% theo % cứng. Đo trên 8 cặp khung 4h, 3000 nến, chia 75% chọn / 25% mới hơn xác nhận, có áp cổng alerts.minAbsScore = 35 như production: dính SL 32,8% (trước 36,3%), win 67,2%, PF 1,43 (trước 1,084), kỳ vọng +0,580%/lệnh (trước +0,063%), tổng +67,3% ở đoạn giữ lại (trước +13,3%). Ba khoá slPercent + takeProfitR + preferSrLevels phải đổi CÙNG NHAU: nới slPercent mà vẫn bám cấu trúc thì tỉ lệ SL đứng yên (35,8% → 35,4% khi đi từ 2,5 lên 4). Đừng đổi mà không chạy lại lệnh Java backtest trên khung 4h.",
     "_notePreferSrLevels": "TẮT có chủ đích. Khi bật, buildLevels kéo SL về bám hỗ trợ/kháng cự nếu khoảng cách nằm trong 0,4x-2,5x mức cơ sở — tức SL có thể chỉ còn 0,4 x slPercent. Thực tế đã sinh ra kèo có SL 1,01% và 7/17 kèo dưới 1,5%, nằm gọn trong biên độ nhiễu. Nới slPercent cũng không cứu được vì nó chỉ nới luôn vùng chấp nhận đó ra. Tắt đi thì slPercent mới thật sự điều khiển khoảng cách SL, và cả tỉ lệ SL lẫn kỳ vọng cùng cải thiện đơn điệu theo slPercent ở CẢ hai đoạn dữ liệu.",
     "slPercent": 4,
     "takeProfitR": [

@@ -12,10 +12,10 @@
   </parent>
 
   <groupId>vn.dongtien</groupId>
-  <artifactId>auth-server</artifactId>
+  <artifactId>dong-tien-ai</artifactId>
   <version>1.0.0</version>
-  <name>Dòng Tiền AI Auth Server</name>
-  <description>Java API cho đăng nhập Google và GitHub</description>
+  <name>Dòng Tiền AI</name>
+  <description>Java runtime cho dashboard, phan tich thi truong va Telegram bot</description>
 
   <properties>
     <java.version>17</java.version>
@@ -37,6 +37,14 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
     </dependency>
     <dependency>
       <groupId>org.postgresql</groupId>
@@ -73,8 +81,15 @@
           <include>index.html</include>
           <include>login/**</include>
           <include>web/**</include>
+          <!-- ES modules loaded directly by the browser. -->
           <include>src/**/*.js</include>
         </includes>
+        <excludes>
+        </excludes>
+      </resource>
+      <resource>
+        <directory>${project.basedir}/../db/migrations</directory>
+        <targetPath>db/migration</targetPath>
       </resource>
     </resources>
     <plugins>
@@ -83,5 +98,6 @@
         <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
     </plugins>
+    <finalName>dong-tien-ai</finalName>
   </build>
 </project>

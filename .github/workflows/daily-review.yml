@@ -25,20 +25,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-java@v4
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      - run: mvn -f server-java/pom.xml -DskipTests package
       - name: Review PostgreSQL trade history
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DATABASE_SSL: ${{ secrets.DATABASE_SSL }}
-          DATABASE_SSL_REJECT_UNAUTHORIZED: ${{ secrets.DATABASE_SSL_REJECT_UNAUTHORIZED }}
+          JDBC_DATABASE_URL: ${{ secrets.JDBC_DATABASE_URL }}
+          DATABASE_USER: ${{ secrets.DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ALERT_CHAT_IDS: ${{ secrets.TELEGRAM_ALERT_CHAT_IDS }}
         run: |
-          test -n "$DATABASE_URL" || { echo 'Missing DATABASE_URL.'; exit 1; }
-          npm run review:daily -- --telegram --no-write \
-            ${{ inputs.force && '--force' || '' }} \
-            ${{ inputs.yesterday && '--yesterday' || '' }}
+          test -n "$JDBC_DATABASE_URL" || { echo 'Missing JDBC_DATABASE_URL.'; exit 1; }
+          java -jar server-java/target/dong-tien-ai.jar daily-review

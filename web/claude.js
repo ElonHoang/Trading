@@ -6,8 +6,8 @@
 // để bật CORS cho trường hợp này.
 //
 // Dùng fetch thay vì @anthropic-ai/sdk vì không có bước build/bundler — không thể
-// import package npm trực tiếp trong browser. Bản Node (src/llm/claude.js) vẫn
-// dùng SDK chính thức.
+// import package npm trực tiếp trong browser. Backend Java không đưa API key
+// của máy chủ xuống giao diện.
 
 import { loadPrompt, getApiKey } from './store.js';
 

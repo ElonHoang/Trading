@@ -1,4 +1,4 @@
-// Cổng chất lượng trước khi cho phép vào lệnh. Dùng được ở browser và Node.
+// Cổng chất lượng trước khi cho phép vào lệnh trong browser.
 // Chỉ dùng dữ liệu có tại nến đóng hiện tại, không dùng dữ liệu tương lai.
 
 export function entryMarketContext(candles, index = candles.length - 1) {

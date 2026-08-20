@@ -472,9 +472,8 @@ export function buildLevels(candles, ind, sr, signal, risk, i = candles.length -
 // ---------------- ML ----------------
 
 /**
- * `stored` = payload model đã nạp sẵn (do phía gọi tự lấy: filesystem ở Node,
- * localStorage/fetch ở browser). Engine cố tình KHÔNG tự đọc đĩa để cùng một
- * file chạy được ở cả hai môi trường.
+ * `stored` = payload model đã nạp sẵn từ localStorage/fetch ở browser.
+ * Engine cố tình không tự đọc đĩa để giữ module thuần browser.
  */
 function mlPrediction(symbol, interval, candles, ind, strategy, stored) {
   if (!strategy.ml?.enabled) return { available: false, reason: 'ML bị tắt trong cấu hình' };

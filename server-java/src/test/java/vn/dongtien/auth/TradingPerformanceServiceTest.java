@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class TradingPerformanceServiceTest {
     @Test
-    void aggregatesClosedTradesByDayAndUsesTheSamePnlRulesAsNode() throws Exception {
+    void aggregatesClosedTradesByDayAndUsesTheConfiguredPnlRules() throws Exception {
         JsonMapper mapper = JsonMapper.builder().build();
         MemoryDocumentStore documents = new MemoryDocumentStore();
         documents.put("config:strategy", mapper.readTree("""

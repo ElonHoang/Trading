@@ -25,7 +25,7 @@ public class DatabaseContentController {
 
     @GetMapping("/strategy")
     ResponseEntity<?> strategy() {
-        return json("config:strategy", "Database chưa có strategy. Chạy npm run db:import-files.");
+        return json("config:strategy", "Database chưa có strategy. Chạy lệnh Java import-files.");
     }
 
     @GetMapping(value = "/prompt", produces = MediaType.TEXT_PLAIN_VALUE)

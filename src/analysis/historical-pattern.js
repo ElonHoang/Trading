@@ -1,5 +1,5 @@
 // So khớp mẫu hình giá hiện tại với các đoạn đã xảy ra trong quá khứ.
-// Module thuần JavaScript để chạy được ở cả Node lẫn browser.
+// Module JavaScript thuần chạy trực tiếp trong browser.
 //
 // Mẫu hình không phải là dự báo độc lập: chỉ trả điểm khi các lần giống nhau
 // trong quá khứ có diễn biến phía sau đủ đồng thuận theo một hướng.

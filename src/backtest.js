@@ -1,5 +1,5 @@
 // Backtest bộ quy tắc + (tuỳ chọn) model ML, có stoploss/take-profit thật.
-// Chạy: npm run backtest -- BTCUSDT 4h
+// Chạy trong Web Worker của dashboard; backend dùng BacktestService Java.
 //
 // Giả định (nói rõ để không tự lừa mình):
 //  - Vào lệnh ở giá ĐÓNG của nến cho tín hiệu (không có look-ahead).

@@ -16,11 +16,10 @@ data/loss-learning/
 # Log & file tạm
 .tmp/
 *.log
-npm-debug.log*
 server-java/target/
 .DS_Store
 Thumbs.db
 
 # models/ ĐƯỢC commit: dashboard chạy trong browser cần model đóng gói sẵn để
 # người mở trang có dự đoán ML ngay mà không phải tự train.
-# Nhớ chạy `npm run models:index` sau khi thêm/xoá model.
+# Dùng lệnh Java `models-index` sau khi thêm/xoá model.

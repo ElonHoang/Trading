@@ -42,7 +42,7 @@ public class TradingPerformanceService {
         this.zone = zone;
     }
 
-    PerformanceResponse performance(String requestedRange) {
+    public PerformanceResponse performance(String requestedRange) {
         Range range = Range.from(requestedRange);
         ZonedDateTime now = ZonedDateTime.now(clock).withZoneSameInstant(zone);
         Window window = Window.forRange(range, now);
