@@ -271,7 +271,7 @@ public class BacktestService {
         groups.put("historicalPattern", clamp(pattern, -1, 1));
         Map<String, Boolean> available = Map.of("cvd", slope != null, "volume", avg != null,
                 "structure", true, "historicalPattern", Boolean.TRUE.equals(historical.get("available")));
-        Map<String, Object> breakdown = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> breakdown = new LinkedHashMap<>();
         double weighted = 0;
         double total = 0;
         for (Map.Entry<String, Double> group : groups.entrySet()) {
@@ -515,7 +515,7 @@ public class BacktestService {
     private record Close(double price, String reason) {}
     private record Signal(String side) {}
     private record Levels(Double stopLoss, List<Double> targets, double riskPercent) {}
-    private record Score(double value, double consensusPercent, int activeGroups, int agreeing, Map<String, Object> breakdown,
+    private record Score(double value, double consensusPercent, int activeGroups, int agreeing, Map<String, Map<String, Object>> breakdown,
                          double rangePosition, double priceChange20Pct, double volumeRatio, double cvdSlope) {}
     private record Diagnostics(double ruleScore, double combinedScore, double consensusPercent, int activeGroups,
                                int agreeingGroups, double volumeRatio, double cvdSlope, double priceChange20Pct,

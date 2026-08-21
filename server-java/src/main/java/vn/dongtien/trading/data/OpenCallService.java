@@ -154,7 +154,8 @@ public class OpenCallService {
         }
 
         if (!merged.equals(known) || movedStop != call.slMovedToEntry()) {
-            updateCall(call.symbol(), current -> current.withProgress(merged, movedStop));
+            boolean stopMoved = movedStop;
+            updateCall(call.symbol(), current -> current.withProgress(merged, stopMoved));
         }
         Double lastPrice = all.isEmpty() ? null : all.get(all.size() - 1).close();
         return new CheckResult(Status.OPEN, merged, lastPrice, after.size(), movedStop, null);

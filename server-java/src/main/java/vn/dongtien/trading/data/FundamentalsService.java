@@ -1,5 +1,6 @@
 package vn.dongtien.trading.data;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -32,6 +33,7 @@ public class FundamentalsService {
     private final Map<String, CacheEntry<Object>> cache = new ConcurrentHashMap<>();
     private final Object cacheLock = new Object();
 
+    @Autowired
     public FundamentalsService(ObjectMapper mapper) {
         this(mapper, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))

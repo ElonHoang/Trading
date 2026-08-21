@@ -47,7 +47,7 @@ public class MonitorService {
 
     public Monitor createMonitor(Dependencies dependencies) {
         if (dependencies == null || dependencies.listTargets() == null || dependencies.evaluate() == null
-                || dependencies.notify() == null || dependencies.loadStrategy() == null) {
+                || dependencies.notifier() == null || dependencies.loadStrategy() == null) {
             throw new IllegalArgumentException("Monitor cần listTargets, evaluate, notify và loadStrategy");
         }
         return new Monitor(dependencies);
@@ -157,7 +157,7 @@ public class MonitorService {
                     if (result.isOpen()) {
                         List<String> newlyHit = new ArrayList<>();
                         for (String label : result.hitTps()) if (!existing.tpHit().contains(label)) newlyHit.add(label);
-                        if (!newlyHit.isEmpty()) deps.notify().notify(new Notification("progress", target, snapshot, setup,
+                        if (!newlyHit.isEmpty()) deps.notifier().notify(new Notification("progress", target, snapshot, setup,
                                 existing, result, newlyHit, evaluation.projections(), evaluation.limitPlan(), previous.lastSignal()));
                         return;
                     }
@@ -169,7 +169,7 @@ public class MonitorService {
                         catch (RuntimeException error) { log("[monitor] không lưu được kết quả kèo " + snapshotSymbol + ": " + error.getMessage()); }
                     }
                     if (result.status() == OpenCallService.Status.TARGET || !result.hitTps().isEmpty()) {
-                        deps.notify().notify(new Notification("closed", target, snapshot, setup, existing, result, List.of(),
+                        deps.notifier().notify(new Notification("closed", target, snapshot, setup, existing, result, List.of(),
                                 evaluation.projections(), evaluation.limitPlan(), previous.lastSignal()));
                     } else log("[monitor] " + snapshotSymbol + " " + text(snapshot, "interval", "") + " chốt "
                             + result.status().value() + " khi chưa chạm TP nào — không báo, để dành cho bản tổng hợp ngày.");
@@ -219,7 +219,7 @@ public class MonitorService {
                         text(snapshot, "interval", target.interval()), side, entry, number(setup.get("stopLoss"), Double.NaN),
                         callTargets, candleTime, evidence), allowedFor(strategy));
                 open.put(snapshotSymbol, call);
-                deps.notify().notify(new Notification("call", target, snapshot, setup, call, null, List.of(),
+                deps.notifier().notify(new Notification("call", target, snapshot, setup, call, null, List.of(),
                         evaluation.projections(), evaluation.limitPlan(), previous.lastSignal()));
             } catch (RuntimeException error) { log("[monitor] " + key + ": " + error.getMessage()); }
         }
@@ -234,11 +234,11 @@ public class MonitorService {
     }
 
     /** Callback bundle: app-specific chart/setup/Telegram code remains outside the lifecycle core. */
-    public record Dependencies(TargetProvider listTargets, Evaluator evaluate, Notifier notify, StrategyLoader loadStrategy,
+    public record Dependencies(TargetProvider listTargets, Evaluator evaluate, Notifier notifier, StrategyLoader loadStrategy,
                                Consumer<String> log, EvidenceBuilder buildEvidence, ClosedTradeRecorder recordClosedTrade,
                                RetuneRunner runAutoRetune) {
-        public Dependencies(TargetProvider listTargets, Evaluator evaluate, Notifier notify, StrategyLoader loadStrategy) {
-            this(listTargets, evaluate, notify, loadStrategy, null, null, null, null);
+        public Dependencies(TargetProvider listTargets, Evaluator evaluate, Notifier notifier, StrategyLoader loadStrategy) {
+            this(listTargets, evaluate, notifier, loadStrategy, null, null, null, null);
         }
     }
     @FunctionalInterface public interface TargetProvider { List<Target> listTargets(); }

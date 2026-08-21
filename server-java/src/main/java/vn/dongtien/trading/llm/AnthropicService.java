@@ -148,7 +148,7 @@ public class AnthropicService {
         copy.remove("series");
         try {
             return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(copy);
-        } catch (IOException | RuntimeException exception) {
+        } catch (RuntimeException exception) {
             return String.valueOf(copy);
         }
     }

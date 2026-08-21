@@ -45,9 +45,8 @@
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-database-tidb</artifactId>
-      <!-- TiDB's community module is not one of the individual modules managed by Boot's BOM. -->
-      <version>${flyway.version}</version>
+      <!-- Flyway 12 gop TiDB vao module MySQL; flyway-database-tidb dung o 10.24.0. -->
+      <artifactId>flyway-mysql</artifactId>
     </dependency>
     <dependency>
       <groupId>com.mysql</groupId>

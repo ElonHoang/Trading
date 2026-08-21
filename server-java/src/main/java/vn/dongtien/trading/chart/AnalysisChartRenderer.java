@@ -297,7 +297,7 @@ public final class AnalysisChartRenderer {
             Color levelColor = "support".equals(kind) ? UP : DOWN;
             graphics.setColor(levelColor);
             graphics.setStroke(dashed((float) Math.min(2.5d, 1d + (number(level.get("touches")) == null ? 0d
-                    : Math.max(0d, number(level.get("touches")) - 1d) * .5d), 5, 4));
+                    : Math.max(0d, number(level.get("touches")) - 1d) * .5d)), 5, 4));
             graphics.draw(new Line2D.Double(PAD_LEFT, y, width - PAD_RIGHT, y));
             if (claim(usedRight, y, 11)) {
                 graphics.setColor(levelColor);

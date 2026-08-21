@@ -1,5 +1,6 @@
 package vn.dongtien.trading.data;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -45,6 +46,7 @@ public class AnnouncementService {
     private final Map<String, CacheEntry<List<Map<String, Object>>>> cache = new ConcurrentHashMap<>();
     private final Object cacheLock = new Object();
 
+    @Autowired
     public AnnouncementService(BinanceClient binance, ObjectMapper mapper) {
         this(binance, mapper, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
