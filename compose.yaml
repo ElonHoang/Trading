@@ -14,13 +14,18 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
       DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-5}
       DATABASE_MAX_LIFETIME_MS: ${DATABASE_MAX_LIFETIME_MS:-300000}
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      SESSION_TIMEOUT: ${SESSION_TIMEOUT:-8h}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      LOCAL_AUTH_ADMIN_USERNAME: ${LOCAL_AUTH_ADMIN_USERNAME:-}
+      LOCAL_AUTH_ADMIN_PASSWORD_HASH: ${LOCAL_AUTH_ADMIN_PASSWORD_HASH:-}
+      LOCAL_AUTH_VIEWER_USERNAME: ${LOCAL_AUTH_VIEWER_USERNAME:-}
+      LOCAL_AUTH_VIEWER_PASSWORD_HASH: ${LOCAL_AUTH_VIEWER_PASSWORD_HASH:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      TRADING_TIMEZONE: ${TRADING_TIMEZONE:-Asia/Bangkok}
+      TRADING_TIMEZONE: ${TRADING_TIMEZONE:-Asia/Ho_Chi_Minh}
     ports:
       - "${WEB_PORT:-8080}:8080"
     networks: [backend]
@@ -47,6 +52,14 @@ services:
       TELEGRAM_ALERT_CHAT_IDS: ${TELEGRAM_ALERT_CHAT_IDS:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       DEFAULT_INTERVAL: ${DEFAULT_INTERVAL:-4h}
+      TRADING_TIMEZONE: ${TRADING_TIMEZONE:-Asia/Ho_Chi_Minh}
+      # The scheduler belongs to this one persistent worker, never the web/Vercel process.
+      TRADING_LEARNING_SCHEDULER_ENABLED: ${TRADING_LEARNING_SCHEDULER_ENABLED:-true}
+      TRADING_DAILY_LEARNING_CRON: ${TRADING_DAILY_LEARNING_CRON:-0 7 8 * * *}
+      TRADING_WEEKLY_HISTORY_PURGE_CRON: ${TRADING_WEEKLY_HISTORY_PURGE_CRON:-0 37 8 * * MON}
+      TRADING_HISTORY_RETENTION_DAYS: ${TRADING_HISTORY_RETENTION_DAYS:-30}
+      TRADING_DAILY_MODEL_MAX_PAIRS: ${TRADING_DAILY_MODEL_MAX_PAIRS:-3}
+      TRADING_DAILY_MODEL_TRAINING_ENABLED: ${TRADING_DAILY_MODEL_TRAINING_ENABLED:-true}
     networks: [backend]
 
   import-files:
@@ -78,6 +91,35 @@ services:
       DATABASE_MAX_LIFETIME_MS: ${DATABASE_MAX_LIFETIME_MS:-300000}
     networks: [backend]
 
+  # Short-lived, interactive user-account importer. It is deliberately not a
+  # long-running bot and never exposes Telegram User API credentials to web.
+  telegram-history:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: [tools]
+    depends_on:
+      migrate-db:
+        condition: service_completed_successfully
+    command: ["java", "-jar", "/app/app.jar", "telegram-list-chats"]
+    stdin_open: true
+    tty: true
+    environment:
+      JDBC_DATABASE_URL: ${JDBC_DATABASE_URL:?Set JDBC_DATABASE_URL to the TiDB Cloud JDBC SSL URL in .env}
+      DATABASE_USER: ${DATABASE_USER:?Set DATABASE_USER to the TiDB Cloud user in .env}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+      DATABASE_MAX_LIFETIME_MS: ${DATABASE_MAX_LIFETIME_MS:-300000}
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_HISTORY_SESSION_DIR: /var/lib/dong-tien/telegram-history
+      TRADING_TIMEZONE: ${TRADING_TIMEZONE:-Asia/Ho_Chi_Minh}
+    volumes:
+      - telegram-history-session:/var/lib/dong-tien/telegram-history
+    networks: [backend]
+
 networks:
   backend:
     driver: bridge
+
+volumes:
+  telegram-history-session:

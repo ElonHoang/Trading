@@ -19,6 +19,7 @@ import java.util.Locale;
 @Service
 public class TradingPerformanceService {
     private static final String STATE_KEY = "data:auto-retune";
+    private static final String TELEGRAM_IMPORT_KEY = "data:telegram-imported-trades";
     private static final String STRATEGY_KEY = "config:strategy";
     private static final DateTimeFormatter DAY_LABEL = DateTimeFormatter.ofPattern("dd/MM");
     private static final DateTimeFormatter MONTH_LABEL = DateTimeFormatter.ofPattern("MM/yyyy");
@@ -32,7 +33,7 @@ public class TradingPerformanceService {
         this(
                 documents,
                 Clock.systemUTC(),
-                ZoneId.of(environment.getProperty("TRADING_TIMEZONE", "Asia/Bangkok"))
+                ZoneId.of(environment.getProperty("TRADING_TIMEZONE", "Asia/Ho_Chi_Minh"))
         );
     }
 
@@ -48,8 +49,11 @@ public class TradingPerformanceService {
         Window window = Window.forRange(range, now);
         Options options = readOptions();
         JsonNode state = documents.find(STATE_KEY).orElse(null);
-        boolean sourceAvailable = state != null;
-        List<Trade> trades = sourceAvailable ? readTrades(state) : List.of();
+        JsonNode telegramImported = documents.find(TELEGRAM_IMPORT_KEY).orElse(null);
+        boolean sourceAvailable = state != null || telegramImported != null;
+        List<Trade> trades = new ArrayList<>();
+        if (state != null) trades.addAll(readTrades(state));
+        if (telegramImported != null) trades.addAll(readTrades(telegramImported));
         List<MutablePoint> buckets = window.buckets();
 
         for (Trade trade : trades) {

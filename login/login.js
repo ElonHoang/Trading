@@ -1,9 +1,12 @@
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 let csrf = null;
+let passwordLoginEnabled = false;
+const loginError = params.get('error');
 
 function safeReturnTo(value) {
-  return value?.startsWith('/') && !value.startsWith('//') ? value : '/';
+  return value?.startsWith('/') && !value.startsWith('//') && !value.includes('\\')
+    && !/[\u0000-\u001F\u007F]/.test(value) ? value : '/';
 }
 
 const returnTo = safeReturnTo(params.get('returnTo'));
@@ -13,6 +16,7 @@ const messages = {
   invalid_state: 'Phiên đăng nhập đã hết hạn. Vui lòng thử lại.',
   missing_code: 'Nhà cung cấp không gửi mã xác nhận. Vui lòng thử lại.',
   oauth_failed: 'Không thể hoàn tất đăng nhập lúc này. Vui lòng thử lại sau.',
+  invalid_credentials: 'Tên đăng nhập hoặc mật khẩu không đúng. Vui lòng thử lại.',
 };
 
 function showNotice(message) {
@@ -32,11 +36,28 @@ function configureProvider(id, provider, enabled) {
   });
 }
 
+function configurePasswordLogin(enabled) {
+  passwordLoginEnabled = enabled;
+  const form = $('password-login-form');
+  form.setAttribute('aria-disabled', String(!enabled));
+  for (const control of form.querySelectorAll('input:not([type="hidden"]), button')) {
+    control.disabled = !enabled;
+  }
+  $('password-login-help').hidden = enabled;
+  $('password-login-return-to').value = returnTo;
+  if (csrf) {
+    $('password-login-csrf').name = csrf.parameterName || '_csrf';
+    $('password-login-csrf').value = csrf.token;
+  }
+}
+
 function showUser(user) {
   $('signed-out').hidden = true;
   $('signed-in').hidden = false;
   $('user-name').textContent = user.name || 'Xin chào';
-  $('user-email').textContent = user.email || `Đăng nhập bằng ${user.provider}`;
+  $('user-email').textContent = user.email || (user.provider === 'password'
+    ? 'Đăng nhập bằng tài khoản nội bộ'
+    : `Đăng nhập bằng ${user.provider}`);
   $('continue-button').href = returnTo;
   const avatar = $('user-avatar');
   if (user.avatar) avatar.src = user.avatar;
@@ -44,23 +65,35 @@ function showUser(user) {
 }
 
 async function init() {
-  const error = params.get('error');
-  if (error) showNotice(messages[error] || 'Đăng nhập không thành công. Vui lòng thử lại.');
+  if (loginError) showNotice(messages[loginError] || 'Đăng nhập không thành công. Vui lòng thử lại.');
 
   try {
     const response = await fetch('/api/auth/session', { headers: { accept: 'application/json' } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const session = await response.json();
     csrf = session.csrf || null;
+    configurePasswordLogin(session.providers.password);
     configureProvider('google-login', 'google', session.providers.google);
     configureProvider('github-login', 'github', session.providers.github);
+    if (loginError === 'invalid_credentials' && session.providers.password) $('username').focus();
     if (session.user) showUser(session.user);
   } catch {
+    configurePasswordLogin(false);
     configureProvider('google-login', 'google', false);
     configureProvider('github-login', 'github', false);
     showNotice('Không thể kết nối tới máy chủ đăng nhập. Vui lòng tải lại trang.');
   }
 }
+
+$('password-login-form').addEventListener('submit', (event) => {
+  if (!passwordLoginEnabled || !csrf) {
+    event.preventDefault();
+    showNotice('Đăng nhập bằng tên đăng nhập và mật khẩu chưa được cấu hình trên máy chủ.');
+    return;
+  }
+  $('password-login-submit').disabled = true;
+  $('password-login-label').textContent = 'Đang đăng nhập…';
+});
 
 $('logout-button').addEventListener('click', async () => {
   const button = $('logout-button');

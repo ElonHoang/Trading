@@ -15,6 +15,7 @@ import {
 } from './store.js';
 import { loadModel, saveModel, deleteModel, listModels } from './model-store.js';
 import { generateReport, askAbout, testApiKey } from './claude.js';
+import { canWrite, csrfFetch, getAuthSession } from './auth.js';
 
 const $ = (id) => document.getElementById(id);
 const NS = 'http://www.w3.org/2000/svg';
@@ -31,6 +32,9 @@ const state = {
   abort: null,
   performanceRange: 'week',
   performanceData: null,
+  auth: null,
+  canWrite: false,
+  profileAvatar: null,
 };
 
 // ---------- Tiện ích ----------
@@ -938,13 +942,19 @@ async function runAnalyze() {
     const symbol = await selectedSymbol();
     state.symbol = symbol;
     state.interval = interval;
-    state.strategy = await loadStrategy();
-    const response = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-      body: JSON.stringify({ symbol, interval, bars: 180, strategy: state.strategy }),
-    });
+    let response;
+    if (state.canWrite) {
+      state.strategy = await loadStrategy();
+      response = await csrfFetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ symbol, interval, bars: 180, strategy: state.strategy }),
+      });
+    } else {
+      const params = new URLSearchParams({ symbol, interval, bars: '180' });
+      response = await fetch(`/api/analyze?${params}`, { cache: 'no-store' });
+    }
     const snap = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(snap.error || `HTTP ${response.status}`);
     renderAll(snap);
@@ -1562,12 +1572,62 @@ function updateKeyStatus() {
   $('ai-key-chip').className = `chip ${has ? 'ok' : 'warn'}`;
 }
 
-async function updateAuthStatus() {
+function initials(name) {
+  const words = String(name || 'Tài khoản').trim().split(/\s+/).filter(Boolean);
+  return words.slice(0, 2).map((word) => word[0]).join('').toLocaleUpperCase('vi-VN') || '?';
+}
+
+function renderSideAvatar(avatar, name) {
+  const host = $('side-avatar');
+  clear(host);
+  if (!avatar) {
+    host.textContent = initials(name);
+    return;
+  }
+  const image = document.createElement('img');
+  image.alt = '';
+  image.src = avatar;
+  image.addEventListener('error', () => {
+    clear(host);
+    host.textContent = initials(name);
+  }, { once: true });
+  host.appendChild(image);
+}
+
+function renderProfileAvatar(avatar, name) {
+  const image = $('profile-avatar-image');
+  const fallback = $('profile-avatar-fallback');
+  if (!avatar) {
+    image.hidden = true;
+    image.removeAttribute('src');
+    fallback.hidden = false;
+    fallback.textContent = initials(name);
+    return;
+  }
+  fallback.hidden = true;
+  image.hidden = false;
+  image.src = avatar;
+  image.onerror = () => {
+    image.hidden = true;
+    image.removeAttribute('src');
+    fallback.hidden = false;
+    fallback.textContent = initials(name);
+  };
+}
+
+function syncProfileEditor(session) {
+  const user = session?.user;
+  if (!user) return;
+  state.profileAvatar = user.avatar || null;
+  $('profile-display-name').value = user.name || '';
+  $('profile-avatar-input').value = '';
+  renderProfileAvatar(state.profileAvatar, user.name);
+}
+
+async function updateAuthStatus(session = null) {
   const link = $('auth-link');
   try {
-    const response = await fetch('/api/auth/session', { headers: { accept: 'application/json' } });
-    if (!response.ok) return;
-    const { user } = await response.json();
+    const { user } = session || await getAuthSession();
     if (!user) return;
     link.textContent = '';
     if (user.avatar) {
@@ -1577,8 +1637,110 @@ async function updateAuthStatus() {
       link.appendChild(avatar);
     }
     link.appendChild(document.createTextNode(user.name || 'Tài khoản'));
+    link.setAttribute('href', '#profile');
     link.setAttribute('aria-label', `Tài khoản: ${user.name || user.email || ''}`);
+    $('side-user-name').textContent = user.name || 'Tài khoản';
+    renderSideAvatar(user.avatar, user.name);
   } catch { /* Dashboard vẫn hoạt động nếu API xác thực chưa sẵn sàng. */ }
+}
+
+function setProfileStatus(message, kind = 'muted') {
+  const status = $('profile-status');
+  status.textContent = message;
+  status.className = `small ${kind}`;
+}
+
+function initSidebar() {
+  for (const button of document.querySelectorAll('[data-open-tab]')) {
+    button.addEventListener('click', () => {
+      switchTab(button.dataset.openTab);
+      $('workspace').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  $('side-logout').addEventListener('click', async () => {
+    const button = $('side-logout');
+    button.disabled = true;
+    try {
+      const response = await csrfFetch('/auth/logout', { method: 'POST' });
+      if (!response.ok) throw new Error('Không thể đăng xuất. Vui lòng thử lại.');
+      location.assign('/login/');
+    } catch (error) {
+      button.disabled = false;
+      showBanner(error.message);
+    }
+  });
+}
+
+function initProfileEditor() {
+  const avatarInput = $('profile-avatar-input');
+  const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
+  avatarInput.addEventListener('change', () => {
+    const file = avatarInput.files?.[0];
+    if (!file) return;
+    if (!allowedTypes.has(file.type) || file.size > 500 * 1024) {
+      avatarInput.value = '';
+      setProfileStatus('Ảnh phải là PNG, JPEG, WebP hoặc GIF và không quá 500 KB.', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      state.profileAvatar = String(reader.result || '');
+      renderProfileAvatar(state.profileAvatar, $('profile-display-name').value);
+      setProfileStatus('Ảnh mới đã sẵn sàng để lưu.');
+    });
+    reader.addEventListener('error', () => setProfileStatus('Không thể đọc ảnh đã chọn.', 'error'));
+    reader.readAsDataURL(file);
+  });
+
+  $('profile-remove-avatar').addEventListener('click', () => {
+    state.profileAvatar = null;
+    avatarInput.value = '';
+    renderProfileAvatar(null, $('profile-display-name').value);
+    setProfileStatus('Ảnh đại diện sẽ được gỡ khi bạn lưu.');
+  });
+
+  $('profile-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const displayName = $('profile-display-name').value.trim();
+    if (displayName.length < 2 || displayName.length > 80) {
+      setProfileStatus('Tên hiển thị cần có từ 2 đến 80 ký tự.', 'error');
+      return;
+    }
+
+    const button = $('profile-save');
+    button.disabled = true;
+    setProfileStatus('Đang lưu…');
+    try {
+      const response = await csrfFetch('/api/auth/profile', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ displayName, avatar: state.profileAvatar }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.user) {
+        throw new Error(payload?.error || 'Không thể lưu thông tin. Vui lòng thử lại.');
+      }
+      state.auth = { ...state.auth, user: payload.user };
+      syncProfileEditor(state.auth);
+      await updateAuthStatus(state.auth);
+      setProfileStatus('Đã lưu thay đổi.', 'ok');
+    } catch (error) {
+      setProfileStatus(error.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+function applyAuthorization(session) {
+  state.auth = session;
+  state.canWrite = canWrite(session);
+  document.body.dataset.canWrite = String(state.canWrite);
+  for (const element of document.querySelectorAll('[data-admin-only]')) {
+    element.hidden = !state.canWrite;
+  }
 }
 
 // ---------- Tabs & khởi động ----------
@@ -1604,7 +1766,21 @@ function applyTheme(mode) {
 
 async function init() {
   try { applyTheme(localStorage.getItem('ta.theme') || ''); } catch { /* bỏ qua */ }
-  updateAuthStatus();
+  try {
+    const session = await getAuthSession();
+    if (!session.user) {
+      location.assign(`/login/?${new URLSearchParams({ returnTo: location.pathname + location.search })}`);
+      return;
+    }
+    applyAuthorization(session);
+    await updateAuthStatus(session);
+    syncProfileEditor(session);
+    initSidebar();
+    initProfileEditor();
+  } catch (err) {
+    showBanner(err.message);
+    return;
+  }
   loadTradingPerformance();
 
   const sel = $('interval');
@@ -1659,7 +1835,7 @@ async function init() {
     }, 150);
   });
 
-  initSettingsPanel();
+  if (state.canWrite) initSettingsPanel();
   await runAnalyze();
 }
 

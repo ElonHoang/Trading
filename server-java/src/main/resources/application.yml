@@ -27,11 +27,11 @@ server:
   forward-headers-strategy: framework
   servlet:
     session:
-      timeout: 7d
+      timeout: ${SESSION_TIMEOUT:8h}
       cookie:
         http-only: true
         same-site: lax
-        secure: ${SESSION_COOKIE_SECURE:false}
+        secure: ${SESSION_COOKIE_SECURE:true}
 
 logging:
   level:
@@ -48,3 +48,13 @@ dongtien:
   anthropic:
     api-key: ${ANTHROPIC_API_KEY:}
     model: ${ANTHROPIC_MODEL:claude-sonnet-4-20250514}
+  learning:
+    scheduler:
+      # This remains off unless the persistent bot worker explicitly enables it.
+      enabled: ${TRADING_LEARNING_SCHEDULER_ENABLED:false}
+      zone: ${TRADING_TIMEZONE:Asia/Ho_Chi_Minh}
+      daily-cron: ${TRADING_DAILY_LEARNING_CRON:0 7 8 * * *}
+      weekly-purge-cron: ${TRADING_WEEKLY_HISTORY_PURGE_CRON:0 37 8 * * MON}
+      history-retention-days: ${TRADING_HISTORY_RETENTION_DAYS:30}
+      max-model-pairs: ${TRADING_DAILY_MODEL_MAX_PAIRS:3}
+      model-training-enabled: ${TRADING_DAILY_MODEL_TRAINING_ENABLED:true}

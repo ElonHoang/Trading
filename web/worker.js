@@ -1,10 +1,12 @@
 // The expensive jobs now run in the Java runtime.  Keep the Worker boundary so
 // the UI protocol stays stable and a slow request never blocks rendering.
 
+import { csrfFetch } from './auth.js';
+
 const post = (type, payload) => self.postMessage({ type, ...payload });
 
 async function request(path, body) {
-  const response = await fetch(path, {
+  const response = await csrfFetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

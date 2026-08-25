@@ -22,6 +22,27 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
+  <!-- User-authorized Telegram history access is isolated in a CLI command. -->
+  <repositories>
+    <repository>
+      <id>mchv</id>
+      <name>MCHV Apache Maven Packages</name>
+      <url>https://mvn.mchv.eu/repository/mchv/</url>
+    </repository>
+  </repositories>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>it.tdlight</groupId>
+        <artifactId>tdlight-java-bom</artifactId>
+        <version>3.5.4+td.1.8.66</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -52,6 +73,21 @@
       <groupId>com.mysql</groupId>
       <artifactId>mysql-connector-j</artifactId>
       <scope>runtime</scope>
+    </dependency>
+    <!-- Kept out of web/bot execution paths; initialized only by Telegram history CLI commands. -->
+    <dependency>
+      <groupId>it.tdlight</groupId>
+      <artifactId>tdlight-java</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>it.tdlight</groupId>
+      <artifactId>tdlight-natives</artifactId>
+      <classifier>linux_amd64_gnu_ssl3</classifier>
+    </dependency>
+    <dependency>
+      <groupId>it.tdlight</groupId>
+      <artifactId>tdlight-natives</artifactId>
+      <classifier>windows_amd64</classifier>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>

@@ -175,6 +175,8 @@
 </div>
 
 <script type="module">
+import { canWrite as sessionCanWrite, csrfFetch, getAuthSession } from '/web/auth.js';
+
 // Cùng bộ vẽ mà bot Telegram dùng để xuất PNG -> chart trên web và trên bot giống nhau.
 // Browser-only chart helpers. The former shared Node module is now rendered by
 // Java for Telegram PNGs; this lightweight canvas renderer keeps /realtime/
@@ -243,6 +245,7 @@ let snap = null;      // snapshot từ /api/analyze
 let candles = [];     // nến dựng từ snap.series, nến cuối được WebSocket cập nhật
 let hover = null;
 let prevPrice = null;
+let canWrite = false;
 
 const GROUP_LABELS = {
   cvd: 'CVD', volume: 'Khối lượng', derivatives: 'Phái sinh (OI + funding)', positioning: 'Định vị đám đông',
@@ -608,8 +611,8 @@ function applyTicker(d) {
 async function loadWatchlist(list) {
   const items = list ?? await (await fetch('/api/watchlist')).json();
   els.watchlist.innerHTML = items.length
-    ? items.map((s) => `<span class="chip"><span data-load="${s}">${s}</span><button data-del="${s}" title="Bỏ theo dõi">×</button></span>`).join('')
-    : '<span style="color:var(--muted);font-size:13px">Chưa theo dõi mã nào. Bấm “+ Theo dõi” để thêm.</span>';
+    ? items.map((s) => `<span class="chip"><span data-load="${s}">${s}</span>${canWrite ? `<button data-del="${s}" title="Bỏ theo dõi">×</button>` : ''}</span>`).join('')
+    : `<span style="color:var(--muted);font-size:13px">${canWrite ? 'Chưa theo dõi mã nào. Bấm “+ Theo dõi” để thêm.' : 'Chưa có mã nào được theo dõi.'}</span>`;
 }
 
 els.watchlist.addEventListener('click', async (e) => {
@@ -618,13 +621,14 @@ els.watchlist.addEventListener('click', async (e) => {
   if (load) {
     els.symbol.value = load;
     run();
-  } else if (del) {
-    loadWatchlist(await (await fetch(`/api/watchlist/${del}`, { method: 'DELETE' })).json());
+  } else if (del && canWrite) {
+    loadWatchlist(await (await csrfFetch(`/api/watchlist/${del}`, { method: 'DELETE' })).json());
   }
 });
 
 els.save.addEventListener('click', async () => {
-  const res = await fetch('/api/watchlist', {
+  if (!canWrite) return;
+  const res = await csrfFetch('/api/watchlist', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ symbol: els.symbol.value }),
@@ -711,6 +715,9 @@ document.addEventListener('visibilitychange', () => {
 const intervals = await (await fetch('/api/intervals')).json();
 els.interval.innerHTML = intervals
   .map((iv) => `<option value="${iv}"${iv === '4h' ? ' selected' : ''}>${iv}</option>`).join('');
+const session = await getAuthSession();
+canWrite = sessionCanWrite(session);
+if (!canWrite) els.save.hidden = true;
 await loadWatchlist();
 run();
 </script>

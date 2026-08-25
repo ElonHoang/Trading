@@ -38,6 +38,32 @@ public class ModelTrainer {
     }
 
     public JsonNode train(String symbol, String interval, JsonNode strategy) {
+        ObjectNode payload = trainCandidate(symbol, interval, strategy);
+        models.save(symbol, interval, payload);
+        return payload;
+    }
+
+    /**
+     * Trains a fresh market model without replacing a reliable active model
+     * unless the candidate is at least as good on holdout quality metrics.
+     */
+    public PromotionResult trainIfReliable(String symbol, String interval, JsonNode strategy) {
+        ObjectNode candidate = trainCandidate(symbol, interval, strategy);
+        JsonNode current = models.load(symbol, interval);
+        double minimumAuc = clamp(strategy.path("ml").path("minTestAuc").asDouble(.52), .5, .99);
+        double candidateAuc = metric(candidate, "test", "auc");
+        double currentAuc = metric(current, "test", "auc");
+        boolean candidateReliable = reliable(candidate, minimumAuc);
+        boolean currentReliable = reliable(current, minimumAuc);
+        boolean accepted = candidateReliable && (!currentReliable || candidateAuc >= currentAuc);
+        if (accepted) models.save(symbol, interval, candidate);
+        String status = accepted ? "promoted" : candidateReliable ? "kept-current-model" : "rejected-quality";
+        return new PromotionResult(symbol, interval, status, accepted,
+                finiteOrNull(candidateAuc), finiteOrNull(metric(candidate, "walkForward", "meanAuc")),
+                finiteOrNull(currentAuc), current == null ? null : current.path("trainedAt").asText(null), null);
+    }
+
+    private ObjectNode trainCandidate(String symbol, String interval, JsonNode strategy) {
         if (!BinanceClient.INTERVAL_MS.containsKey(interval)) {
             throw new IllegalArgumentException("Khung thời gian không hợp lệ: " + interval);
         }
@@ -121,9 +147,22 @@ public class ModelTrainer {
         stopping.put("maxTrees", treeCount);
         payload.set("calibration", calibration(testProbabilities));
         payload.set("importance", importance(model));
-        models.save(symbol, interval, payload);
         return payload;
     }
+
+    private static double metric(JsonNode model, String group, String field) {
+        if (model == null) return Double.NaN;
+        return model.path("metrics").path(group).path(field).asDouble(Double.NaN);
+    }
+
+    private static boolean reliable(JsonNode model, double minimumAuc) {
+        double auc = metric(model, "test", "auc");
+        double walkForward = metric(model, "walkForward", "meanAuc");
+        return Double.isFinite(auc) && auc >= minimumAuc
+                && (!Double.isFinite(walkForward) || walkForward >= minimumAuc - .02);
+    }
+
+    private static Double finiteOrNull(double value) { return Double.isFinite(value) ? value : null; }
 
     /** -2 neutral/no barrier, -1 ambiguous barrier, 0 down, 1 up. */
     private static int label(List<Candle> candles, int index, int horizon, double threshold, String mode) {
@@ -355,6 +394,14 @@ public class ModelTrainer {
         if (!Double.isFinite(value)) return 0;
         double scale = Math.pow(10, places);
         return Math.round(value * scale) / scale;
+    }
+
+    public record PromotionResult(String symbol, String interval, String status, boolean promoted,
+                                  Double candidateTestAuc, Double candidateWalkForwardAuc,
+                                  Double previousTestAuc, String previousTrainedAt, String error) {
+        public static PromotionResult failed(String symbol, String interval, String error) {
+            return new PromotionResult(symbol, interval, "failed", false, null, null, null, null, error);
+        }
     }
 
     private record Split(int feature, double threshold, double left, double right, double loss) {}

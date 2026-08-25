@@ -11,6 +11,8 @@ class ReturnPathTest {
         assertThat(ReturnPath.safe("/realtime/")).isEqualTo("/realtime/");
         assertThat(ReturnPath.safe("https://example.com")).isEqualTo("/");
         assertThat(ReturnPath.safe("//example.com")).isEqualTo("/");
+        assertThat(ReturnPath.safe("/\\example.com")).isEqualTo("/");
+        assertThat(ReturnPath.safe("/\nexample.com")).isEqualTo("/");
         assertThat(ReturnPath.safe(null)).isEqualTo("/");
     }
 }

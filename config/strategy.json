@@ -173,6 +173,8 @@
     "_note": "Học lại từ kèo đã dính SL mà CHƯA chốt được TP1 ('stopped'; chạm TP1 rồi mới về entry là 'breakeven', KHÔNG tính là thua và không đem đi mổ xẻ). Neo vào BÁO CÁO TỔNG HỢP CUỐI NGÀY, không phải vào từng lần dính SL: báo cáo hiện ra thì có pauseAfterReviewMinutes phút soi lại các kèo thua, trong khoảng đó không mở kèo mới. Bản rà soát phát lại từng kèo trên nến thật để phân loại nguyên nhân, và KHÔNG tự đổi cấu hình — nó chỉ nói nên đem hướng nào đi backtest.",
     "enabled": true,
     "dailyLossLogEnabled": true,
+    "_noteDailyModelTraining": "Worker bot se train lai model thi truong cho toi da 3 cap co keo da dong trong ngay. Model moi chi duoc thay neu dat nguong AUC holdout va khong kem hon model dang dung.",
+    "dailyModelTrainingEnabled": true,
     "dailyLossLogHistoryDays": 7,
     "_noteDailyLossLog": "Vòng quét chỉ ghi kèo stopped trước TP1 của đúng từng ngày vào lossLogs trong auto-retune state. Chu kỳ tuần tính theo giờ Việt Nam và bắt đầu thứ Hai: lần ghi đầu tuần mới tự xóa toàn bộ log tuần trước rồi ghi lại từ đầu; trong tuần giữ tối đa 7 ngày. Không backtest, không sinh candidate, không sửa chỉ số. Bản còn 'chưa đủ nến' được phát lại vào ngày sau để khung 4h có thêm dữ liệu.",
     "_notePause": "Chặn MỞ kèo mới, không chặn theo dõi kèo đang chạy — dừng theo dõi thì kèo đang mở mất người canh, nguy hiểm hơn thứ cửa này định phòng. reviewAtUtc phải khớp cron của Trading-runner/.github/workflows/daily-review.yml ('7 1 * * *' = 01:07 UTC = 08:07 giờ VN); lệch thì cửa mở sai lúc. Cửa suy ra từ đồng hồ, không lưu trạng thái, vì bản rà soát chạy --no-write nên không có đường ghi lại 'tôi vừa báo cáo xong'.",

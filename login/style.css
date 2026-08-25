@@ -162,6 +162,48 @@ a { color: inherit; }
   line-height: 1.45;
 }
 
+.credentials-form { display: grid; gap: 15px; }
+.form-field { display: grid; gap: 7px; }
+.form-field label { color: #4d4f49; font-size: 12px; font-weight: 700; }
+.form-field input {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 14px;
+  border: 1px solid #cfd0c9;
+  border-radius: 10px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.form-field input:hover { border-color: #adafa7; }
+.form-field input:focus { border-color: #92958b; box-shadow: 0 0 0 3px rgba(172, 213, 40, .25); }
+.credentials-submit {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 12px;
+  color: #11110e;
+  background: var(--lime);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 150ms ease, transform 150ms ease;
+}
+.credentials-submit:hover { background: var(--lime-dark); transform: translateY(-1px); }
+.credentials-submit:focus-visible { outline: 3px solid rgba(172, 213, 40, .5); outline-offset: 3px; }
+.credentials-form[aria-disabled="true"] { opacity: .52; }
+.credentials-form[aria-disabled="true"] .credentials-submit { cursor: not-allowed; transform: none; }
+.password-login-help { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.auth-divider { display: flex; align-items: center; gap: 13px; margin: 24px 0 18px; color: #969890; font-size: 11px; }
+.auth-divider::before, .auth-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+
 .providers { display: grid; gap: 12px; }
 
 .provider-button {

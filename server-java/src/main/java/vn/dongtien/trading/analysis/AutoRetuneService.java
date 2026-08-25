@@ -44,15 +44,17 @@ public class AutoRetuneService {
     private final BinanceClient binance;
     private final BacktestService backtest;
     private final StrategyService strategies;
+    private final TradingStateLock stateLock;
 
     public AutoRetuneService(DocumentStore documents, ObjectMapper mapper, AnalysisService analysis, BinanceClient binance,
-                             BacktestService backtest, StrategyService strategies) {
+                             BacktestService backtest, StrategyService strategies, TradingStateLock stateLock) {
         this.documents = documents;
         this.mapper = mapper;
         this.analysis = analysis;
         this.binance = binance;
         this.backtest = backtest;
         this.strategies = strategies;
+        this.stateLock = stateLock;
     }
 
     /** Loads and normalizes the shared JSON state without dropping unknown fields. */
@@ -66,7 +68,7 @@ public class AutoRetuneService {
     public ObjectNode readAutoRetuneState() { return readState(); }
 
     public void saveState(JsonNode state) {
-        documents.put(STATE_KEY, state == null ? emptyState() : state);
+        stateLock.runLocked(() -> documents.put(STATE_KEY, state == null ? emptyState() : state));
     }
 
     public void saveAutoRetuneState(JsonNode state) { saveState(state); }
@@ -153,6 +155,10 @@ public class AutoRetuneService {
 
     /** Saves one completed trade and returns its persisted state plus its SL streak. */
     public Map<String, Object> recordClosedTrade(JsonNode call, JsonNode result, JsonNode snapshot, int historyLimit) {
+        return stateLock.withLock(() -> recordClosedTradeLocked(call, result, snapshot, historyLimit));
+    }
+
+    private Map<String, Object> recordClosedTradeLocked(JsonNode call, JsonNode result, JsonNode snapshot, int historyLimit) {
         ObjectNode state = readState();
         String interval = ReviewSupport.text(call == null ? null : call.get("interval"),
                 ReviewSupport.text(snapshot == null ? null : snapshot.get("interval"), ""));
@@ -193,18 +199,32 @@ public class AutoRetuneService {
         else storedResult.putArray("hitTps");
         copyOrNull(storedResult, "bars", result == null ? null : result.get("bars"));
         copyOrNull(storedResult, "lastPrice", result == null ? null : result.get("lastPrice"));
+        boolean reachedTp1 = "target".equals(status) || (storedResult.path("hitTps").isArray() && !storedResult.path("hitTps").isEmpty());
+        storedResult.put("outcome", reachedTp1 ? "win" : "stopped".equals(status) ? "loss" : "neutral");
         copyOrNull(trade, "evidence", call == null ? null : call.get("evidence"));
 
         ArrayNode trades = (ArrayNode) state.path("trades");
-        trades.add(trade);
+        ObjectNode persisted = findById(trades, trade.path("id").asText());
+        boolean recorded = persisted == null;
+        if (recorded) trades.add(trade);
+        else trade = persisted;
         int limit = Math.max(20, historyLimit > 0 ? historyLimit : 200);
         trimToLast(trades, limit);
         saveState(state);
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("state", state);
         output.put("trade", trade);
+        output.put("recorded", recorded);
         output.put("streak", stopLossStreak(trades));
         return output;
+    }
+
+    private static ObjectNode findById(ArrayNode trades, String id) {
+        if (id == null || id.isBlank()) return null;
+        for (JsonNode item : trades) {
+            if (item.isObject() && id.equals(item.path("id").asText())) return (ObjectNode) item;
+        }
+        return null;
     }
 
     public Map<String, Object> recordClosedTrade(JsonNode call, JsonNode result, JsonNode snapshot) {

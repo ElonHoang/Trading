@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Đăng nhập vào AI phân tích kỹ thuật bằng Google hoặc GitHub.">
+  <meta name="description" content="Đăng nhập vào AI phân tích kỹ thuật bằng tài khoản, Google hoặc GitHub.">
   <title>Đăng nhập · Dòng Tiền AI</title>
   <link rel="stylesheet" href="/login/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%2311100e'/><path d='M8 20l5-5 4 3 7-8' fill='none' stroke='%23d7ff57' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>">
@@ -71,6 +71,31 @@
 
           <div id="notice" class="notice" role="alert" hidden></div>
 
+          <form class="credentials-form" id="password-login-form" action="/auth/login" method="post" aria-describedby="password-login-help">
+            <input id="password-login-csrf" name="_csrf" type="hidden">
+            <input id="password-login-return-to" name="returnTo" type="hidden">
+
+            <div class="form-field">
+              <label for="username">Tên đăng nhập</label>
+              <input id="username" name="username" type="text" autocomplete="username" spellcheck="false" required aria-describedby="password-login-help">
+            </div>
+
+            <div class="form-field">
+              <label for="password">Mật khẩu</label>
+              <input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="password-login-help">
+            </div>
+
+            <button class="credentials-submit" id="password-login-submit" type="submit">
+              <span id="password-login-label">Đăng nhập</span>
+              <span aria-hidden="true">→</span>
+            </button>
+          </form>
+          <p class="password-login-help" id="password-login-help" hidden>Đăng nhập bằng tài khoản nội bộ chưa được bật trên máy chủ.</p>
+
+          <div class="auth-divider" role="separator" aria-label="Hoặc đăng nhập bằng">
+            <span>hoặc</span>
+          </div>
+
           <div class="providers" aria-label="Các phương thức đăng nhập">
             <a class="provider-button" id="google-login" href="/auth/google">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -90,7 +115,7 @@
             </a>
           </div>
 
-          <p class="terms">Đăng nhập được bảo vệ bởi OAuth 2.0. Ứng dụng không nhận hoặc lưu mật khẩu Google/GitHub của bạn.</p>
+          <p class="terms">Ứng dụng không lưu mật khẩu bạn nhập và không nhận mật khẩu Google/GitHub của bạn.</p>
         </div>
 
         <div id="signed-in" class="signed-in" hidden>

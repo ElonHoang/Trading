@@ -2,6 +2,7 @@ package vn.dongtien.trading.runtime;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 import vn.dongtien.auth.TradingPerformanceService;
@@ -18,9 +19,14 @@ import vn.dongtien.trading.llm.AnthropicService;
 import vn.dongtien.trading.ml.ModelTrainer;
 import vn.dongtien.trading.model.ModelStore;
 import vn.dongtien.trading.telegram.TelegramBotService;
+import vn.dongtien.trading.telegram.TelegramCallHistoryParser;
+import vn.dongtien.trading.telegram.TelegramHistoryClient;
+import vn.dongtien.trading.telegram.TelegramHistoryImportService;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
@@ -42,18 +48,24 @@ public class TradingCommandRunner implements ApplicationRunner {
     private final AutoRetuneService autoRetune;
     private final ResearchService research;
     private final AnthropicService anthropic;
+    private final TelegramHistoryClient telegramHistory;
+    private final TelegramHistoryImportService telegramImports;
+    private final Environment environment;
 
     public TradingCommandRunner(ObjectMapper mapper, BinanceClient binance, StrategyService strategies,
                                 TradingUniverse universe, AnalysisService analysis, BacktestService backtest,
                                 ModelTrainer trainer, ModelStore models, ImportFilesService importer,
                                 TelegramBotService telegram, TradingPerformanceService performance,
                                 DailyReviewService dailyReviews, DailyLossLogService dailyLossLogs,
-                                AutoRetuneService autoRetune, ResearchService research, AnthropicService anthropic) {
+                                AutoRetuneService autoRetune, ResearchService research, AnthropicService anthropic,
+                                TelegramHistoryClient telegramHistory, TelegramHistoryImportService telegramImports,
+                                Environment environment) {
         this.mapper = mapper; this.binance = binance; this.strategies = strategies; this.universe = universe;
         this.analysis = analysis; this.backtest = backtest; this.trainer = trainer; this.models = models;
         this.importer = importer; this.telegram = telegram; this.performance = performance;
         this.dailyReviews = dailyReviews; this.dailyLossLogs = dailyLossLogs; this.autoRetune = autoRetune;
         this.research = research; this.anthropic = anthropic;
+        this.telegramHistory = telegramHistory; this.telegramImports = telegramImports; this.environment = environment;
     }
 
     @Override
@@ -123,6 +135,29 @@ public class TradingCommandRunner implements ApplicationRunner {
             case "migrate" -> System.out.println("Database migrations completed by Flyway.");
             case "alerts-once" -> telegram.sendAlertsOnce();
             case "bot" -> telegram.runForever();
+            case "telegram-list-chats" -> {
+                List<Map<String, Object>> chats = telegramHistory.listChats().stream()
+                        .map(TelegramHistoryClient.ChatSummary::asMap).toList();
+                print(Map.of("chats", chats, "count", chats.size(),
+                        "note", "Chon mot id va chay telegram-import-history --chat-id=<id>."));
+            }
+            case "telegram-import-history" -> {
+                long chatId = requiredLongOption(arguments, "chat-id");
+                ZoneId zone = ZoneId.of(environment.getProperty("TRADING_TIMEZONE", "Asia/Ho_Chi_Minh"));
+                LocalDate date = LocalDate.parse(option(arguments, "date", LocalDate.now(zone).minusDays(1).toString()));
+                int lookbackDays = boundedIntOption(arguments, "lookback-days", 14, 1, 90);
+                int maxMessages = boundedIntOption(arguments, "max-messages", 3_000, 100, 10_000);
+                List<TelegramCallHistoryParser.HistoryMessage> messages = telegramHistory.history(
+                        chatId, date, zone, lookbackDays, maxMessages);
+                TelegramCallHistoryParser.ParseResult parsed = new TelegramCallHistoryParser().parse(chatId, date, zone, messages);
+                Map<String, Object> output = new java.util.LinkedHashMap<>(telegramImports.store(parsed, arguments.containsOption("apply")).asMap());
+                output.put("date", date.toString());
+                output.put("mode", arguments.containsOption("apply") ? "apply" : "dry-run");
+                output.put("message", arguments.containsOption("apply")
+                        ? "Chi cac keo nhan dang duoc moi duoc luu; du lieu Telegram khong duoc dua vao training."
+                        : "Dry-run: chua ghi database. Them --apply sau khi kiem tra ket qua.");
+                print(output);
+            }
             default -> throw new IllegalArgumentException("Lệnh Java không hợp lệ: " + command);
         }
     }
@@ -134,6 +169,22 @@ public class TradingCommandRunner implements ApplicationRunner {
     private static String option(ApplicationArguments arguments, String name, String fallback) {
         List<String> values = arguments.getOptionValues(name);
         return values == null || values.isEmpty() || values.get(0).isBlank() ? fallback : values.get(0);
+    }
+    private static long requiredLongOption(ApplicationArguments arguments, String name) {
+        String value = option(arguments, name, null);
+        if (value == null) throw new IllegalArgumentException("Thieu --" + name + "=<gia-tri>");
+        try { return Long.parseLong(value); }
+        catch (NumberFormatException exception) { throw new IllegalArgumentException("--" + name + " phai la so nguyen", exception); }
+    }
+    private static int boundedIntOption(ApplicationArguments arguments, String name, int fallback, int min, int max) {
+        String value = option(arguments, name, Integer.toString(fallback));
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed < min || parsed > max) throw new IllegalArgumentException("--" + name + " phai nam trong " + min + ".." + max);
+            return parsed;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("--" + name + " phai la so nguyen", exception);
+        }
     }
     private void print(Object value) throws Exception { System.out.println(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(value)); }
     private static Path repositoryRoot() {

@@ -10,13 +10,44 @@
 </head>
 <body>
 
+<div class="app-shell">
+  <aside class="side-nav" aria-label="Điều hướng chính">
+    <a class="side-brand" href="#dashboard" aria-label="Dòng Tiền AI - trang tổng quan">Dòng Tiền AI</a>
+    <nav class="side-nav-links">
+      <p class="side-nav-label">Phân tích</p>
+      <a href="#dashboard">Tổng quan</a>
+      <a href="#performance">Hiệu suất giao dịch</a>
+      <a href="#market">Thị trường</a>
+      <a href="#signals">Dòng tiền &amp; tín hiệu</a>
+
+      <p class="side-nav-label">Công cụ</p>
+      <button type="button" data-open-tab="tab-ai">Báo cáo AI</button>
+      <button type="button" data-open-tab="tab-train">Huấn luyện ML</button>
+      <button type="button" data-open-tab="tab-backtest">Backtest</button>
+      <button type="button" data-open-tab="tab-config">Cấu hình</button>
+      <button type="button" data-open-tab="tab-prompt">System prompt</button>
+      <button type="button" data-open-tab="tab-settings">Cài đặt AI</button>
+    </nav>
+    <div class="side-account">
+      <a class="side-profile-link" href="#profile">
+        <span class="side-avatar" id="side-avatar" aria-hidden="true"></span>
+        <span>
+          <strong id="side-user-name">Tài khoản</strong>
+          <small>Chỉnh sửa thông tin</small>
+        </span>
+      </a>
+      <button class="side-logout" id="side-logout" type="button">Đăng xuất</button>
+    </div>
+  </aside>
+
+  <div class="app-content">
 <header>
   <h1>AI phân tích kỹ thuật</h1>
   <div class="controls analysis-controls">
     <input type="text" id="symbol" value="BTC" placeholder="BTC" aria-label="Mã token" autocomplete="off">
     <select id="interval" aria-label="Khung thời gian"></select>
     <button class="primary" id="btn-analyze">Phân tích</button>
-    <button id="btn-ai">Phân tích bằng AI</button>
+    <button id="btn-ai" data-admin-only hidden>Phân tích bằng AI</button>
   </div>
   <div class="spacer"></div>
   <div class="controls account-controls">
@@ -26,10 +57,10 @@
   </div>
 </header>
 
-<main>
+<main id="dashboard">
   <div id="banner" class="banner hidden"></div>
 
-  <section class="card">
+  <section class="card" id="admin-tools" data-admin-only hidden>
     <div class="hero">
       <div>
         <div class="signal-label" id="signal-label">
@@ -54,7 +85,7 @@
     <ul class="notes" id="conflicts"></ul>
   </section>
 
-  <section class="card performance-card" aria-labelledby="performance-title">
+  <section class="card performance-card" id="performance" aria-labelledby="performance-title">
     <div class="performance-head">
       <div>
         <h2 id="performance-title">Hiệu suất dòng tiền</h2>
@@ -86,7 +117,7 @@
     <p class="performance-note" id="performance-note"></p>
   </section>
 
-  <div class="market-layout">
+  <div class="market-layout" id="market">
     <section class="card price-card">
       <h2>Giá &amp; vùng hỗ trợ/kháng cự</h2>
       <p class="sub" id="price-chart-sub">—</p>
@@ -116,7 +147,7 @@
     </aside>
   </div>
 
-  <div class="analysis-layout">
+  <div class="analysis-layout" id="signals">
     <section class="card flow-card">
       <h2>Dòng tiền chủ động</h2>
       <p class="sub">CVD luỹ tiến và mua chủ động ròng mỗi nến</p>
@@ -145,7 +176,7 @@
     </section>
   </div>
 
-  <section class="card">
+  <section class="card" id="workspace">
     <div class="tabs" role="tablist" style="margin-bottom:12px">
       <button role="tab" id="tab-ai" aria-selected="true" data-panel="panel-ai">Báo cáo AI</button>
       <button role="tab" id="tab-train" aria-selected="false" data-panel="panel-train">Huấn luyện ML</button>
@@ -256,12 +287,44 @@
     </div>
   </section>
 
+  <section class="card profile-card" id="profile" aria-labelledby="profile-title">
+    <div>
+      <h2 id="profile-title">Chỉnh sửa thông tin</h2>
+      <p class="sub">Bạn chỉ có thể cập nhật tên hiển thị và ảnh đại diện của chính mình.</p>
+    </div>
+    <form id="profile-form" class="profile-form">
+      <div class="profile-avatar-editor">
+        <div class="profile-avatar-preview">
+          <img id="profile-avatar-image" alt="Ảnh đại diện xem trước" hidden>
+          <span id="profile-avatar-fallback" aria-hidden="true"></span>
+        </div>
+        <div>
+          <label class="small" for="profile-avatar-input">Ảnh đại diện</label>
+          <input id="profile-avatar-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+          <p class="small muted">PNG, JPEG, WebP hoặc GIF, tối đa 500 KB.</p>
+          <button id="profile-remove-avatar" type="button">Gỡ ảnh</button>
+        </div>
+      </div>
+      <label class="profile-name-field" for="profile-display-name">
+        <span>Tên hiển thị</span>
+        <input id="profile-display-name" type="text" minlength="2" maxlength="80" required autocomplete="name">
+      </label>
+      <div class="controls">
+        <button class="primary" id="profile-save" type="submit">Lưu thay đổi</button>
+        <span class="small muted" id="profile-status" role="status" aria-live="polite"></span>
+      </div>
+    </form>
+  </section>
+
   <p class="small muted" style="text-align:center; margin:8px 0 0">
     Dữ liệu từ Binance public API · mọi tính toán chạy trong trình duyệt bạn ·
     <a href="https://github.com/ElonHoang/Trading" target="_blank" rel="noopener">mã nguồn</a><br>
     Đây là công cụ phân tích kỹ thuật tự động, không phải lời khuyên đầu tư.
   </p>
 </main>
+
+  </div>
+</div>
 
 <script type="module" src="./web/app.js"></script>
 </body>
