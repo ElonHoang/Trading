@@ -31,7 +31,7 @@ jobs:
           java-version: 17
           cache: maven
       - run: mvn -f server-java/pom.xml -DskipTests package
-      - name: Review PostgreSQL trade history
+      - name: Review TiDB Cloud trade history
         env:
           JDBC_DATABASE_URL: ${{ secrets.JDBC_DATABASE_URL }}
           DATABASE_USER: ${{ secrets.DATABASE_USER }}

@@ -22,7 +22,7 @@ jobs:
           java-version: 17
           cache: maven
       - run: mvn -f server-java/pom.xml -DskipTests package
-      - name: Run one alert scan against PostgreSQL
+      - name: Run one alert scan against TiDB Cloud
         env:
           JDBC_DATABASE_URL: ${{ secrets.JDBC_DATABASE_URL }}
           DATABASE_USER: ${{ secrets.DATABASE_USER }}
