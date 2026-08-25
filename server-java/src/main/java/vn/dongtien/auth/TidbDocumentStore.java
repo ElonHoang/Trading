@@ -1,6 +1,5 @@
 package vn.dongtien.auth;
 
-import jakarta.annotation.PostConstruct;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -26,19 +25,6 @@ public class TidbDocumentStore implements DocumentStore {
     public TidbDocumentStore(JdbcTemplate jdbc, ObjectMapper mapper) {
         this.jdbc = jdbc;
         this.mapper = mapper;
-    }
-
-    @PostConstruct
-    void createSchema() {
-        jdbc.execute("""
-                CREATE TABLE IF NOT EXISTS app_documents (
-                  document_key VARCHAR(255) NOT NULL,
-                  document_value JSON NOT NULL,
-                  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-                  PRIMARY KEY (document_key),
-                  INDEX app_documents_updated_at_idx (updated_at)
-                )
-                """);
     }
 
     @Override

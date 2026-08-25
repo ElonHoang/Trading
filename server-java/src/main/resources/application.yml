@@ -11,6 +11,7 @@ spring:
     hikari:
       maximum-pool-size: ${DATABASE_POOL_SIZE:5}
       minimum-idle: 0
+      idle-timeout: 0
       connection-timeout: 10000
       # TiDB Cloud may close public connections during maintenance; recycle first.
       max-lifetime: ${DATABASE_MAX_LIFETIME_MS:300000}

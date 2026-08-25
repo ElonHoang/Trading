@@ -1,16 +1,16 @@
-# Thiết kế PostgreSQL cho Dòng Tiền AI
+# Thiết kế TiDB/MySQL cho Dòng Tiền AI
 
 ## Mục tiêu
 
-- PostgreSQL là nguồn dữ liệu runtime duy nhất.
-- Một kèo chỉ có một bản ghi xuyên suốt từ lúc mở đến lúc đóng.
-- Chống call trùng bằng constraint trong database, không chỉ bằng code.
-- Query dashboard theo thời gian/symbol/status không phải giải nén document lớn.
-- Giữ JSONB cho dữ liệu biến động mạnh: snapshot phân tích, evidence, báo cáo optimizer và cây GBDT.
-- Lưu lịch sử cấu hình/model để rollback và audit được.
+- TiDB Cloud là nguồn dữ liệu runtime duy nhất và được truy cập qua giao thức MySQL.
+- Flyway là thành phần duy nhất tạo và nâng cấp schema.
+- Một kèo có một bản ghi xuyên suốt từ lúc mở đến lúc đóng.
+- Chống dữ liệu trùng bằng unique key và foreign key trong database, không chỉ bằng code.
+- Các trường thường lọc trên dashboard được chuẩn hóa thành cột; payload linh hoạt dùng kiểu `JSON`.
+- Lưu lịch sử cấu hình và model để có thể audit hoặc rollback.
 
-`public.app_documents` là lớp tương thích tạm thời. Schema đích nằm trong namespace
-`trading`; code repository sẽ được chuyển từng module rồi mới xoá document store.
+`app_documents` là lớp tương thích cho các repository Java hiện tại. Schema chuẩn hóa đã được
+tạo sẵn để từng module chuyển dần sang bảng riêng mà không phải thay database thêm lần nữa.
 
 ## Sơ đồ quan hệ
 
@@ -29,39 +29,39 @@ erDiagram
 
     STRATEGY_VERSION {
       bigint id PK
-      jsonb config
+      json config
       varchar source
       boolean is_active
-      timestamptz activated_at
+      datetime activated_at
     }
     ML_MODEL {
-      uuid id PK
+      char id PK
       varchar symbol
       varchar interval
-      numeric test_auc
-      jsonb payload
+      decimal test_auc
+      json payload
       boolean is_active
     }
     TRADE_CALL {
-      uuid id PK
+      char id PK
       varchar symbol
       varchar interval
       varchar side
       varchar status
-      numeric entry_price
-      numeric initial_stop_loss
-      numeric exit_price
-      timestamptz opened_at
-      timestamptz closed_at
-      jsonb evidence
+      decimal entry_price
+      decimal initial_stop_loss
+      decimal exit_price
+      datetime opened_at
+      datetime closed_at
+      json evidence
     }
     TRADE_TARGET {
       bigint id PK
-      uuid trade_call_id FK
+      char trade_call_id FK
       smallint position
-      numeric target_price
+      decimal target_price
       boolean is_hit
-      timestamptz hit_at
+      datetime hit_at
     }
     MONITOR_CHECKPOINT {
       varchar worker_key PK
@@ -72,21 +72,21 @@ erDiagram
     }
     TUNING_RUNTIME {
       smallint singleton_id PK
-      jsonb active_changes
-      timestamptz last_applied_at
-      timestamptz last_review_at
+      json active_changes
+      datetime last_applied_at
+      datetime last_review_at
     }
     DAILY_REVIEW {
       bigint id PK
       varchar review_status
-      timestamptz window_start
-      timestamptz window_end
-      jsonb report
+      datetime window_start
+      datetime window_end
+      json report
     }
     LEARNING_LOG {
       date review_date PK
-      jsonb record
-      text formatted_text
+      json record
+      mediumtext formatted_text
     }
 ```
 
@@ -94,54 +94,61 @@ erDiagram
 
 | Nhóm | Bảng | Vai trò |
 |---|---|---|
+| Tương thích | `app_documents` | Lưu document cho các repository Java chưa chuẩn hóa |
 | Danh tính | `app_user`, `auth_identity` | User nội bộ và Google/GitHub OAuth |
 | Telegram | `telegram_subscriber` | Chat đang bật cảnh báo |
+| Watchlist | `watchlist_symbol` | Danh sách symbol và thứ tự hiển thị |
 | Cấu hình | `strategy_version`, `prompt_version` | Version, active version và rollback |
-| Model | `ml_model` | Metadata chuẩn hóa + payload GBDT JSONB |
+| Model | `ml_model` | Metadata chuẩn hóa và payload GBDT dạng `JSON` |
 | Giao dịch | `trade_call`, `trade_target` | Vòng đời kèo và từng TP |
 | Giao tiếp | `trade_message`, `trade_event` | Telegram message và event bất biến |
 | Monitor | `monitor_checkpoint` | Chống xử lý lại cùng một nến |
 | Tự học | `tuning_runtime`, `retune_attempt`, `daily_review`, `daily_loss_log`, `learning_log` | Trạng thái và lịch sử optimizer |
 | Quản trị | `audit_log` | Ai sửa gì, trước/sau ra sao |
 
-## Quy tắc toàn vẹn quan trọng
+## Quy tắc tương thích TiDB/MySQL
 
-1. Partial unique index `trade_call_one_open_symbol_uq` bảo đảm mỗi symbol chỉ có một kèo mở.
-2. `trade_call_lifecycle` buộc kèo `open` chưa có `closed_at`, kèo đã đóng bắt buộc có.
-3. `trade_call_price_direction` buộc SL long nằm dưới entry và SL short nằm trên entry.
-4. `strategy_one_active_uq`, `prompt_one_active_uq` bảo đảm chỉ một cấu hình/prompt active.
-5. `ml_model_one_active_pair_uq` bảo đảm mỗi `(symbol, interval)` chỉ có một model active.
-6. Target có unique `(trade_call_id, position)` và `(trade_call_id, label)`.
-7. Giá dùng `NUMERIC(30,12)`, không dùng `float`, để tránh sai số lưu trữ.
-8. Thời điểm nghiệp vụ dùng `TIMESTAMPTZ`; millisecond của nến Binance giữ bằng `BIGINT`.
+1. Tên bảng không kèm namespace kiểu `public` hoặc `trading`; database trong JDBC URL chính là namespace.
+2. UUID được lưu bằng `CHAR(36)` và tạo bằng `UUID()`.
+3. Giá dùng `DECIMAL(30,12)`, không dùng kiểu số thực, để tránh sai số lưu trữ.
+4. Thời điểm nghiệp vụ dùng `DATETIME(6)` theo UTC; JDBC URL phải có `connectionTimeZone=UTC`.
+5. Payload linh hoạt dùng `JSON`; ứng dụng truyền JSON hợp lệ qua MySQL Connector/J.
+6. Upsert document dùng `INSERT ... ON DUPLICATE KEY UPDATE`.
+7. Unique key trên generated column thay thế partial unique index: chỉ một strategy/prompt active,
+   một model active cho mỗi `(symbol, interval)`, và một kèo mở cho mỗi symbol.
+8. Foreign key yêu cầu TiDB 6.6 trở lên. TiDB 8.5 là lựa chọn triển khai an toàn cho schema này.
+9. TiDB có thể nhận cú pháp `CHECK` nhưng chỉ thực thi khi biến
+   `tidb_enable_check_constraint` được bật. Ứng dụng vẫn phải validate dữ liệu ở service layer.
 
-## Cái gì dùng JSONB
+## Dữ liệu JSON
 
-JSONB chỉ dùng khi schema thực sự linh hoạt hoặc payload rất lớn:
+`JSON` chỉ dùng khi schema thực sự linh hoạt hoặc payload lớn:
 
-- `ml_model.payload`: toàn bộ cây GBDT và metrics chi tiết.
+- `app_documents.document_value` trong giai đoạn tương thích.
+- `ml_model.payload`: cây GBDT và metrics chi tiết.
 - `trade_call.evidence`, `analysis_snapshot`, `result_payload`.
 - `retune_attempt.report`, `daily_review.report`, `learning_log.record`.
 - `auth_identity.attributes` và payload event/checkpoint.
 
-Symbol, side, status, entry, SL, thời gian, AUC và các trường cần lọc đều là cột chuẩn.
+Symbol, side, status, entry, stop loss, thời gian và AUC vẫn là cột chuẩn để index và query.
 
 ## View dashboard
 
-`trading.v_closed_trade_performance` trả dữ liệu gọn cho biểu đồ hiệu suất, gồm
-entry/exit/status, `reached_tp1` và `tp1_price`. Công thức PnL vẫn do service tính theo
-strategy version để không đóng cứng một quy tắc có thể thay đổi vào SQL.
+`v_closed_trade_performance` trả dữ liệu gọn cho biểu đồ hiệu suất, gồm entry/exit/status,
+`reached_tp1` và `tp1_price`. Công thức PnL vẫn do service Java tính theo strategy version để
+không đóng cứng một quy tắc có thể thay đổi vào SQL.
 
-## Migration
+## Migration và dữ liệu cũ
 
-1. `V001`: tạo `app_documents` để tương thích với code hiện tại.
-2. `V002`: tạo schema chuẩn hóa, constraint, index và view.
-3. `R__import_document_store`: import idempotent từ document store sang các bảng mới;
-   migration này chạy lại sau mỗi lần import legacy.
-4. Chuyển repository theo thứ tự: watchlist/subscriber → model/config → trade → monitor → learning.
-5. Chạy đối chiếu số lượng và kết quả dashboard.
-6. Chỉ xoá `app_documents` sau khi không còn code nào truy cập.
+1. `V001__document_store.sql` tạo `app_documents`.
+2. `V002__normalized_trading_schema.sql` tạo schema chuẩn hóa, key, index và view.
+3. `R__import_document_store.sql` ghi nhận ranh giới chuyển đổi và chủ ý không chạy SQL PostgreSQL
+   trên TiDB.
+4. `java -jar server-java/target/dong-tien-ai.jar import-files --overwrite` nhập các file cấu hình,
+   watchlist và model hiện có vào `app_documents` bằng upsert MySQL.
+5. Dữ liệu từ một PostgreSQL cũ phải được export ra file trung gian rồi import bằng ứng dụng hoặc
+   ETL; TiDB Cloud không thể tự đọc database cũ trong Flyway.
+6. Chỉ xóa `app_documents` sau khi tất cả repository đã dùng bảng chuẩn hóa.
 
-Mọi migration `V...` có checksum trong `public.schema_migrations`. Một file versioned đã chạy
-không được sửa; thay đổi tiếp theo phải tạo file `V003__...sql` mới. Migration `R__...`
-được phép chạy lại và bắt buộc phải idempotent.
+Flyway lưu checksum và trạng thái trong `flyway_schema_history`. Không sửa file `V...` đã phát hành;
+mọi thay đổi schema tiếp theo phải dùng `V003__...sql` trở lên. File `R__...` phải luôn idempotent.
