@@ -29,6 +29,8 @@ public class SecurityConfig {
                 // Browser state-changing requests use the CSRF token from /api/auth/session.
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/login", "/login/", "/login/**", "/oauth2/**", "/login/oauth2/**", "/error", "/favicon.ico").permitAll()
+                        // Health check cua platform chay truoc khi co phien dang nhap.
+                        .requestMatchers(HttpMethod.GET, "/healthz").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/google", "/auth/github").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/logout").authenticated()

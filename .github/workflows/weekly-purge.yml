@@ -1,31 +1,28 @@
-name: Telegram alerts
+name: Weekly history purge
 
-# Thay cho vong quet cua bot worker khi deploy tren Render goi free.
-#
-# Tan suat quyet dinh chi phi Actions. Repo PUBLIC: khong gioi han phut. Repo
-# PRIVATE goi Free: 2000 phut/thang, va moi lan chay ton ~1-2 phut khi trung
-# cache jar (~4 phut khi phai build lai). Moi 2 gio = ~360 lan/thang. Muon day
-# hon thi sua cron ben duoi va tinh lai ngan sach.
+# 01:37 UTC thu Hai = 08:37 gio Viet Nam, trung lich cua TradingLearningScheduler.
+# Chi xoa keo DA DONG qua han giu du lieu; keo mo, model, cau hinh va learning
+# log khong bi dung toi.
 #
 # LUU Y: GitHub tu tat scheduled workflow sau 60 ngay repo khong co commit moi.
 on:
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "37 1 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Noi tiep voi daily-learning/weekly-purge: MonitorService.tick() ghi monitor state,
-# recordClosedTrade va co the goi runAutoRetune - trung state voi job learning.
+# Dung chung group `trading-state` voi daily-learning va telegram-alerts: ca ba deu
+# ghi vao state trading, va khoa trong tien trinh khong bat qua duoc ranh gioi runner.
 concurrency:
   group: trading-state
   cancel-in-progress: false
 
 jobs:
-  scan:
+  purge:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -52,17 +49,14 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Run one alert scan against TiDB Cloud
+      - name: Purge expired closed trades
         env:
           JDBC_DATABASE_URL: ${{ secrets.JDBC_DATABASE_URL }}
           DATABASE_USER: ${{ secrets.DATABASE_USER }}
           DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_ALERT_CHAT_IDS: ${{ secrets.TELEGRAM_ALERT_CHAT_IDS }}
           TRADING_TIMEZONE: Asia/Ho_Chi_Minh
+          TRADING_HISTORY_RETENTION_DAYS: "30"
           DATABASE_MIGRATE: "false"
         run: |
           test -n "$JDBC_DATABASE_URL" || { echo 'Missing JDBC_DATABASE_URL.'; exit 1; }
-          test -n "$TELEGRAM_BOT_TOKEN" || { echo 'Missing TELEGRAM_BOT_TOKEN.'; exit 1; }
-          test -n "$TELEGRAM_ALERT_CHAT_IDS" || { echo 'Missing TELEGRAM_ALERT_CHAT_IDS.'; exit 1; }
-          java -jar server-java/target/dong-tien-ai.jar alerts-once
+          java -jar server-java/target/dong-tien-ai.jar purge-history

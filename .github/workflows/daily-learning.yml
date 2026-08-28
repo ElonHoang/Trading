@@ -1,31 +1,28 @@
-name: Telegram alerts
+name: Daily learning job
 
-# Thay cho vong quet cua bot worker khi deploy tren Render goi free.
-#
-# Tan suat quyet dinh chi phi Actions. Repo PUBLIC: khong gioi han phut. Repo
-# PRIVATE goi Free: 2000 phut/thang, va moi lan chay ton ~1-2 phut khi trung
-# cache jar (~4 phut khi phai build lai). Moi 2 gio = ~360 lan/thang. Muon day
-# hon thi sua cron ben duoi va tinh lai ngan sach.
+# Thay cho cron cua bot worker khi deploy tren Render goi free (khong co worker).
+# 01:07 UTC = 08:07 gio Viet Nam, trung lich cua TradingLearningScheduler.
 #
 # LUU Y: GitHub tu tat scheduled workflow sau 60 ngay repo khong co commit moi.
 on:
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "7 1 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Noi tiep voi daily-learning/weekly-purge: MonitorService.tick() ghi monitor state,
-# recordClosedTrade va co the goi runAutoRetune - trung state voi job learning.
+# Ba workflow (learning, purge, alerts) dung chung group vi cung doc-sua-ghi state
+# auto-retune/monitor trong TiDB. Chung chay o ba runner khac nhau nen TradingStateLock
+# khong bao ve duoc; concurrency cua GitHub la co che noi tiep duy nhat o day.
 concurrency:
   group: trading-state
   cancel-in-progress: false
 
 jobs:
-  scan:
+  learn:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -52,17 +49,15 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Run one alert scan against TiDB Cloud
+      - name: Run daily learning against TiDB Cloud
         env:
           JDBC_DATABASE_URL: ${{ secrets.JDBC_DATABASE_URL }}
           DATABASE_USER: ${{ secrets.DATABASE_USER }}
           DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_ALERT_CHAT_IDS: ${{ secrets.TELEGRAM_ALERT_CHAT_IDS }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TRADING_TIMEZONE: Asia/Ho_Chi_Minh
+          # Web service da chay Flyway; job nay chi doc schema da co.
           DATABASE_MIGRATE: "false"
         run: |
           test -n "$JDBC_DATABASE_URL" || { echo 'Missing JDBC_DATABASE_URL.'; exit 1; }
-          test -n "$TELEGRAM_BOT_TOKEN" || { echo 'Missing TELEGRAM_BOT_TOKEN.'; exit 1; }
-          test -n "$TELEGRAM_ALERT_CHAT_IDS" || { echo 'Missing TELEGRAM_ALERT_CHAT_IDS.'; exit 1; }
-          java -jar server-java/target/dong-tien-ai.jar alerts-once
+          java -jar server-java/target/dong-tien-ai.jar learn-once

@@ -1,0 +1,75 @@
+# Render Blueprint — mot Web Service duy nhat tren goi free.
+#
+# Goi free khong co Background Worker, nen worker `bot` khong duoc khai bao o
+# day. Job hoc hang ngay va don lich su chuyen sang GitHub Actions cron goi hai
+# lenh CLI `learn-once` va `purge-history` (xem .github/workflows/).
+#
+# Hau qua cua goi free, can biet truoc:
+#   - Service ngu sau 15 phut khong co request; lan truy cap ke tiep cho ~50s.
+#   - RAM 512MB. Backtest/train nang tren dashboard co the bi OOM; nhung tac vu
+#     do nen chay bang CLI o may hoac trong GitHub Actions.
+#   - Bot Telegram tuong tac (/set, /add, /canhbao) KHONG chay o cau hinh nay
+#     vi no can mot tien trinh song lien tuc.
+#
+# `branch: main` la nhanh deploy. Phat trien tren `develop` roi merge sang `main`;
+# Render tu deploy lai moi khi `main` co commit moi (autoDeploy).
+
+services:
+  - type: web
+    name: dong-tien-ai-web
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # Dockerfile chay `java -Dserver.port=${PORT:-10000}`; Render dinh tuyen vao cong nay.
+      - key: PORT
+        value: "10000"
+      # Render cap TLS o edge nen cookie phien bat buoc Secure.
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: SESSION_TIMEOUT
+        value: 8h
+      # Web la noi duy nhat chay Flyway trong cau hinh nay.
+      - key: DATABASE_MIGRATE
+        value: "true"
+      # Bat buoc false: GitHub Actions cron so huu job hoc, khong phai web.
+      # Bat o day se chay trung job va tranh chap voi workflow.
+      - key: TRADING_LEARNING_SCHEDULER_ENABLED
+        value: "false"
+      - key: DATABASE_POOL_SIZE
+        value: "5"
+      # TiDB Cloud co the dong ket noi public khi bao tri; tai su dung sau 5 phut.
+      - key: DATABASE_MAX_LIFETIME_MS
+        value: "300000"
+      - key: TRADING_TIMEZONE
+        value: Asia/Ho_Chi_Minh
+      # `sync: false` = Render hoi gia tri luc tao Blueprint va khong luu vao Git.
+      - key: JDBC_DATABASE_URL
+        sync: false
+      - key: DATABASE_USER
+        sync: false
+      - key: DATABASE_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: LOCAL_AUTH_ADMIN_USERNAME
+        sync: false
+      - key: LOCAL_AUTH_ADMIN_PASSWORD_HASH
+        sync: false
+      - key: LOCAL_AUTH_VIEWER_USERNAME
+        sync: false
+      - key: LOCAL_AUTH_VIEWER_PASSWORD_HASH
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false

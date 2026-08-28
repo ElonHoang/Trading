@@ -11,6 +11,7 @@ import vn.dongtien.trading.analysis.AutoRetuneService;
 import vn.dongtien.trading.analysis.DailyLossLogService;
 import vn.dongtien.trading.analysis.DailyReviewService;
 import vn.dongtien.trading.analysis.ResearchService;
+import vn.dongtien.trading.analysis.TradingLearningJobs;
 import vn.dongtien.trading.backtest.BacktestService;
 import vn.dongtien.trading.config.StrategyService;
 import vn.dongtien.trading.config.TradingUniverse;
@@ -25,6 +26,7 @@ import vn.dongtien.trading.telegram.TelegramHistoryImportService;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -47,6 +49,7 @@ public class TradingCommandRunner implements ApplicationRunner {
     private final DailyLossLogService dailyLossLogs;
     private final AutoRetuneService autoRetune;
     private final ResearchService research;
+    private final TradingLearningJobs learningJobs;
     private final AnthropicService anthropic;
     private final TelegramHistoryClient telegramHistory;
     private final TelegramHistoryImportService telegramImports;
@@ -59,13 +62,14 @@ public class TradingCommandRunner implements ApplicationRunner {
                                 DailyReviewService dailyReviews, DailyLossLogService dailyLossLogs,
                                 AutoRetuneService autoRetune, ResearchService research, AnthropicService anthropic,
                                 TelegramHistoryClient telegramHistory, TelegramHistoryImportService telegramImports,
-                                Environment environment) {
+                                TradingLearningJobs learningJobs, Environment environment) {
         this.mapper = mapper; this.binance = binance; this.strategies = strategies; this.universe = universe;
         this.analysis = analysis; this.backtest = backtest; this.trainer = trainer; this.models = models;
         this.importer = importer; this.telegram = telegram; this.performance = performance;
         this.dailyReviews = dailyReviews; this.dailyLossLogs = dailyLossLogs; this.autoRetune = autoRetune;
         this.research = research; this.anthropic = anthropic;
-        this.telegramHistory = telegramHistory; this.telegramImports = telegramImports; this.environment = environment;
+        this.telegramHistory = telegramHistory; this.telegramImports = telegramImports;
+        this.learningJobs = learningJobs; this.environment = environment;
     }
 
     @Override
@@ -130,6 +134,9 @@ public class TradingCommandRunner implements ApplicationRunner {
                 print(output);
             }
             case "auto-retune" -> print(autoRetune.runAutoRetune(strategies.strategy()));
+            // Same workflow as the worker cron, for deployments without a persistent worker.
+            case "learn-once" -> print(learningJobs.runDailyLearning(Instant.now()));
+            case "purge-history" -> print(learningJobs.purgeExpiredHistory(Instant.now()));
             case "import-files" -> print(Map.of("imported", importer.run(repositoryRoot(), arguments.containsOption("overwrite"))));
             case "models-index" -> print(models.list());
             case "migrate" -> System.out.println("Database migrations completed by Flyway.");

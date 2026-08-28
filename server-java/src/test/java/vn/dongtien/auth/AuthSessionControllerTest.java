@@ -66,6 +66,13 @@ class AuthSessionControllerTest {
     }
 
     @Test
+    void healthEndpointAnswersPlatformProbesWithoutLogin() throws Exception {
+        mockMvc.perform(get("/healthz"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ok"));
+    }
+
+    @Test
     void usernamePasswordLoginRedirectsToSafeReturnPath() throws Exception {
         MvcResult login = mockMvc.perform(post("/auth/login")
                         .with(csrf())
