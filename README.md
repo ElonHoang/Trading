@@ -78,20 +78,33 @@ Nhung gi **khong** co trong cau hinh nay:
 
 ### Cac buoc
 
-1. Merge `develop` vao `main` va push, roi vao Render > **New** > **Blueprint** va tro toi repo nay.
-   Render doc [render.yaml](render.yaml) va tao Web Service goi free.
-2. Render hoi tung bien danh dau `sync: false`. Bat buoc dien `JDBC_DATABASE_URL`, `DATABASE_USER`
-   va `DATABASE_PASSWORD`. Bien OAuth/local-auth de trong neu chua dung; cac provider dang nhap se
-   fail-closed dung nhu thiet ke.
-3. Cho web live, lay domain `https://<ten>.onrender.com` roi them redirect URI vao OAuth app:
+Repo nay da co san mot Web Service tren Render (runtime Docker, region Singapore) theo doi nhanh
+`production`. Blueprint cua Render **khong nhan** service tao tay: bam New > Blueprint se tao them
+mot service thu hai voi URL khac. Vi vay giu service dang co va chinh Settings cua no; giu
+[render.yaml](render.yaml) lam tai lieu ghi dung cau hinh can co.
+
+1. Merge code vao `production` va push. Render tu deploy lai (autoDeploy).
+2. Trong **Settings** cua service, dat:
+   - `Branch` = `production`
+   - `Instance Type` = Free
+   - `Health Check Path` = `/healthz` — **chi them sau khi ban deploy da co route nay**, neu khong
+     Render se danh dau service unhealthy va rollback.
+3. Trong **Environment**, dien cac bien co gia tri co dinh:
+   `PORT=10000`, `SESSION_COOKIE_SECURE=true`, `SESSION_TIMEOUT=8h`, `DATABASE_MIGRATE=true`,
+   `TRADING_LEARNING_SCHEDULER_ENABLED=false`, `DATABASE_POOL_SIZE=5`,
+   `DATABASE_MAX_LIFETIME_MS=300000`, `TRADING_TIMEZONE=Asia/Ho_Chi_Minh`.
+   Bat buoc them `JDBC_DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD`. Cac bien
+   OAuth/local-auth/Anthropic de trong neu chua dung; cac provider dang nhap se fail-closed dung
+   nhu thiet ke.
+4. Cho web live, lay domain `https://<ten>.onrender.com` roi them redirect URI vao OAuth app:
    `https://<ten>.onrender.com/login/oauth2/code/google` va `.../code/github`.
    `OAuthClientConfig` sinh redirect tu `{baseUrl}`, con `forward-headers-strategy: framework` giup
    Spring doc dung scheme HTTPS phia sau proxy cua Render.
-4. Vao **Settings > Secrets and variables > Actions** cua repo GitHub va them cac secret:
+5. Vao **Settings > Secrets and variables > Actions** cua repo GitHub va them cac secret:
    `JDBC_DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD` (bat buoc),
    `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_IDS` (cho alert),
    `ANTHROPIC_API_KEY` (neu dung Anthropic trong daily review).
-5. Chay thu tay tung workflow bang nut **Run workflow** truoc khi tin vao lich cron.
+6. Chay thu tay tung workflow bang nut **Run workflow** truoc khi tin vao lich cron.
 
 ### Ngan sach GitHub Actions
 

@@ -11,8 +11,9 @@
 #   - Bot Telegram tuong tac (/set, /add, /canhbao) KHONG chay o cau hinh nay
 #     vi no can mot tien trinh song lien tuc.
 #
-# `branch: main` la nhanh deploy. Phat trien tren `develop` roi merge sang `main`;
-# Render tu deploy lai moi khi `main` co commit moi (autoDeploy).
+# `branch: production` la nhanh Render theo doi. Luong phat hanh: lam tren
+# `develop` -> merge sang `main` -> merge sang `production`. Render tu deploy lai
+# moi khi `production` co commit moi (autoDeploy).
 
 services:
   - type: web
@@ -20,7 +21,7 @@ services:
     runtime: docker
     plan: free
     region: singapore
-    branch: main
+    branch: production
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /healthz
