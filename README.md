@@ -183,6 +183,11 @@ java -jar server-java/target/dong-tien-ai.jar local-user set hoangnv --role=admi
 Render goi free khong co Shell, nen chay lenh nay o may ban voi `.env` tro toi cung TiDB
 Cloud ma web dang dung. Tai khoan co hieu luc ngay, khong can deploy lai.
 
+Database moi duoc migration `V004__seed_local_credential.sql` seed san hai tai khoan khoi tao
+`hoangnv` (admin) va `viewer`, de trang login khong bi khoa kin khi chua ai chay duoc CLI.
+Hash cua chung nam trong Git nen phai coi la mat khau tam: doi ca hai bang `local-user set`
+ngay sau lan dang nhap dau. Doi mat khau chi ghi de dong trong bang, khong dung toi migration.
+
 ## Nhap lich su call tu Telegram
 
 `telegram-history` la CLI tuong tac, khong phai bot chay nen. Lan dau tien no hoi so dien thoai, ma OTP va (neu co) mat khau 2FA ngay trong terminal; phien dang nhap duoc giu trong Docker volume rieng va khong nam trong Git. Lenh liet ke chat chi hien thi cac chat cua tai khoan da dang nhap. Sau do phai truyen dung `--chat-id` cua nhom muon doc; chuong trinh khong quet hay lay tu nhom khac.
