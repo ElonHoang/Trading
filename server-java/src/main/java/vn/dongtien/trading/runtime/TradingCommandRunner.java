@@ -5,6 +5,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
+import vn.dongtien.auth.LocalUserAdmin;
 import vn.dongtien.auth.TradingPerformanceService;
 import vn.dongtien.trading.analysis.AnalysisService;
 import vn.dongtien.trading.analysis.AutoRetuneService;
@@ -24,6 +25,11 @@ import vn.dongtien.trading.telegram.TelegramCallHistoryParser;
 import vn.dongtien.trading.telegram.TelegramHistoryClient;
 import vn.dongtien.trading.telegram.TelegramHistoryImportService;
 
+import java.io.BufferedReader;
+import java.io.Console;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -50,6 +56,7 @@ public class TradingCommandRunner implements ApplicationRunner {
     private final AutoRetuneService autoRetune;
     private final ResearchService research;
     private final TradingLearningJobs learningJobs;
+    private final LocalUserAdmin localUsers;
     private final AnthropicService anthropic;
     private final TelegramHistoryClient telegramHistory;
     private final TelegramHistoryImportService telegramImports;
@@ -62,14 +69,15 @@ public class TradingCommandRunner implements ApplicationRunner {
                                 DailyReviewService dailyReviews, DailyLossLogService dailyLossLogs,
                                 AutoRetuneService autoRetune, ResearchService research, AnthropicService anthropic,
                                 TelegramHistoryClient telegramHistory, TelegramHistoryImportService telegramImports,
-                                TradingLearningJobs learningJobs, Environment environment) {
+                                TradingLearningJobs learningJobs, LocalUserAdmin localUsers,
+                                Environment environment) {
         this.mapper = mapper; this.binance = binance; this.strategies = strategies; this.universe = universe;
         this.analysis = analysis; this.backtest = backtest; this.trainer = trainer; this.models = models;
         this.importer = importer; this.telegram = telegram; this.performance = performance;
         this.dailyReviews = dailyReviews; this.dailyLossLogs = dailyLossLogs; this.autoRetune = autoRetune;
         this.research = research; this.anthropic = anthropic;
         this.telegramHistory = telegramHistory; this.telegramImports = telegramImports;
-        this.learningJobs = learningJobs; this.environment = environment;
+        this.learningJobs = learningJobs; this.localUsers = localUsers; this.environment = environment;
     }
 
     @Override
@@ -137,6 +145,8 @@ public class TradingCommandRunner implements ApplicationRunner {
             // Same workflow as the worker cron, for deployments without a persistent worker.
             case "learn-once" -> print(learningJobs.runDailyLearning(Instant.now()));
             case "purge-history" -> print(learningJobs.purgeExpiredHistory(Instant.now()));
+            // Tai khoan dang nhap noi bo nam trong database, khong qua bien moi truong.
+            case "local-user" -> print(localUser(args, arguments));
             case "import-files" -> print(Map.of("imported", importer.run(repositoryRoot(), arguments.containsOption("overwrite"))));
             case "models-index" -> print(models.list());
             case "migrate" -> System.out.println("Database migrations completed by Flyway.");
@@ -194,6 +204,49 @@ public class TradingCommandRunner implements ApplicationRunner {
         }
     }
     private void print(Object value) throws Exception { System.out.println(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(value)); }
+
+    private Object localUser(List<String> args, ApplicationArguments arguments) {
+        String action = args.size() > 1 ? args.get(1) : "list";
+        return switch (action) {
+            case "list" -> localUsers.list();
+            case "set" -> localUsers.save(namedArgument(args), option(arguments, "role", "viewer"),
+                    readPassword("Mat khau cho " + namedArgument(args) + ": "));
+            case "remove" -> localUsers.remove(namedArgument(args));
+            default -> throw new IllegalArgumentException("Lenh local-user khong hop le: " + action
+                    + ". Dung: list | set <username> [--role=admin] | remove <username>");
+        };
+    }
+
+    private static String namedArgument(List<String> args) {
+        if (args.size() < 3 || args.get(2).isBlank()) throw new IllegalArgumentException("Thieu <username>");
+        return args.get(2);
+    }
+
+    /**
+     * Doc mat khau, khong hien thi khi co console that.
+     *
+     * <p>Loi nhac di ra stderr de stdout chi con JSON ket qua, van pipe duoc.</p>
+     */
+    private static char[] readPassword(String prompt) {
+        Console console = System.console();
+        if (console != null) {
+            char[] typed = console.readPassword("%s", prompt);
+            if (typed == null || typed.length == 0) throw new IllegalArgumentException("Chua nhap mat khau");
+            return typed;
+        }
+        System.err.print(prompt);
+        System.err.flush();
+        // Khong dong reader: dong no se dong luon System.in cua tien trinh.
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        try {
+            String line = reader.readLine();
+            if (line == null || line.isBlank()) throw new IllegalArgumentException("Chua nhap mat khau");
+            return line.toCharArray();
+        } catch (IOException error) {
+            throw new IllegalStateException("Khong doc duoc mat khau tu stdin", error);
+        }
+    }
+
     private static Path repositoryRoot() {
         Path current = Path.of("").toAbsolutePath().normalize();
         if (Files.isRegularFile(current.resolve("config/strategy.json"))) return current;

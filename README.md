@@ -93,18 +93,26 @@ mot service thu hai voi URL khac. Vi vay giu service dang co va chinh Settings c
    `PORT=10000`, `SESSION_COOKIE_SECURE=true`, `SESSION_TIMEOUT=8h`, `DATABASE_MIGRATE=true`,
    `TRADING_LEARNING_SCHEDULER_ENABLED=false`, `DATABASE_POOL_SIZE=5`,
    `DATABASE_MAX_LIFETIME_MS=300000`, `TRADING_TIMEZONE=Asia/Ho_Chi_Minh`.
-   Bat buoc them `JDBC_DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD`. Cac bien
-   OAuth/local-auth/Anthropic de trong neu chua dung; cac provider dang nhap se fail-closed dung
-   nhu thiet ke.
-4. Cho web live, lay domain `https://<ten>.onrender.com` roi them redirect URI vao OAuth app:
+   Bat buoc them `JDBC_DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD`. Bien OAuth va
+   Anthropic de trong neu chua dung; cac provider dang nhap se fail-closed dung nhu thiet ke.
+   Tai khoan dang nhap noi bo KHONG khai o day — xem buoc 4.
+4. Tao tai khoan admin dau tien. Chay o may ban, voi `.env` tro toi cung TiDB Cloud ma web dung:
+
+   ```powershell
+   java -jar server-java/target/dong-tien-ai.jar local-user set <username> --role=admin
+   ```
+
+   Lenh se hoi mat khau (it nhat 10 ky tu) va ghi BCrypt hash vao bang `local_credential`.
+   Tai khoan co hieu luc ngay, khong can deploy lai.
+5. Cho web live, lay domain `https://<ten>.onrender.com` roi them redirect URI vao OAuth app:
    `https://<ten>.onrender.com/login/oauth2/code/google` va `.../code/github`.
    `OAuthClientConfig` sinh redirect tu `{baseUrl}`, con `forward-headers-strategy: framework` giup
    Spring doc dung scheme HTTPS phia sau proxy cua Render.
-5. Vao **Settings > Secrets and variables > Actions** cua repo GitHub va them cac secret:
+6. Vao **Settings > Secrets and variables > Actions** cua repo GitHub va them cac secret:
    `JDBC_DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD` (bat buoc),
    `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_IDS` (cho alert),
    `ANTHROPIC_API_KEY` (neu dung Anthropic trong daily review).
-6. Chay thu tay tung workflow bang nut **Run workflow** truoc khi tin vao lich cron.
+7. Chay thu tay tung workflow bang nut **Run workflow** truoc khi tin vao lich cron.
 
 ### Ngan sach GitHub Actions
 
@@ -148,6 +156,9 @@ java -jar server-java/target/dong-tien-ai.jar daily-loss-log
 java -jar server-java/target/dong-tien-ai.jar auto-retune
 java -jar server-java/target/dong-tien-ai.jar learn-once
 java -jar server-java/target/dong-tien-ai.jar purge-history
+java -jar server-java/target/dong-tien-ai.jar local-user list
+java -jar server-java/target/dong-tien-ai.jar local-user set <username> --role=admin
+java -jar server-java/target/dong-tien-ai.jar local-user remove <username>
 java -jar server-java/target/dong-tien-ai.jar alerts-once
 java -jar server-java/target/dong-tien-ai.jar bot
 ```
@@ -158,6 +169,19 @@ java -jar server-java/target/dong-tien-ai.jar bot
 cron trong bot worker. Dung chung khi khong co worker chay nen (vi du Render goi free) va
 de mot scheduler ben ngoai goi. Khong bat `TRADING_LEARNING_SCHEDULER_ENABLED` o service
 nao khac trong luc dung hai lenh nay, neu khong job se chay trung.
+
+`local-user` quan ly tai khoan dang nhap noi bo, luu trong bang `local_credential` cua TiDB.
+Mat khau duoc nhap qua stdin roi bam BCrypt cost 12 ngay tai cho; mat khau tho khong bao gio
+di vao log, vao database hay vao bien moi truong. `list` khong bao gio in hash.
+`remove` tu choi xoa admin cuoi cung de khong ai bi khoa ra ngoai.
+
+```powershell
+# Tao admin dau tien (se hoi mat khau, it nhat 10 ky tu)
+java -jar server-java/target/dong-tien-ai.jar local-user set hoangnv --role=admin
+```
+
+Render goi free khong co Shell, nen chay lenh nay o may ban voi `.env` tro toi cung TiDB
+Cloud ma web dang dung. Tai khoan co hieu luc ngay, khong can deploy lai.
 
 ## Nhap lich su call tu Telegram
 
@@ -193,7 +217,7 @@ trung. Xem muc Deploy mien phi ben tren.
 | `DATABASE_MIGRATE` | Chay Flyway luc khoi dong, mac dinh `true`. Khi deploy nhieu service, chi de mot service (web) dat `true` |
 | `JAVA_SERVER_PORT` | Port Java, mac dinh `8080` |
 | `SESSION_COOKIE_SECURE`, `SESSION_TIMEOUT` | Dat `true` khi deploy HTTPS; session mac dinh het han sau 8 gio |
-| `LOCAL_AUTH_ADMIN_*`, `LOCAL_AUTH_VIEWER_*` | Hai tai khoan local: admin ghi/xoa, viewer chi xem; mat khau phai la BCrypt hash cost 12 |
+| `LOCAL_AUTH_ADMIN_*`, `LOCAL_AUTH_VIEWER_*` | Cach cu, van duoc ho tro. Uu tien dung lenh `local-user` de luu tai khoan trong database; neu dung bien thi phai du ca bon va hash BCrypt cost 12 |
 | `TELEGRAM_BOT_TOKEN` | Token bot Telegram |
 | `TELEGRAM_ALLOWED_IDS` | Chat ID duoc phep doc/dung bot |
 | `TELEGRAM_OWNER_IDS` | Chat ID duoc phep dung lenh ghi; de trong se fail-closed |
@@ -205,7 +229,7 @@ trung. Xem muc Deploy mien phi ben tren.
 | `TRADING_DAILY_MODEL_MAX_PAIRS` | Toi da cap symbol/interval duoc train moi ngay, mac dinh `3` |
 | `TRADING_DAILY_MODEL_TRAINING_ENABLED` | Bat/tat train lai market model sau daily review |
 
-Đăng nhập nội bộ dùng Spring Security với BCrypt, CSRF và đổi session ID sau khi xác thực. Chỉ lưu password hash vào `LOCAL_AUTH_ADMIN_PASSWORD_HASH` và `LOCAL_AUTH_VIEWER_PASSWORD_HASH`, không lưu mật khẩu thô. Vì BCrypt có ký tự `$`, trong `.env` hãy đặt mỗi hash giữa nháy đơn; ứng dụng cũng đọc đúng giá trị này khi chạy Java trực tiếp. Admin có quyền gọi API ghi/xóa; viewer chỉ được dùng các route GET. Google/GitHub (nếu được cấu hình) mặc định nhận `ROLE_VIEWER`, tức chỉ xem. Khi deploy Internet, bắt buộc dùng HTTPS và đặt `SESSION_COOKIE_SECURE=true`; Docker Compose mặc định giá trị này là `true` nếu biến chưa được khai báo.
+Đăng nhập nội bộ dùng Spring Security với BCrypt, CSRF và đổi session ID sau khi xác thực. Tài khoản nằm trong bảng `local_credential` của TiDB và được tạo bằng lệnh `local-user`; chỉ lưu BCrypt hash cost 12, không lưu mật khẩu thô. Cách cũ khai bằng bốn biến `LOCAL_AUTH_*` vẫn chạy được: khi trùng username, bản trong database được ưu tiên. Vì BCrypt có ký tự `$`, nếu dùng `.env` hãy đặt mỗi hash giữa nháy đơn. Admin có quyền gọi API ghi/xóa; viewer chỉ được dùng các route GET. Google/GitHub (nếu được cấu hình) mặc định nhận `ROLE_VIEWER`, tức chỉ xem. Khi deploy Internet, bắt buộc dùng HTTPS và đặt `SESSION_COOKIE_SECURE=true`; Docker Compose mặc định giá trị này là `true` nếu biến chưa được khai báo.
 Khi chạy Docker ở localhost bằng HTTP, đặt riêng `SESSION_COOKIE_SECURE=false` trong `.env`.
 
 ## API

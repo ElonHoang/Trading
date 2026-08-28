@@ -227,6 +227,12 @@ class AuthSessionControllerTest {
 
     @TestConfiguration
     static class DatabaseTestConfiguration {
+        /** Khong co tai khoan trong database: cac test o day dung tai khoan khai bang bien moi truong. */
+        @Bean
+        LocalCredentialStore localCredentialStore() {
+            return new InMemoryLocalCredentialStore();
+        }
+
         @Bean
         DocumentStore documentStore(ObjectMapper mapper) {
             Map<String, JsonNode> values = new ConcurrentHashMap<>();

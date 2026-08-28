@@ -58,14 +58,8 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: LOCAL_AUTH_ADMIN_USERNAME
-        sync: false
-      - key: LOCAL_AUTH_ADMIN_PASSWORD_HASH
-        sync: false
-      - key: LOCAL_AUTH_VIEWER_USERNAME
-        sync: false
-      - key: LOCAL_AUTH_VIEWER_PASSWORD_HASH
-        sync: false
+      # Tai khoan dang nhap noi bo KHONG dat o day: chung nam trong bang
+      # local_credential cua TiDB, tao bang `local-user set <username> --role=admin`.
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET

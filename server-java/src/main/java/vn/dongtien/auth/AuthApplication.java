@@ -14,7 +14,8 @@ public class AuthApplication {
         SpringApplication application = new SpringApplication(AuthApplication.class);
         if (args.length > 0 && Set.of("analyze", "backtest", "train", "daily-review", "diagnose-sl",
                 "validate-filters", "research-patterns", "import-files", "models-index", "migrate", "bot",
-                "alerts-once", "daily-loss-log", "auto-retune", "learn-once", "purge-history", "telegram-list-chats",
+                "alerts-once", "daily-loss-log", "auto-retune", "learn-once", "purge-history", "local-user",
+                "telegram-list-chats",
                 "telegram-import-history").contains(args[0])) {
             application.setWebApplicationType(WebApplicationType.NONE);
         }
