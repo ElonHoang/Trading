@@ -1,6 +1,7 @@
 package vn.dongtien.auth;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -106,5 +107,25 @@ class LocalAuthConfigTest {
     @Test
     void localLoginAcceptsHashesQuotedForDockerCompose() {
         assertThat(config.localAuthAvailability(bothRolesConfigured("'" + BCRYPT_12 + "'"), credentials).enabled()).isTrue();
+    }
+
+    @Test
+    void localLoginStaysOffWithoutBlowingUpWhenTheDatabaseIsUnreachable() {
+        assertThat(config.localAuthAvailability(new MockEnvironment(), unreachable()).enabled()).isFalse();
+    }
+
+    @Test
+    void environmentAccountsKeepWorkingWhileTheDatabaseIsUnreachable() {
+        assertThat(config.localAuthAvailability(bothRolesConfigured(BCRYPT_12), unreachable()).enabled()).isTrue();
+    }
+
+    /** Cua hang tra loi nhu TiDB Cloud luc mat ket noi: nem loi thay vi tra ve 0. */
+    private static LocalCredentialStore unreachable() {
+        return new InMemoryLocalCredentialStore() {
+            @Override
+            public int countActive() {
+                throw new DataAccessResourceFailureException("TiDB Cloud khong phan hoi");
+            }
+        };
     }
 }

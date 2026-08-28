@@ -1,5 +1,7 @@
 package vn.dongtien.auth;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -17,6 +19,7 @@ import java.util.regex.Pattern;
 
 @Configuration
 public class LocalAuthConfig {
+    private static final Logger LOG = LoggerFactory.getLogger(LocalAuthConfig.class);
     private static final String ADMIN_USERNAME_PROPERTY = "LOCAL_AUTH_ADMIN_USERNAME";
     private static final String ADMIN_PASSWORD_HASH_PROPERTY = "LOCAL_AUTH_ADMIN_PASSWORD_HASH";
     private static final String VIEWER_USERNAME_PROPERTY = "LOCAL_AUTH_VIEWER_USERNAME";
@@ -71,6 +74,10 @@ public class LocalAuthConfig {
         private final java.util.function.BooleanSupplier source;
         private volatile boolean value;
         private volatile long readAtMs;
+        /** Trang thai da bao, de mot su co keo dai khong sinh mot dong log moi 30 giay. */
+        private volatile State reported = State.UNKNOWN;
+
+        private enum State { UNKNOWN, READY, EMPTY, UNREACHABLE }
 
         private CachedFlag(java.util.function.BooleanSupplier source) {
             this.source = source;
@@ -81,12 +88,31 @@ public class LocalAuthConfig {
             if (readAtMs > 0 && now - readAtMs < AVAILABILITY_CACHE_MS) return value;
             try {
                 value = source.getAsBoolean();
-            } catch (DataAccessException ignored) {
+                report(value ? State.READY : State.EMPTY, null);
+            } catch (DataAccessException exception) {
                 // Trang login van phai hien duoc khi database tam thoi khong voi toi.
                 value = false;
+                report(State.UNREACHABLE, exception);
             }
             readAtMs = now;
             return value;
+        }
+
+        /**
+         * Tren trang login, "chua co tai khoan nao" va "khong doc duoc database" hien
+         * ra y het nhau, nen log la cho duy nhat phan biet duoc hai truong hop.
+         */
+        private void report(State state, DataAccessException exception) {
+            if (state == reported) return;
+            reported = state;
+            switch (state) {
+                case UNREACHABLE -> LOG.warn("Tắt đăng nhập nội bộ vì không đọc được bảng local_credential: {}",
+                        exception.getMostSpecificCause().toString());
+                case EMPTY -> LOG.info("Đăng nhập nội bộ đang tắt vì bảng local_credential chưa có tài khoản nào. "
+                        + "Tạo tài khoản bằng: java -jar dong-tien-ai.jar local-user set <username> --role=admin");
+                case READY -> LOG.info("Đăng nhập nội bộ đang bật.");
+                case UNKNOWN -> { }
+            }
         }
     }
 
