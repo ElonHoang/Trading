@@ -50,6 +50,9 @@ public class BinanceClient {
     private volatile long futuresSymbolsAt;
     private volatile List<JsonNode> tickerCache;
     private volatile long tickerCacheAt;
+    // Spot and futures are billed against separate per-IP budgets.
+    private final BinanceRateLimiter spotLimiter;
+    private final BinanceRateLimiter futuresLimiter;
 
     @Autowired
     public BinanceClient(ObjectMapper mapper) {
@@ -57,8 +60,17 @@ public class BinanceClient {
     }
 
     BinanceClient(ObjectMapper mapper, HttpClient http) {
+        this(mapper, http,
+                new BinanceRateLimiter("spot", BinanceRateLimiter.SPOT_WEIGHT_CAP),
+                new BinanceRateLimiter("futures", BinanceRateLimiter.FUTURES_WEIGHT_CAP));
+    }
+
+    BinanceClient(ObjectMapper mapper, HttpClient http,
+                  BinanceRateLimiter spotLimiter, BinanceRateLimiter futuresLimiter) {
         this.mapper = mapper;
         this.http = http;
+        this.spotLimiter = spotLimiter;
+        this.futuresLimiter = futuresLimiter;
     }
 
     public static String normalizeSymbol(String input) {
@@ -347,12 +359,16 @@ public class BinanceClient {
     }
 
     JsonNode getJson(List<String> hosts, String path) {
+        BinanceRateLimiter limiter = limiterFor(hosts);
+        // The budget is per IP, not per host, so it is checked once per request.
+        limiter.beforeRequest();
         RuntimeException last = null;
         for (String host : hosts) {
             try {
                 HttpRequest request = HttpRequest.newBuilder(URI.create(host + path)).timeout(Duration.ofSeconds(15))
                         .header("User-Agent", "dong-tien-ai-java/1.0").GET().build();
                 HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+                limiter.recordUsedWeight(response.headers().firstValue("x-mbx-used-weight-1m"));
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
                     String message = "HTTP " + response.statusCode();
                     try {
@@ -361,6 +377,14 @@ public class BinanceClient {
                             message = body.path("msg").asText() + " (code " + body.path("code").asInt() + ")";
                         }
                     } catch (RuntimeException ignored) {}
+                    if (response.statusCode() == 429 || response.statusCode() == 418) {
+                        limiter.recordThrottled(response.statusCode(), response.body(),
+                                response.headers().firstValue("retry-after"));
+                        // Every host in a pool shares one per-IP budget, so failing over here
+                        // would spend more of a budget that is already exhausted.
+                        last = new RemoteException(message, false);
+                        break;
+                    }
                     boolean invalid = message.contains("-1121") || message.toLowerCase(Locale.ROOT).contains("invalid symbol");
                     RemoteException error = new RemoteException(message, invalid);
                     if (response.statusCode() == 400 || invalid) throw error;
@@ -379,6 +403,10 @@ public class BinanceClient {
             }
         }
         throw new RemoteException("Không lấy được dữ liệu từ Binance: " + (last == null ? "unknown" : last.getMessage()), false);
+    }
+
+    private BinanceRateLimiter limiterFor(List<String> hosts) {
+        return !hosts.isEmpty() && hosts.get(0).contains("fapi.binance.com") ? futuresLimiter : spotLimiter;
     }
 
     private static void requireInterval(String interval) {

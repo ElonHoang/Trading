@@ -236,6 +236,22 @@ web/, login/, public/  browser UI only
 db/migrations/         Flyway migrations cho TiDB/MySQL
 ```
 
+### Han muc Binance
+
+Binance tinh weight theo **IP**, cua so mot phut, va tra ve so weight da dung trong header
+`X-MBX-USED-WEIGHT-1M`. `BinanceRateLimiter` doc chinh header do thay vi tu doan bang weight,
+giu rieng ngan sach cho spot (6000/phut) va futures (2400/phut).
+
+- Cham 80% han muc: request bi giu lai toi dau phut sau, tuc lam cham lai thay vi bi cam.
+- Gap `429`: doc `Retry-After`. Gap `418`/`-1003`: doc moc `banned until` ngay trong body.
+- Trong luc bi cam, client **khong goi Binance nua** ma bao loi ngay. Goi tiep khi dang bi
+  cam se keo dai lenh cam.
+- `api`, `api1`, `api2`, `data-api` dung CHUNG mot ngan sach IP. Vi vay khi gap 429/418,
+  `getJson` **khong** chuyen sang host khac — lam vay chi tieu them phan han muc da het.
+
+Han muc nay theo tung tien trinh. Web tren Render va runner GitHub Actions dung IP datacenter
+dung chung, nen van co the bi cam vi luu luong cua nguoi khac tren cung IP.
+
 ## Kiem thu
 
 ```powershell
