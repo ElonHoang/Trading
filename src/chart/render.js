@@ -26,6 +26,15 @@ export const COLORS = {
   crosshair: '#64748b',
 };
 
+/**
+ * Bảng màu thực dùng khi vẽ. Không truyền `colors` thì đúng là COLORS (bot Telegram
+ * và mọi nơi cũ không đổi một nét nào). Trang web truyền màu theo giao diện sáng/tối.
+ * Màu tăng/giảm phải là hex 6 ký tự: bên dưới nối thêm 2 ký tự alpha vào sau (vd. `${C.up}33`).
+ */
+function themed(colors) {
+  return colors ? { ...COLORS, ...colors } : COLORS;
+}
+
 /* ---------- format (dùng chung để web và ảnh hiện số giống nhau) ---------- */
 
 // Crypto có mã giá rất nhỏ (SHIB ~0.000008) nên số chữ số thập phân phải co giãn.
@@ -91,9 +100,9 @@ function polyline(ctx, series, color, xOf, yOf, width = 1.3) {
   ctx.stroke();
 }
 
-function crosshair(ctx, hover, top, height, xOf) {
+function crosshair(ctx, hover, top, height, xOf, color) {
   if (hover == null) return;
-  ctx.strokeStyle = COLORS.crosshair;
+  ctx.strokeStyle = color;
   ctx.setLineDash([3, 3]);
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -121,8 +130,10 @@ export const FORWARD_RATIO = 0.34;
 
 export function renderPricePanel(ctx, {
   candles, volumeAvg = [], interval, width, height, levels = null, walls = [],
-  setup = null, hover = null, font = '11px sans-serif', volumeRatio = 0.2,
+  setup = null, hover = null, font = '11px sans-serif', volumeRatio = 0.2, colors = null,
+  timeTicks = 6, compact: narrow = false,
 }) {
+  const C = themed(colors);
   ctx.font = font;
   const volH = Math.round((height - PAD.top - PAD.bottom) * volumeRatio);
   const fullW = width - PAD.left - PAD.right;
@@ -175,8 +186,8 @@ export function renderPricePanel(ctx, {
   const priceDec = decimalsFor(candles[candles.length - 1].close);
 
   // Lưới ngang + nhãn giá bên phải
-  ctx.strokeStyle = COLORS.grid;
-  ctx.fillStyle = COLORS.text;
+  ctx.strokeStyle = C.grid;
+  ctx.fillStyle = C.text;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 1;
@@ -204,7 +215,7 @@ export function renderPricePanel(ctx, {
     for (const lv of (list ?? []).slice(0, 3)) {
       if (lv.price < lo || lv.price > hi) continue;
       const y = yOf(lv.price);
-      const color = kind === 'support' ? COLORS.support : COLORS.resistance;
+      const color = kind === 'support' ? C.support : C.resistance;
       ctx.strokeStyle = color;
       ctx.lineWidth = Math.min(2.5, 1 + ((lv.touches ?? 1) - 1) * 0.5);
       ctx.setLineDash([5, 4]);
@@ -233,7 +244,7 @@ export function renderPricePanel(ctx, {
   for (const w of wallsToDraw) {
     if (w.price < lo || w.price > hi) continue;
     const y = yOf(w.price);
-    const color = w.side === 'bid' ? COLORS.support : COLORS.resistance;
+    const color = w.side === 'bid' ? C.support : C.resistance;
     ctx.strokeStyle = color;
     ctx.globalAlpha = 0.28;
     ctx.lineWidth = 5;
@@ -256,7 +267,7 @@ export function renderPricePanel(ctx, {
   const bodyW = Math.max(1, Math.min(step * 0.7, 14));
   for (let i = 0; i < candles.length; i++) {
     const c = candles[i];
-    const color = c.close >= c.open ? COLORS.up : COLORS.down;
+    const color = c.close >= c.open ? C.up : C.down;
     const x = xOf(i);
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
@@ -295,8 +306,8 @@ export function renderPricePanel(ctx, {
       return { top, h, y2 };
     };
 
-    const profit = box(lastTp?.price, '#26a69a33', '#26a69a99');
-    const risk = box(setup.stopLoss, '#ef535033', '#ef535099');
+    const profit = box(lastTp?.price, `${C.up}33`, `${C.up}99`);
+    const risk = box(setup.stopLoss, `${C.down}33`, `${C.down}99`);
 
     // Vạch + nhãn cho TỪNG mức TP, không chỉ mức cuối — để đọc được cả lộ trình.
     const usedBox = [];
@@ -309,7 +320,7 @@ export function renderPricePanel(ctx, {
     for (const tp of setup.targets ?? []) {
       const y = clampY(yOf(tp.price));
       ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = '#26a69aaa';
+      ctx.strokeStyle = `${C.up}aa`;
       ctx.beginPath();
       ctx.moveTo(zoneX, y);
       ctx.lineTo(zoneX + zoneW, y);
@@ -317,12 +328,13 @@ export function renderPricePanel(ctx, {
       ctx.setLineDash([]);
       if (claimBox(y)) {
         const movePct = ((tp.price - setup.entry) / setup.entry) * 100;
-        const text = `${tp.label} ${fmt(tp.price, priceDec)} (${pct(movePct)})`;
+        const text = narrow ? `${tp.label} ${pct(movePct, 1)}`
+          : `${tp.label} ${fmt(tp.price, priceDec)} (${pct(movePct)})`;
         ctx.font = font;
         const w = ctx.measureText(text).width + 10;
-        ctx.fillStyle = '#26a69a';
+        ctx.fillStyle = C.up;
         ctx.fillRect(zoneX + 3, y - 8, w, 16);
-        ctx.fillStyle = COLORS.accentInk;
+        ctx.fillStyle = C.accentInk;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(text, zoneX + 8, y);
@@ -330,7 +342,7 @@ export function renderPricePanel(ctx, {
     }
 
     // Đường entry kẻ mảnh qua phần nến để thấy mức so với quá khứ.
-    ctx.strokeStyle = COLORS.entry;
+    ctx.strokeStyle = C.entry;
     ctx.setLineDash([5, 4]);
     ctx.lineWidth = 1.2;
     ctx.beginPath();
@@ -346,7 +358,7 @@ export function renderPricePanel(ctx, {
       const x = align === 'right' ? zoneX + zoneW - w : zoneX + 2;
       ctx.fillStyle = bg;
       ctx.fillRect(x, y - 8, w, 16);
-      ctx.fillStyle = COLORS.accentInk;
+      ctx.fillStyle = C.accentInk;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(text, x + 5, y);
@@ -354,23 +366,25 @@ export function renderPricePanel(ctx, {
 
     const movePct = (p) => ((p - setup.entry) / setup.entry) * 100;
     if (risk && setup.stopLoss != null) {
-      tag(`Cắt lỗ ${fmt(setup.stopLoss, priceDec)} (${pct(movePct(setup.stopLoss))})`,
-        clampY(yOf(setup.stopLoss)), '#ef5350');
+      tag(narrow ? `Cắt lỗ ${pct(movePct(setup.stopLoss), 1)}`
+        : `Cắt lỗ ${fmt(setup.stopLoss, priceDec)} (${pct(movePct(setup.stopLoss))})`,
+      clampY(yOf(setup.stopLoss)), C.down);
     }
     // Hộp "chờ" (dựng từ phép chiếu, chưa phải kèo) phải khác hộp kèo thật.
     const dir = setup.side === 'long' ? 'LONG' : 'SHORT';
-    tag(setup.pending
-      ? `CHỜ ${dir} · qua ${fmt(setup.entry, priceDec)}`
-        + (setup.rrToTp1 ? ` · R:R ${fmt(setup.rrToTp1, 2)}` : '')
-      : `${dir} vào ${fmt(setup.entry, priceDec)}`
-        + (setup.rrToTp1 ? ` · R:R ${fmt(setup.rrToTp1, 2)}` : ''),
-    yEntry, setup.pending ? COLORS.text : COLORS.entry, 'left');
+    tag(narrow ? (setup.pending ? `CHỜ ${dir}` : `${dir} vào`)
+      : setup.pending
+        ? `CHỜ ${dir} · qua ${fmt(setup.entry, priceDec)}`
+          + (setup.rrToTp1 ? ` · R:R ${fmt(setup.rrToTp1, 2)}` : '')
+        : `${dir} vào ${fmt(setup.entry, priceDec)}`
+          + (setup.rrToTp1 ? ` · R:R ${fmt(setup.rrToTp1, 2)}` : ''),
+    yEntry, setup.pending ? C.text : C.entry, 'left');
   }
 
   // Đường giá hiện tại + thẻ giá bên phải
   const lastClose = candles[candles.length - 1].close;
   const yLast = yOf(lastClose);
-  ctx.strokeStyle = COLORS.accent;
+  ctx.strokeStyle = C.accent;
   ctx.setLineDash([4, 3]);
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -378,9 +392,9 @@ export function renderPricePanel(ctx, {
   ctx.lineTo(width - PAD.right, yLast);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = COLORS.accent;
+  ctx.fillStyle = C.accent;
   ctx.fillRect(width - PAD.right + 2, yLast - 8, PAD.right - 4, 16);
-  ctx.fillStyle = COLORS.accentInk;
+  ctx.fillStyle = C.accentInk;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(fmt(lastClose, priceDec), width - PAD.right + 6, yLast);
@@ -391,25 +405,25 @@ export function renderPricePanel(ctx, {
   const vy = (v) => volTop + volH - (v / volMax) * volH;
   for (let i = 0; i < candles.length; i++) {
     const c = candles[i];
-    ctx.fillStyle = c.close >= c.open ? '#26a69a55' : '#ef535055';
+    ctx.fillStyle = c.close >= c.open ? `${C.up}55` : `${C.down}55`;
     ctx.fillRect(xOf(i) - bodyW / 2, vy(c.volume), bodyW, Math.max(0.6, volTop + volH - vy(c.volume)));
   }
   if (volumeAvg.some((v) => v != null)) {
     ctx.setLineDash([4, 3]);
-    polyline(ctx, volumeAvg, COLORS.volAvg, xOf, vy, 1.2);
+    polyline(ctx, volumeAvg, C.volAvg, xOf, vy, 1.2);
     ctx.setLineDash([]);
   }
 
   // Nhãn thời gian: ~6 mốc, tránh chữ chồng nhau
-  ctx.fillStyle = COLORS.text;
+  ctx.fillStyle = C.text;
   ctx.textBaseline = 'top';
-  const every = Math.max(1, Math.ceil(candles.length / 6));
+  const every = Math.max(1, Math.ceil(candles.length / timeTicks));
   for (let i = 0; i < candles.length; i += every) {
     ctx.textAlign = i === 0 ? 'left' : 'center';
     ctx.fillText(timeLabel(candles[i].openTime, interval), xOf(i), height - PAD.bottom + 7);
   }
 
-  crosshair(ctx, hover, PAD.top, plotH + 6 + volH, xOf);
+  crosshair(ctx, hover, PAD.top, plotH + 6 + volH, xOf, C.crosshair);
 }
 
 /**
@@ -418,8 +432,9 @@ export function renderPricePanel(ctx, {
  */
 export function renderCvdPanel(ctx, {
   candles, cvd, cvdDelta, width, height, hover = null, font = '11px sans-serif',
-  forwardRatio = 0,
+  forwardRatio = 0, colors = null, compact: narrow = false,
 }) {
+  const C = themed(colors);
   ctx.font = font;
   // Phải khớp vùng chừa của panel giá, nếu không trục thời gian hai panel lệch nhau.
   const plotW = (width - PAD.left - PAD.right) * (1 - forwardRatio);
@@ -434,8 +449,8 @@ export function renderCvdPanel(ctx, {
   const span = hi - lo || Math.abs(hi) || 1;
   const yLine = (v) => 14 + lineH - ((v - lo) / span) * lineH;
 
-  ctx.strokeStyle = COLORS.grid;
-  ctx.fillStyle = COLORS.text;
+  ctx.strokeStyle = C.grid;
+  ctx.fillStyle = C.text;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 1;
@@ -446,7 +461,7 @@ export function renderCvdPanel(ctx, {
     ctx.stroke();
     ctx.fillText(compact(v), width - PAD.right + 7, yLine(v));
   }
-  polyline(ctx, cvd, COLORS.cvd, xOf, yLine, 1.6);
+  polyline(ctx, cvd, C.cvd, xOf, yLine, 1.6);
 
   // Cột delta chuẩn hoá theo volume từng nến
   const share = cvdDelta.map((d, i) => (d != null && candles[i]?.volume ? d / candles[i].volume : null));
@@ -455,22 +470,23 @@ export function renderCvdPanel(ctx, {
   const yBar = (v) => barsTop + barsH / 2 - (v / extent) * (barsH / 2);
   const barW = Math.max(1, Math.min((plotW / candles.length) * 0.7, 14));
 
-  ctx.strokeStyle = COLORS.gridSoft;
+  ctx.strokeStyle = C.gridSoft;
   ctx.beginPath();
   ctx.moveTo(PAD.left, yBar(0));
   ctx.lineTo(PAD.left + plotW, yBar(0));
   ctx.stroke();
   for (let i = 0; i < share.length; i++) {
     if (share[i] == null) continue;
-    ctx.fillStyle = share[i] >= 0 ? '#26a69acc' : '#ef5350cc';
+    ctx.fillStyle = share[i] >= 0 ? `${C.up}cc` : `${C.down}cc`;
     ctx.fillRect(xOf(i) - barW / 2, share[i] >= 0 ? yBar(share[i]) : yBar(0),
       barW, Math.max(0.8, Math.abs(yBar(share[i]) - yBar(0))));
   }
-  ctx.fillStyle = COLORS.text;
+  ctx.fillStyle = C.text;
   ctx.textAlign = 'left';
   ctx.fillText(`±${(extent * 100).toFixed(0)}%`, width - PAD.right + 7, yBar(0));
 
   ctx.textBaseline = 'top';
-  ctx.fillText('CVD luỹ tiến · cột = mua chủ động ròng mỗi nến (% KL)', PAD.left + 2, 2);
-  crosshair(ctx, hover, 14, lineH + 4 + barsH, xOf);
+  ctx.fillText(narrow ? 'CVD luỹ tiến · cột: mua chủ động ròng'
+    : 'CVD luỹ tiến · cột = mua chủ động ròng mỗi nến (% KL)', PAD.left + 2, 2);
+  crosshair(ctx, hover, 14, lineH + 4 + barsH, xOf, C.crosshair);
 }

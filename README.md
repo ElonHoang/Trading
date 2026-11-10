@@ -336,8 +336,10 @@ code. Khi sửa các module dùng chung, hãy kiểm tra chúng không import `n
 
 ```
 index.html               Dashboard tĩnh (chạy cục bộ khi cần)
-web/                     Lớp riêng của browser: app.js, style.css, store.js,
-                         model-store.js, claude.js, worker.js
+web/                     Lớp riêng của browser: app.js, store.js, model-store.js,
+                         claude.js, worker.js; giao diện dùng chung cho CẢ HAI trang:
+                         style.css (màu, bố cục), ui.js (sáng/tối, chú thích thuật ngữ,
+                         khối kết luận / vì sao / thang giá), charts.js (biểu đồ SVG của dashboard)
 public/index.html        Giao diện realtime (WebSocket Binance)
 src/                     LÕI — dùng chung browser & Node
   data/binance.js        Nến, ticker, funding, OI, sổ lệnh + tường, định vị đám đông,

@@ -4,188 +4,154 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Phân tích dòng tiền realtime</title>
+<link rel="stylesheet" href="/web/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📈</text></svg>">
 <style>
-  :root {
-    --bg: #0e1116;
-    --panel: #161b22;
-    --border: #262d38;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --up: #26a69a;
-    --down: #ef5350;
-    --accent: #58a6ff;
-    --warn: #f0b90b;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
-  }
-  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 16px 48px; }
-  h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
-  h1 span { color: var(--muted); font-weight: 400; }
-  .hint { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
-  .hint a { color: var(--accent); }
-
-  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
-  input, select, button {
-    font: inherit; color: var(--text); background: var(--panel);
-    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
-  }
-  input { width: 130px; text-transform: uppercase; }
-  input::placeholder { text-transform: none; color: var(--muted); }
-  button { cursor: pointer; }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { opacity: .5; cursor: default; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #04101f; font-weight: 600; }
-
-  #conn { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); margin-left: auto; }
-  #conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  /* Chỉ những thứ riêng của trang realtime; phần còn lại dùng chung /web/style.css */
+  #conn { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text-3); white-space: nowrap; }
+  #conn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--flat); flex: none; }
+  #connText { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  #conn.live { color: var(--up-text); }
   #conn.live .dot { background: var(--up); animation: pulse 1.8s ease-in-out infinite; }
-  #conn.live { color: var(--up); }
-  #conn.connecting .dot { background: var(--warn); animation: pulse .9s ease-in-out infinite; }
+  #conn.connecting .dot { background: var(--warning); animation: pulse .9s ease-in-out infinite; }
+  #conn.offline { color: var(--down-text); }
   #conn.offline .dot { background: var(--down); }
-  #conn.offline { color: var(--down); }
   @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
+  @media (prefers-reduced-motion: reduce) { #conn .dot { animation: none !important; } }
 
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px; background: var(--panel);
-    border: 1px solid var(--border); border-radius: 999px; padding: 4px 6px 4px 11px; font-size: 13px;
+  .hint { margin: 0; color: var(--text-3); font-size: 13.5px; }
+
+  .wl { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wl-item {
+    display: inline-flex; align-items: center; background: var(--surface);
+    border: 1px solid var(--line-strong); border-radius: 999px; font-size: 14px; font-weight: 600;
   }
-  .chip button { border: 0; background: none; padding: 0 4px; color: var(--muted); line-height: 1; }
-  .chip button:hover { color: var(--down); }
-  .chip > span { cursor: pointer; }
-  .chip > span:hover { color: var(--accent); }
+  .wl-item > span { cursor: pointer; padding: 6px 4px 6px 12px; min-height: 34px; display: inline-flex; align-items: center; }
+  .wl-item > span:hover { color: var(--accent); }
+  .wl-item > button { border: 0; background: none; padding: 0 10px 0 4px; min-height: 34px; color: var(--text-3); font-size: 16px; line-height: 1; }
+  .wl-item > button:hover { color: var(--down-text); background: none; }
+  .wl-empty { color: var(--text-3); font-size: 14px; }
 
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
-  .hero { display: flex; flex-wrap: wrap; gap: 26px; padding: 16px 18px; margin-bottom: 14px; align-items: flex-start; }
-  .hero .price { font-size: 27px; font-weight: 650; letter-spacing: -.5px; }
-  .hero dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-  .hero dd { margin: 3px 0 0; font-variant-numeric: tabular-nums; }
-  .hero .signal { font-size: 19px; font-weight: 650; }
-  .up { color: var(--up); }
-  .down { color: var(--down); }
-  .tick-up { animation: flashUp .5s ease-out; }
-  .tick-down { animation: flashDown .5s ease-out; }
-  @keyframes flashUp { from { background: #26a69a44 } to { background: transparent } }
-  @keyframes flashDown { from { background: #ef535044 } to { background: transparent } }
+  #msg { display: none; }
+  #msg.err { display: block; }
+  #msg.load { display: block; }
 
-  .chartbox { position: relative; padding: 10px 4px 4px; margin-bottom: 14px; }
+  .tick-up { animation: flashUp .6s ease-out; }
+  .tick-down { animation: flashDown .6s ease-out; }
+  @keyframes flashUp { from { background: color-mix(in srgb, var(--up) 35%, transparent); } to { background: transparent; } }
+  @keyframes flashDown { from { background: color-mix(in srgb, var(--down) 35%, transparent); } to { background: transparent; } }
+
+  .chartbox { position: relative; }
+  .chartbox .range { margin-left: auto; font-size: 13px; color: var(--text-3); }
   canvas { display: block; width: 100%; }
-  #chart { height: 380px; }
-  #cvd { height: 150px; }
-  .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 0 14px 8px; font-size: 12px; color: var(--muted); }
-  .legend i { display: inline-block; width: 16px; height: 2px; vertical-align: middle; margin-right: 5px; }
+  #chart { height: 420px; }
+  #cvd { height: 160px; margin-top: 4px; }
+  @media (max-width: 700px) { #chart { height: 340px; } #cvd { height: 140px; } }
+  #tip { position: absolute; z-index: 5; white-space: nowrap; }
 
-  #tip {
-    position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
-    background: #0b0f14ee; border: 1px solid var(--border); border-radius: 6px;
-    padding: 8px 10px; font-size: 12px; font-variant-numeric: tabular-nums;
-    white-space: nowrap; z-index: 5;
-  }
-  #tip b { color: var(--muted); font-weight: 400; display: inline-block; min-width: 82px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 0; }
+  .cell { background: var(--surface-2); border-radius: 10px; padding: 10px 14px; }
+  .cell dt { color: var(--text-3); font-size: 13px; font-weight: 600; }
+  .cell dd { margin: 3px 0 0; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .cell small { display: block; color: var(--text-3); font-size: 12.5px; font-weight: 400; margin-top: 2px; }
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
-  .cell { background: var(--panel); padding: 12px 14px; }
-  .cell dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-  .cell dd { margin: 4px 0 0; font-size: 16px; font-variant-numeric: tabular-nums; }
-  .cell small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
-
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
-  .cols section { padding: 14px 16px; }
-  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; font-weight: 500; }
-  .cols li { list-style: none; display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-variant-numeric: tabular-nums; }
-  .cols ul { margin: 0; padding: 0; }
-  .cols .touch { color: var(--muted); font-size: 12px; }
-
-  #reasons { padding: 14px 16px; margin-bottom: 14px; }
-  #reasons details { border-top: 1px solid var(--border); padding: 7px 0; }
-  #reasons details:first-of-type { border-top: 0; }
-  #reasons summary { cursor: pointer; display: flex; justify-content: space-between; gap: 10px; font-variant-numeric: tabular-nums; }
-  #reasons ul { margin: 6px 0 2px; padding-left: 18px; color: var(--muted); font-size: 13px; }
-
-  #conflicts { padding: 0; margin: 0 0 14px; list-style: none; }
-  #conflicts li {
-    background: #3a2d10; border: 1px solid #6b5220; color: #ffd98a;
-    border-radius: 8px; padding: 9px 13px; margin-bottom: 6px; font-size: 13px;
-  }
-
-  #msg { padding: 11px 14px; border-radius: 8px; margin-bottom: 14px; display: none; }
-  #msg.err { display: block; background: #3d1618; border: 1px solid #6b2226; color: #ffb4b0; }
-  #msg.load { display: block; background: var(--panel); border: 1px solid var(--border); color: var(--muted); }
-
-  .foot { color: var(--muted); font-size: 12px; margin-top: 18px; }
-  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } #conn { margin-left: 0; } }
+  .foot { color: var(--text-3); font-size: 13px; text-align: center; margin: 4px 0 0; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Phân tích dòng tiền <span>· realtime từ Binance</span></h1>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand">📈 <span class="brand-name">Phân tích kỹ thuật <span>crypto</span></span></div>
+    <nav class="nav" aria-label="Chuyển trang">
+      <a href="/">Tổng quan</a>
+      <a href="/realtime/" aria-current="page">Realtime</a>
+    </nav>
+    <div class="spacer"></div>
+    <div id="conn"><span class="dot"></span><span id="connText">chưa kết nối</span></div>
+    <button class="icon" id="btn-theme" type="button" aria-label="Đổi giao diện sáng/tối"></button>
+  </div>
+</header>
+
+<main>
   <p class="hint">
-    Chỉ dùng order book, volume, OI, funding rate, CVD và hỗ trợ/kháng cự.
-    Nến cập nhật liên tục qua WebSocket; điểm và chỉ báo tính lại khi nến đóng
-    (chỉ báo phải tính trên nến đã đóng). Dashboard đầy đủ: <a href="/">/</a>
+    Giá và nến chạy trực tiếp từ Binance. Kết luận và điểm chỉ tính lại khi nến đóng
+    (chỉ báo phải tính trên nến đã đóng). Muốn xem đầy đủ hơn, mở trang <a href="/">Tổng quan</a>.
   </p>
 
   <div class="toolbar">
-    <input id="symbol" value="BTC" placeholder="BTC, ETH, SOL…" autocomplete="off">
-    <select id="interval"></select>
-    <button class="primary" id="go">Phân tích</button>
-    <button id="save">+ Theo dõi</button>
-    <div id="conn"><span class="dot"></span><span id="connText">chưa kết nối</span></div>
+    <label class="field grow"><span>Mã token</span>
+      <input type="text" id="symbol" value="BTC" placeholder="BTC, ETH, SOL…" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    </label>
+    <label class="field grow"><span>Khung nến</span>
+      <select id="interval"></select>
+    </label>
+    <button class="primary" id="go" type="button">Phân tích</button>
+    <button id="save" type="button" title="Thêm mã này vào danh sách theo dõi">+ Theo dõi</button>
   </div>
 
-  <div class="chips" id="watchlist"></div>
-  <div id="msg"></div>
-  <ul id="conflicts"></ul>
+  <div class="wl" id="watchlist" aria-label="Danh sách theo dõi"></div>
+  <div id="msg" class="banner" role="status"></div>
 
-  <dl class="card hero" id="hero" hidden></dl>
+  <div id="verdict"></div>
 
-  <div class="card chartbox">
-    <div class="legend">
-      <span><i style="background:#26a69a"></i>Hỗ trợ / tường mua</span>
-      <span><i style="background:#ef5350"></i>Kháng cự / tường bán</span>
-      <span><i style="background:#8b949e"></i>Khối lượng TB</span>
-      <span><i style="background:#58a6ff"></i>CVD</span>
-      <span style="margin-left:auto" id="range"></span>
+  <section class="card chartbox">
+    <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px">
+      <h2 class="card-title" style="margin:0">Biểu đồ giá trực tiếp</h2>
+      <span class="range" id="range"></span>
     </div>
-    <canvas id="chart"></canvas>
-    <canvas id="cvd"></canvas>
-    <div id="tip"></div>
-  </div>
+    <p class="sub" style="margin-bottom:10px">Rê chuột hoặc chạm vào biểu đồ để xem từng nến.</p>
+    <div class="layers" id="layers" role="group" aria-label="Chọn thông tin hiển thị trên biểu đồ">
+      <button type="button" class="toggle" data-layer="levels" aria-pressed="true" title="Vùng giá mà giá hay bật lại (hỗ trợ) hoặc bị chặn (kháng cự)">Hỗ trợ / kháng cự</button>
+      <button type="button" class="toggle" data-layer="plan" aria-pressed="true" title="Mức vào lệnh, cắt lỗ và chốt lời gợi ý (chỉ hiện khi có kịch bản)">Kịch bản vào lệnh</button>
+      <button type="button" class="toggle" data-layer="walls" aria-pressed="false" title="Các mức có lượng lệnh chờ mua/bán lớn bất thường trong sổ lệnh. Lưu ý: lệnh lớn có thể bị đặt rồi huỷ để đánh lừa, nên đối chiếu với dòng tiền chủ động.">Tường lệnh</button>
+    </div>
+    <div class="legend" id="legend"></div>
+    <canvas id="chart" role="img" aria-label="Biểu đồ nến trực tiếp kèm hỗ trợ, kháng cự và kịch bản"></canvas>
+    <canvas id="cvd" role="img" aria-label="Dòng tiền chủ động CVD"></canvas>
+    <div class="tooltip" id="tip" role="tooltip"></div>
+  </section>
 
-  <dl class="grid" id="stats"></dl>
-
-  <div class="cols">
+  <div class="grid-2">
     <section class="card">
-      <h2>Kháng cự</h2>
-      <ul id="res"></ul>
+      <h2>Vì sao ra kết luận này?</h2>
+      <p class="sub">Mỗi dòng là một nhóm chỉ báo. Thanh xanh kéo điểm lên, thanh đỏ kéo điểm xuống. Bấm vào dòng để đọc lý do.</p>
+      <div id="breakdown" class="muted">Đang tải…</div>
     </section>
     <section class="card">
-      <h2>Hỗ trợ</h2>
-      <ul id="sup"></ul>
+      <h2>Vùng giá quan trọng</h2>
+      <p class="sub">Các mức gần giá hiện tại nhất mà giá hay bật lại hoặc bị chặn.</p>
+      <div id="ladder" class="muted">Đang tải…</div>
     </section>
   </div>
 
-  <div class="card" id="reasons"></div>
+  <section class="card">
+    <details class="fold">
+      <summary><span>Số liệu chi tiết <small>(cho người đã quen với chỉ báo)</small></span></summary>
+      <div class="fold-body"><dl class="stats" id="stats"></dl></div>
+    </details>
+  </section>
+
   <p class="foot" id="foot"></p>
-</div>
+  <p class="foot">Đây là công cụ phân tích kỹ thuật tự động, không phải lời khuyên đầu tư.</p>
+</main>
 
 <script type="module">
 // Cùng bộ vẽ mà bot Telegram dùng để xuất PNG -> chart trên web và trên bot giống nhau.
 import {
-  renderPricePanel, renderCvdPanel, PAD,
+  renderPricePanel, renderCvdPanel, PAD, FORWARD_RATIO,
   decimalsFor, fmt, pct, compact, timeLabel,
 } from '/src/chart/render.js';
+import {
+  initTheme, initTerms, chartColors, verdictHTML, breakdownHTML, ladderHTML, nearestLevels,
+  term, esc, num, toneOf,
+} from '/web/ui.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
   symbol: $('symbol'), interval: $('interval'), go: $('go'), save: $('save'),
-  watchlist: $('watchlist'), msg: $('msg'), hero: $('hero'), stats: $('stats'),
-  res: $('res'), sup: $('sup'), reasons: $('reasons'), conflicts: $('conflicts'),
+  watchlist: $('watchlist'), msg: $('msg'), verdict: $('verdict'), stats: $('stats'),
+  breakdown: $('breakdown'), ladder: $('ladder'), legend: $('legend'),
   chart: $('chart'), cvd: $('cvd'), tip: $('tip'), range: $('range'), foot: $('foot'),
   conn: $('conn'), connText: $('connText'),
 };
@@ -194,13 +160,13 @@ let snap = null;      // snapshot từ /api/analyze
 let candles = [];     // nến dựng từ snap.series, nến cuối được WebSocket cập nhật
 let hover = null;
 let prevPrice = null;
+let thresholds = null;
 
-const GROUP_LABELS = {
-  cvd: 'CVD', volume: 'Khối lượng', derivatives: 'Phái sinh (OI + funding)', positioning: 'Định vị đám đông',
-  structure: 'Hỗ trợ/kháng cự', orderBook: 'Sổ lệnh',
-};
+// Lớp hiển thị dùng chung khoá lưu với dashboard (trang kia còn thêm lớp "volume").
+const LAYERS_KEY = 'ta.layers';
+const layers = { levels: true, plan: true, walls: false };
+try { Object.assign(layers, JSON.parse(localStorage.getItem(LAYERS_KEY) || '{}')); } catch { /* dùng mặc định */ }
 
-const cls = (v) => (v == null ? '' : v >= 0 ? 'up' : 'down');
 const clockLabel = (ms) => new Date(ms).toLocaleTimeString('vi-VN');
 
 /* ---------- vẽ ---------- */
@@ -218,22 +184,37 @@ function prepare(canvas) {
   return { ctx, w, h };
 }
 
-const FONT = '11px ui-sans-serif, system-ui, sans-serif';
+const FONT = '12px ui-sans-serif, system-ui, sans-serif';
+
+/** Kịch bản dùng được để vẽ hộp lãi/lỗ (cùng hình dạng mà renderPricePanel nhận). */
+const activePlan = () => (layers.plan && snap?.levels && snap.levels.side !== 'none'
+  && snap.levels.entry != null && snap.levels.stopLoss != null ? snap.levels : null);
 
 function draw() {
   if (!snap || !candles.length) return;
+  const colors = chartColors();
+  const plan = activePlan();
+  const last = candles[candles.length - 1].close;
+  const levels = layers.levels
+    ? nearestLevels(snap.structure, last, { perSide: els.chart.clientWidth < 560 ? 1 : 2, minGapPct: 1.2 }) : null;
   {
     const { ctx, w, h } = prepare(els.chart);
+    // Khung hẹp (điện thoại): ít mốc thời gian hơn và nhãn kịch bản ngắn hơn.
+    const plotW = (w - PAD.left - PAD.right) * (plan ? 1 - FORWARD_RATIO : 1);
     renderPricePanel(ctx, {
+      timeTicks: Math.max(1, Math.min(6, Math.floor(plotW / 120))),
+      compact: w < 560,
       candles,
       volumeAvg: snap.series.volumeAvg,
       interval: snap.interval,
       width: w,
       height: h,
-      levels: snap.structure,
-      walls: snap.orderBook?.walls ?? [],
+      levels,
+      walls: layers.walls ? (snap.orderBook?.walls ?? []) : [],
+      setup: plan,
       hover,
       font: FONT,
+      colors,
     });
   }
   {
@@ -246,8 +227,23 @@ function draw() {
       height: h,
       hover,
       font: FONT,
+      forwardRatio: plan ? FORWARD_RATIO : 0,   // trục thời gian hai khung phải khớp nhau
+      compact: w < 560,
+      colors,
     });
   }
+}
+
+function renderLegend() {
+  const item = (swatch, label) => `<span class="legend-item">${swatch}${label}</span>`;
+  const sw = (bg, extra = '') => `<span class="legend-swatch" style="background:${bg};${extra}"></span>`;
+  const dash = (c) => `repeating-linear-gradient(90deg, ${c} 0 4px, transparent 4px 7px)`;
+  const out = [item(sw('var(--up)'), 'Nến tăng'), item(sw('var(--down)'), 'Nến giảm')];
+  if (layers.levels) out.push(item(sw(dash('var(--up)')), 'Hỗ trợ'), item(sw(dash('var(--down)')), 'Kháng cự'));
+  if (layers.walls) out.push(item(sw('var(--text-3)', 'height:6px;opacity:.45'), 'Tường lệnh'));
+  if (activePlan()) out.push(item(sw('var(--up)', 'height:8px;opacity:.35'), 'Vùng lãi'), item(sw('var(--down)', 'height:8px;opacity:.35'), 'Vùng lỗ'));
+  out.push(item(sw(dash('var(--text-3)')), 'Khối lượng TB'), item(sw('var(--accent)'), 'CVD'));
+  els.legend.innerHTML = out.join('');
 }
 
 // WebSocket đẩy tick liên tục, nên gộp mọi yêu cầu vẽ vào một frame.
@@ -258,7 +254,7 @@ function scheduleRender() {
   requestAnimationFrame(() => {
     frameQueued = false;
     draw();
-    renderHero();
+    renderTick();
   });
 }
 
@@ -267,7 +263,8 @@ function scheduleRender() {
 function onMove(e) {
   if (!candles.length) return;
   const rect = els.chart.getBoundingClientRect();
-  const plotW = rect.width - PAD.left - PAD.right;
+  // Có hộp kịch bản thì nến chỉ chiếm phần trái của khung.
+  const plotW = (rect.width - PAD.left - PAD.right) * (activePlan() ? 1 - FORWARD_RATIO : 1);
   const i = Math.floor(((e.clientX - rect.left - PAD.left) / plotW) * candles.length);
   if (i < 0 || i >= candles.length) return hideTip();
 
@@ -279,60 +276,73 @@ function onMove(e) {
   const chg = ((c.close - c.open) / c.open) * 100;
   const delta = snap.series.cvdDelta[i];
   const share = delta != null && c.volume ? (delta / c.volume) * 100 : null;
+  const row = (k, v) => `<div class="tt-row"><span>${k}</span><span>${v}</span></div>`;
   els.tip.innerHTML = `
-    <div style="margin-bottom:4px">${timeLabel(c.openTime, snap.interval)}</div>
-    <div><b>Mở / Đóng</b> ${fmt(c.open, d)} → <span class="${cls(chg)}">${fmt(c.close, d)} (${pct(chg)})</span></div>
-    <div><b>Cao / Thấp</b> ${fmt(c.high, d)} / ${fmt(c.low, d)}</div>
-    <div><b>Khối lượng</b> ${compact(c.volume)}</div>
-    <div><b>Mua chủ động</b> ${share == null ? '—' : `<span class="${cls(share)}">${pct(share, 1)} KL</span>`}</div>
-    <div><b>CVD</b> ${compact(snap.series.cvd[i])}</div>`;
-  els.tip.style.opacity = '1';
+    <div class="tt-time">${timeLabel(c.openTime, snap.interval)}</div>
+    ${row('Mở', fmt(c.open, d))}${row('Cao', fmt(c.high, d))}${row('Thấp', fmt(c.low, d))}
+    ${row('Đóng', `<span class="${toneOf(chg)}">${fmt(c.close, d)} (${pct(chg)})</span>`)}
+    ${row('Khối lượng', compact(c.volume))}
+    ${row('Mua chủ động', share == null ? '—' : `<span class="${toneOf(share)}">${pct(share, 1)} KL</span>`)}
+    ${row('CVD luỹ tiến', compact(snap.series.cvd[i]))}`;
+  els.tip.classList.add('on');
 
   // Lật tooltip sang trái khi sắp tràn mép phải.
   const box = els.chart.parentElement.getBoundingClientRect();
   const x = e.clientX - box.left;
   const tw = els.tip.offsetWidth;
   els.tip.style.left = `${x + tw + 24 > box.width ? x - tw - 14 : x + 14}px`;
-  els.tip.style.top = `${Math.min(e.clientY - box.top + 12, box.height - els.tip.offsetHeight - 8)}px`;
+  els.tip.style.top = `${Math.max(4, Math.min(e.clientY - box.top + 12, box.height - els.tip.offsetHeight - 8))}px`;
 }
 
 function hideTip() {
-  els.tip.style.opacity = '0';
+  els.tip.classList.remove('on');
   if (hover !== null) { hover = null; draw(); }
 }
 
 /* ---------- render số ---------- */
 
-function renderHero() {
+const livePrice = () => (candles.length ? candles[candles.length - 1].close : snap.price.lastClose);
+
+/** Dựng lại cả khối kết luận. Chỉ gọi khi có snapshot mới (không gọi theo từng tick). */
+function renderVerdict() {
   if (!snap) return;
-  const price = candles.length ? candles[candles.length - 1].close : snap.price.lastClose;
-  const d = decimalsFor(price);
+  const price = livePrice();
+  els.verdict.innerHTML = verdictHTML(snap, {
+    thresholds,
+    price,
+    change24h: snap.price.change24hPercent,
+    note: `Nến đã đóng gần nhất lúc ${timeLabel(Date.parse(snap.lastClosedCandleTime), snap.interval)}`,
+  });
+  prevPrice = price;
+}
+
+/** Mỗi tick chỉ cập nhật giá + % 24h; dựng lại cả khối sẽ làm chớp và mất tooltip thuật ngữ. */
+let lastLadder = 0;
+function renderTick() {
+  if (!snap) return;
+  const price = livePrice();
+  const big = $('bigPrice');
+  if (big) {
+    big.textContent = fmt(price, decimalsFor(price));
+    if (prevPrice != null && price !== prevPrice) {
+      big.classList.remove('tick-up', 'tick-down');
+      void big.offsetWidth;   // khởi động lại animation
+      big.classList.add(price > prevPrice ? 'tick-up' : 'tick-down');
+    }
+  }
+  const delta = $('bigDelta');
   const chg = snap.price.change24hPercent;
-  const item = (label, value, klass = '') =>
-    `<div><dt>${label}</dt><dd class="${klass}">${value}</dd></div>`;
-
-  els.hero.hidden = false;
-  els.hero.innerHTML = `
-    <div>
-      <dt>${snap.symbol} · ${snap.interval}</dt>
-      <dd class="price ${cls(chg)}" id="bigPrice">${fmt(price, d)}</dd>
-    </div>
-    ${item('Tín hiệu', `<span class="signal ${snap.combined.score >= 0 ? 'up' : 'down'}">${snap.combined.signal}</span>`)}
-    ${item('Điểm tổng hợp', `${snap.combined.score >= 0 ? '+' : ''}${snap.combined.score} / 100`,
-      cls(snap.combined.score))}
-    ${item('Thay đổi 24h', pct(chg), cls(chg))}
-    ${item('Cao / thấp 24h', snap.price.high24h != null
-      ? `${fmt(snap.price.low24h, d)} – ${fmt(snap.price.high24h, d)}` : '—')}
-    ${item('Model ML', snap.ml?.available
-      ? `${snap.ml.probUpPercent}% tăng` : '—',
-      snap.ml?.available ? cls(snap.ml.probUp - 0.5) : '')}`;
-
-  if (prevPrice != null && price !== prevPrice) {
-    const el = $('bigPrice');
-    el.classList.add(price > prevPrice ? 'tick-up' : 'tick-down');
-    el.addEventListener('animationend', () => el.classList.remove('tick-up', 'tick-down'), { once: true });
+  if (delta && chg != null) {
+    delta.textContent = `${pct(chg)} / 24h`;
+    delta.className = `delta ${toneOf(chg)}`;
   }
   prevPrice = price;
+  // Thang giá có dòng "giá hiện tại": làm mới nhưng không quá 1 lần/giây.
+  if (Date.now() - lastLadder > 1000) { lastLadder = Date.now(); renderLadder(); }
+}
+
+function renderLadder() {
+  if (snap) els.ladder.innerHTML = ladderHTML(snap, livePrice());
 }
 
 function renderStats() {
@@ -344,74 +354,33 @@ function renderStats() {
     `<div class="cell"><dt>${label}</dt><dd class="${klass}">${value}</dd>${note ? `<small>${note}</small>` : ''}</div>`;
 
   const rows = [
-    cell('Khối lượng', compact(ind.volume), '',
+    cell(term('volume'), compact(ind.volume), '',
       ind.volumeRatio == null ? '' : `${fmt(ind.volumeRatio, 2)}× trung bình ${snap.indicatorParams.volumeAvg} nến`),
-    cell(`CVD ${snap.indicatorParams.cvdSlope} nến`,
+    cell(`${term('cvd', 'CVD')} ${snap.indicatorParams.cvdSlope} nến`,
       ind.cvdSlope == null ? '—' : pct(ind.cvdSlope * 100, 1),
-      cls(ind.cvdSlope), 'mua chủ động ròng / khối lượng cùng kỳ'),
-    cell('Nến hiện tại',
+      toneOf(ind.cvdSlope), 'mua chủ động ròng / khối lượng cùng kỳ'),
+    cell(term('taker', 'Nến hiện tại'),
       ind.cvdDeltaShare == null ? '—' : pct(ind.cvdDeltaShare * 100, 1),
-      cls(ind.cvdDeltaShare), 'phần khối lượng là mua chủ động'),
-    cell('CVD luỹ tiến', compact(ind.cvd), cls(ind.cvd)),
-    cell('Funding', der?.fundingRate == null ? '—' : pct(der.fundingRatePercent, 4),
-      cls(der?.fundingRate), der ? at : 'không có hợp đồng futures'),
-    cell('Open Interest', compact(der?.openInterest),
-      cls(der?.openInterestChangePct),
+      toneOf(ind.cvdDeltaShare), 'phần khối lượng là mua chủ động'),
+    cell(term('cvd', 'CVD luỹ tiến'), compact(ind.cvd), toneOf(ind.cvd)),
+    cell(term('funding'), der?.fundingRate == null ? '—' : pct(der.fundingRatePercent, 4),
+      toneOf(der?.fundingRate), der ? at : 'không có hợp đồng futures'),
+    cell(term('oi', 'Open Interest'), compact(der?.openInterest),
+      toneOf(der?.openInterestChangePct),
       der?.openInterestChangePct == null ? '' : `${pct(der.openInterestChangePct)} · 14 kỳ 4h`),
-    cell('Sổ lệnh', ob == null ? '—' : pct(ob.imbalance * 100, 1),
-      cls(ob?.imbalance),
+    cell(term('orderbook'), ob == null ? '—' : pct(ob.imbalance * 100, 1),
+      toneOf(ob?.imbalance),
       ob?.depthSpanPct == null ? '' : `trải ±${fmt(ob.depthSpanPct, 2)}% · ${ob.levels} mức · ${at}`),
   ];
 
   for (const w of ob?.walls ?? []) {
-    rows.push(cell(`Tường ${w.side === 'bid' ? 'mua' : 'bán'}`,
+    rows.push(cell(term('wall', `Tường ${w.side === 'bid' ? 'mua' : 'bán'}`),
       fmt(w.price, decimalsFor(w.price)),
       w.side === 'bid' ? 'up' : 'down',
       `${pct(w.distancePct)} · ${fmt(w.ratioToAvg, 1)}× trung bình`));
   }
 
-  if (snap.levels?.side !== 'none' && snap.levels?.stopLoss != null) {
-    const d = decimalsFor(snap.levels.entry);
-    rows.push(cell('Stop loss', fmt(snap.levels.stopLoss, d), 'down',
-      `rủi ro ${fmt(snap.levels.riskPercent, 2)}% từ ${fmt(snap.levels.entry, d)}`));
-    rows.push(cell('Take profit',
-      (snap.levels.targets ?? []).map((t) => fmt(t.price, d)).join(' / ') || '—', 'up',
-      'theo bội số R'));
-  }
-
   els.stats.innerHTML = rows.join('');
-}
-
-function renderLevels() {
-  const d = decimalsFor(snap.price.lastClose);
-  const row = (lv) => `<li><span>${fmt(lv.price, d)} <span class="${cls(lv.distancePct)}">${pct(lv.distancePct)}</span></span>
-    <span class="touch">${lv.touches} lần chạm</span></li>`;
-  const fill = (el, list) => {
-    el.innerHTML = list?.length ? list.map(row).join('')
-      : '<li style="color:var(--muted)">Không tìm thấy trong khoảng nến này</li>';
-  };
-  fill(els.res, snap.structure?.resistance);
-  fill(els.sup, snap.structure?.support);
-}
-
-function renderReasons() {
-  const entries = Object.entries(snap.rules.breakdown)
-    .filter(([, v]) => v.weight > 0)
-    .sort((a, b) => Math.abs(b[1].contributionPct) - Math.abs(a[1].contributionPct));
-  els.reasons.innerHTML = `<h2>Đóng góp từng nhóm vào điểm ${snap.rules.score}</h2>`
-    + entries.map(([key, v]) => `
-      <details>
-        <summary>
-          <span>${GROUP_LABELS[key] ?? key} <span style="color:var(--muted)">· trọng số ${v.weight}</span></span>
-          <span class="${cls(v.contributionPct)}">${v.contributionPct >= 0 ? '+' : ''}${v.contributionPct}</span>
-        </summary>
-        <ul>${v.reasons.map((r) => `<li>${r}</li>`).join('')}</ul>
-      </details>`).join('');
-}
-
-function renderConflicts() {
-  els.conflicts.innerHTML = (snap.conflicts ?? [])
-    .map((c) => `<li>⚠️ ${c}</li>`).join('');
 }
 
 /* ---------- WebSocket Binance ---------- */
@@ -541,8 +510,8 @@ function applyKline(k) {
   if (k.x) scheduleRefetch();
 
   els.foot.textContent = candle.closed
-    ? `Nến cuối đã đóng. Snapshot lúc ${clockLabel(Date.parse(snap.generatedAt))}.`
-    : `Nến cuối đang chạy — điểm và chỉ báo tính trên nến đã đóng, snapshot lúc ${clockLabel(Date.parse(snap.generatedAt))}.`;
+    ? `Nến cuối đã đóng. Kết luận tính lúc ${clockLabel(Date.parse(snap.generatedAt))}.`
+    : `Nến cuối đang chạy — kết luận và chỉ báo tính trên nến đã đóng, lúc ${clockLabel(Date.parse(snap.generatedAt))}.`;
   scheduleRender();
 }
 
@@ -559,8 +528,8 @@ function applyTicker(d) {
 async function loadWatchlist(list) {
   const items = list ?? await (await fetch('/api/watchlist')).json();
   els.watchlist.innerHTML = items.length
-    ? items.map((s) => `<span class="chip"><span data-load="${s}">${s}</span><button data-del="${s}" title="Bỏ theo dõi">×</button></span>`).join('')
-    : '<span style="color:var(--muted);font-size:13px">Chưa theo dõi mã nào. Bấm “+ Theo dõi” để thêm.</span>';
+    ? items.map((s) => `<span class="wl-item"><span data-load="${esc(s)}">${esc(s)}</span><button type="button" data-del="${esc(s)}" title="Bỏ theo dõi ${esc(s)}" aria-label="Bỏ theo dõi ${esc(s)}">×</button></span>`).join('')
+    : '<span class="wl-empty">Chưa theo dõi mã nào. Bấm “+ Theo dõi” để thêm.</span>';
 }
 
 els.watchlist.addEventListener('click', async (e) => {
@@ -588,7 +557,7 @@ els.save.addEventListener('click', async () => {
 /* ---------- chạy ---------- */
 
 function showError(text) {
-  els.msg.className = 'err';
+  els.msg.className = 'banner error';
   els.msg.textContent = text;
 }
 
@@ -598,7 +567,7 @@ async function run({ keepStream = false } = {}) {
 
   if (!keepStream) {
     closeStream();
-    els.msg.className = 'load';
+    els.msg.className = 'banner load';
     els.msg.textContent = `Đang tải ${symbol.toUpperCase()}…`;
     hideTip();
   }
@@ -626,14 +595,16 @@ async function run({ keepStream = false } = {}) {
     els.msg.className = '';
     els.symbol.value = body.symbol;
     els.range.textContent = `${candles.length} nến · ${timeLabel(candles[0].openTime, body.interval)} → ${timeLabel(candles.at(-1).openTime, body.interval)}`;
-    els.foot.textContent = `Snapshot lúc ${clockLabel(Date.parse(body.generatedAt))} · `
+    els.foot.textContent = `Kết luận tính lúc ${clockLabel(Date.parse(body.generatedAt))} · `
       + `nến đóng gần nhất ${timeLabel(Date.parse(body.lastClosedCandleTime), body.interval)}`;
+    history.replaceState(null, '', `?${new URLSearchParams({ symbol: body.symbol, interval: body.interval })}`);
 
-    renderHero();
+    renderVerdict();
     renderStats();
-    renderLevels();
-    renderReasons();
-    renderConflicts();
+    els.breakdown.innerHTML = breakdownHTML(snap);
+    lastLadder = Date.now();
+    renderLadder();
+    renderLegend();
     draw();
 
     if (!keepStream) openStream(body.symbol, body.interval);
@@ -643,6 +614,8 @@ async function run({ keepStream = false } = {}) {
     els.go.disabled = false;
   }
 }
+
+/* ---------- khởi động ---------- */
 
 els.go.addEventListener('click', () => run());
 els.symbol.addEventListener('keydown', (e) => e.key === 'Enter' && run());
@@ -659,9 +632,32 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+for (const btn of document.querySelectorAll('#layers [data-layer]')) {
+  const key = btn.dataset.layer;
+  btn.setAttribute('aria-pressed', String(Boolean(layers[key])));
+  btn.addEventListener('click', () => {
+    layers[key] = !layers[key];
+    btn.setAttribute('aria-pressed', String(layers[key]));
+    try {
+      localStorage.setItem(LAYERS_KEY, JSON.stringify({
+        ...JSON.parse(localStorage.getItem(LAYERS_KEY) || '{}'), ...layers,
+      }));
+    } catch { /* chế độ riêng tư */ }
+    renderLegend();
+    draw();
+  });
+}
+
+initTheme($('btn-theme'), draw);
+initTerms();
+
 const intervals = await (await fetch('/api/intervals')).json();
+const wanted = new URLSearchParams(location.search);
+const startInterval = intervals.includes(wanted.get('interval')) ? wanted.get('interval') : '4h';
 els.interval.innerHTML = intervals
-  .map((iv) => `<option value="${iv}"${iv === '4h' ? ' selected' : ''}>${iv}</option>`).join('');
+  .map((iv) => `<option value="${iv}"${iv === startInterval ? ' selected' : ''}>${iv}</option>`).join('');
+if (wanted.get('symbol')) els.symbol.value = wanted.get('symbol');
+thresholds = await fetch('/api/thresholds').then((r) => (r.ok ? r.json() : null)).catch(() => null);
 await loadWatchlist();
 run();
 </script>

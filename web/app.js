@@ -14,9 +14,13 @@ import {
 } from './store.js';
 import { loadModel, saveModel, deleteModel, listModels } from './model-store.js';
 import { generateReport, askAbout, testApiKey } from './claude.js';
+import { fmt, compact } from '../src/chart/render.js';
+import {
+  initTheme, initTerms, cssVar, esc, num, term, verdictHTML, breakdownHTML, ladderHTML,
+} from './ui.js';
+import { drawPriceChart, drawCvd, drawFlow, priceLegendHTML } from './charts.js';
 
 const $ = (id) => document.getElementById(id);
-const NS = 'http://www.w3.org/2000/svg';
 
 const state = {
   snapshot: null,
@@ -28,27 +32,23 @@ const state = {
   worker: null,
   jobId: 0,
   abort: null,
+  layers: { levels: true, plan: true, walls: false, volume: true },
 };
 
 // ---------- Tiện ích ----------
 
 function fmtNum(v) {
   if (v == null || !Number.isFinite(v)) return '—';
-  const abs = Math.abs(v);
-  if (abs >= 1000) return v.toLocaleString('vi-VN', { maximumFractionDigits: 2 });
-  if (abs >= 1) return v.toFixed(3);
-  if (abs >= 0.01) return v.toFixed(5);
-  return v.toPrecision(4);
+  return fmt(v);
 }
 
 function fmtSigned(v, digits = 2) {
-  if (v == null || !Number.isFinite(v)) return '—';
-  return `${v > 0 ? '+' : ''}${v.toFixed(digits)}`;
+  return num(v, digits, { signed: true });
 }
 
 function fmtPct(v, digits = 1) {
   if (v == null || !Number.isFinite(v)) return '—';
-  return `${(v * 100).toFixed(digits)}%`;
+  return `${num(v * 100, digits)}%`;
 }
 
 function fmtTime(ms, interval) {
@@ -58,13 +58,6 @@ function fmtTime(ms, interval) {
   }
   const date = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
   return `${date} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-function mk(tag, attrs = {}, text) {
-  const node = document.createElementNS(NS, tag);
-  for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, String(v));
-  if (text != null) node.textContent = String(text);
-  return node;
 }
 
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
@@ -112,234 +105,6 @@ function legendItem(label, color, dashed = false) {
   return item;
 }
 
-const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-
-// ---------- Thang điểm tổng hợp (diverging) ----------
-
-function drawScoreBar(score, thresholds) {
-  const svg = $('score-bar');
-  clear(svg);
-  const W = 600, padX = 6, trackY = 20, trackH = 16;
-  const x = (v) => padX + ((v + 100) / 200) * (W - padX * 2);
-
-  svg.appendChild(mk('rect', {
-    x: padX, y: trackY, width: W - padX * 2, height: trackH, rx: 4, fill: cssVar('--div-mid'),
-  }));
-  for (const [from, to, color] of [
-    [-100, thresholds.strongSell, cssVar('--div-neg')],
-    [thresholds.strongBuy, 100, cssVar('--div-pos')],
-  ]) {
-    svg.appendChild(mk('rect', {
-      x: x(from), y: trackY, width: Math.max(0, x(to) - x(from)), height: trackH,
-      rx: 4, fill: color, opacity: 0.18,
-    }));
-  }
-  for (const v of [-100, thresholds.strongSell, thresholds.sell, 0,
-    thresholds.buy, thresholds.strongBuy, 100]) {
-    svg.appendChild(mk('line', {
-      x1: x(v), y1: trackY - 3, x2: x(v), y2: trackY + trackH + 3,
-      class: v === 0 ? 'axis-line' : 'grid-line',
-    }));
-  }
-  svg.appendChild(mk('text', { x: padX, y: trackY + trackH + 16 }, '−100 giảm mạnh'));
-  svg.appendChild(mk('text', { x: W / 2, y: trackY + trackH + 16, 'text-anchor': 'middle' }, '0'));
-  svg.appendChild(mk('text', { x: W - padX, y: trackY + trackH + 16, 'text-anchor': 'end' }, '+100 tăng mạnh'));
-
-  const color = score >= 0 ? cssVar('--div-pos') : cssVar('--div-neg');
-  const from = Math.min(0, score), to = Math.max(0, score);
-  svg.appendChild(mk('rect', {
-    x: x(from), y: trackY, width: Math.max(2, x(to) - x(from)), height: trackH, rx: 4, fill: color,
-  }));
-  svg.appendChild(mk('line', {
-    x1: x(score), y1: trackY - 7, x2: x(score), y2: trackY + trackH + 7,
-    stroke: cssVar('--text-primary'), 'stroke-width': 2,
-  }));
-  svg.appendChild(mk('text', {
-    x: Math.min(W - 26, Math.max(24, x(score))), y: 12,
-    'text-anchor': 'middle', class: 'series-label', fill: cssVar('--text-primary'),
-  }, fmtSigned(score, 1)));
-}
-
-// ---------- Crosshair + tooltip ----------
-
-function attachCrosshair(svg, tip, { plotX, plotW, count, onIndex, top = 0, bottom = 0 }) {
-  const cursor = mk('line', {
-    y1: top, y2: bottom, class: 'axis-line', 'stroke-dasharray': '3 3', opacity: 0,
-  });
-  svg.appendChild(cursor);
-
-  const move = (clientX, clientY) => {
-    const rect = svg.getBoundingClientRect();
-    const vb = svg.viewBox.baseVal;
-    const svgX = ((clientX - rect.left) / rect.width) * vb.width;
-    const t = (svgX - plotX) / plotW;
-    const i = Math.max(0, Math.min(count - 1, Math.round(t * (count - 1))));
-    const cx = plotX + (count > 1 ? (i / (count - 1)) * plotW : plotW / 2);
-    cursor.setAttribute('x1', cx);
-    cursor.setAttribute('x2', cx);
-    cursor.setAttribute('opacity', 1);
-    const html = onIndex(i);
-    if (!html) return;
-    tip.innerHTML = html;
-    tip.classList.add('on');
-    const wrap = svg.parentElement.getBoundingClientRect();
-    const tw = tip.offsetWidth || 160;
-    let left = clientX - wrap.left + 14;
-    if (left + tw > wrap.width) left = clientX - wrap.left - tw - 14;
-    tip.style.left = `${Math.max(4, left)}px`;
-    tip.style.top = `${Math.max(4, Math.min(wrap.height - 60, clientY - wrap.top + 12))}px`;
-  };
-  const leave = () => { cursor.setAttribute('opacity', 0); tip.classList.remove('on'); };
-
-  svg.addEventListener('pointermove', (e) => move(e.clientX, e.clientY));
-  svg.addEventListener('pointerleave', leave);
-  svg.addEventListener('pointerdown', (e) => move(e.clientX, e.clientY));
-}
-
-const ttRow = (label, value) => `<div class="tt-row"><span>${label}</span><span>${value}</span></div>`;
-
-// ---------- Biểu đồ giá ----------
-
-function drawPriceChart(snap) {
-  const svg = $('price-chart');
-  const tip = $('price-tip');
-  clear(svg);
-  const s = snap.series;
-  if (!s || !s.close.length) return;
-
-  const W = 900, H = 460;
-  const padL = 6, padR = 66, padT = 10;
-  const priceTop = padT, priceH = 320;
-  const volTop = priceTop + priceH + 34, volH = 62;
-  const plotW = W - padL - padR;
-  const n = s.close.length;
-
-  const lows = s.low.filter((v) => v != null);
-  const highs = s.high.filter((v) => v != null);
-  const srPrices = [...snap.structure.support, ...snap.structure.resistance]
-    .filter((l) => Math.abs(l.distancePct) < 12).map((l) => l.price);
-
-  let min = Math.min(...lows, ...srPrices);
-  let max = Math.max(...highs, ...srPrices);
-  const pad = (max - min) * 0.06 || Math.abs(max) * 0.01 || 1;
-  min -= pad; max += pad;
-
-  const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const y = (v) => priceTop + priceH - ((v - min) / (max - min)) * priceH;
-  const step = plotW / Math.max(1, n - 1);
-  const bodyW = Math.max(1.2, Math.min(9, step * 0.62));
-
-  for (let k = 0; k <= 5; k++) {
-    const v = min + ((max - min) * k) / 5;
-    const yy = y(v);
-    svg.appendChild(mk('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, class: 'grid-line' }));
-    svg.appendChild(mk('text', { x: W - padR + 5, y: yy + 3 }, fmtNum(v)));
-  }
-
-  // Hỗ trợ/kháng cự là khung tham chiếu duy nhất trên biểu đồ giá — không còn
-  // EMA hay Bollinger (xem .claude/skills/chi-bao/SKILL.md).
-  const srColor = { support: cssVar('--good'), resistance: cssVar('--critical') };
-  for (const kind of ['support', 'resistance']) {
-    for (const lvl of snap.structure[kind].slice(0, 3)) {
-      if (lvl.price < min || lvl.price > max) continue;
-      const yy = y(lvl.price);
-      // Mức bị chạm nhiều lần thì vẽ dày hơn.
-      svg.appendChild(mk('line', {
-        x1: padL, y1: yy, x2: W - padR, y2: yy,
-        stroke: srColor[kind], 'stroke-width': Math.min(2.5, 1 + (lvl.touches - 1) * 0.5),
-        'stroke-dasharray': '5 4', opacity: 0.75,
-      }));
-      svg.appendChild(mk('text', {
-        x: W - padR - 3, y: yy - 3, 'text-anchor': 'end',
-        fill: srColor[kind], class: 'series-label',
-      }, `${kind === 'support' ? 'HT' : 'KC'} ${fmtNum(lvl.price)} · ${lvl.touches}x`));
-    }
-  }
-
-  const up = cssVar('--up'), down = cssVar('--down');
-  for (let i = 0; i < n; i++) {
-    const o = s.open[i], c = s.close[i], h = s.high[i], l = s.low[i];
-    if ([o, c, h, l].some((v) => v == null)) continue;
-    const col = c >= o ? up : down;
-    svg.appendChild(mk('line', { x1: x(i), y1: y(h), x2: x(i), y2: y(l), stroke: col, 'stroke-width': 1 }));
-    svg.appendChild(mk('rect', {
-      x: x(i) - bodyW / 2, y: y(Math.max(o, c)), width: bodyW,
-      height: Math.max(1, Math.abs(y(o) - y(c))), fill: col, rx: Math.min(1.5, bodyW / 3),
-    }));
-  }
-
-  // Tường lệnh trong sổ lệnh: vẽ như mức ngang, chỉ khi nằm trong khung giá.
-  for (const w of snap.orderBook?.walls ?? []) {
-    if (w.price < min || w.price > max) continue;
-    const yy = y(w.price);
-    const col = w.side === 'bid' ? cssVar('--good') : cssVar('--critical');
-    svg.appendChild(mk('line', {
-      x1: padL, y1: yy, x2: W - padR, y2: yy,
-      stroke: col, 'stroke-width': 3, opacity: 0.3,
-    }));
-    svg.appendChild(mk('text', {
-      x: padL + 3, y: yy - 3, fill: col, class: 'series-label',
-    }, `Tường ${w.side === 'bid' ? 'MUA' : 'BÁN'} ${w.ratioToAvg.toFixed(1)}x`));
-  }
-
-  const maxVol = Math.max(...s.volume.filter(Number.isFinite), 1);
-  const vy = (v) => volTop + volH - (v / maxVol) * volH;
-  svg.appendChild(mk('line', {
-    x1: padL, y1: volTop + volH, x2: W - padR, y2: volTop + volH, class: 'axis-line',
-  }));
-  svg.appendChild(mk('text', { x: padL, y: volTop - 4 }, 'Khối lượng'));
-  for (let i = 0; i < n; i++) {
-    const v = s.volume[i];
-    if (!Number.isFinite(v)) continue;
-    svg.appendChild(mk('rect', {
-      x: x(i) - bodyW / 2, y: vy(v), width: bodyW,
-      height: Math.max(0.6, volTop + volH - vy(v)),
-      fill: s.close[i] >= s.open[i] ? up : down, opacity: 0.45, rx: Math.min(1.5, bodyW / 3),
-    }));
-  }
-  const volAvgPts = [];
-  for (let i = 0; i < n; i++) if (s.volumeAvg[i] != null) volAvgPts.push(`${x(i)},${vy(s.volumeAvg[i])}`);
-  if (volAvgPts.length > 2) {
-    svg.appendChild(mk('polyline', {
-      points: volAvgPts.join(' '), fill: 'none', stroke: cssVar('--text-muted'),
-      'stroke-width': 1.5, 'stroke-dasharray': '4 3',
-    }));
-  }
-
-  const tickEvery = Math.max(1, Math.floor(n / 7));
-  for (let i = 0; i < n; i += tickEvery) {
-    svg.appendChild(mk('text', {
-      x: x(i), y: H - 4, 'text-anchor': i === 0 ? 'start' : 'middle',
-    }, fmtTime(s.time[i], snap.interval)));
-  }
-
-  attachCrosshair(svg, tip, {
-    plotX: padL, plotW, count: n, top: priceTop, bottom: volTop + volH,
-    onIndex: (i) => {
-      const changePct = ((s.close[i] - s.open[i]) / s.open[i]) * 100;
-      const share = s.volume[i] ? (s.cvdDelta[i] / s.volume[i]) * 100 : null;
-      return `<div class="tt-time">${fmtTime(s.time[i], snap.interval)}</div>`
-        + ttRow('Mở', fmtNum(s.open[i])) + ttRow('Cao', fmtNum(s.high[i]))
-        + ttRow('Thấp', fmtNum(s.low[i]))
-        + ttRow('Đóng', `${fmtNum(s.close[i])} (${fmtSigned(changePct)}%)`)
-        + ttRow('Khối lượng', fmtNum(s.volume[i]))
-        + ttRow('Mua chủ động', share == null ? '—' : `${fmtSigned(share)}% KL`);
-    },
-  });
-
-  const lg = $('price-legend');
-  clear(lg);
-  lg.append(
-    legendItem('Hỗ trợ', cssVar('--good'), true),
-    legendItem('Kháng cự', cssVar('--critical'), true),
-    legendItem('Khối lượng TB', cssVar('--text-muted'), true),
-  );
-  $('price-chart-sub').textContent =
-    `${n} nến ${snap.interval} · nến xanh = đóng cao hơn mở · HT/KC kèm số lần chạm`;
-
-  renderCandleTable(snap);
-}
-
 function renderCandleTable(snap) {
   const s = snap.series;
   const host = $('candle-table');
@@ -373,452 +138,206 @@ function renderCandleTable(snap) {
   host.appendChild(table);
 }
 
-// ---------- CVD luỹ tiến ----------
+// ---------- Kết luận, mức giá, dòng tiền, model, số liệu ----------
 
-function drawCvd(snap) {
-  const svg = $('cvd-chart');
-  const tip = $('cvd-tip');
-  clear(svg);
-  const s = snap.series;
-  const W = 420, H = 130, padL = 4, padR = 44, padT = 14, padB = 16;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const n = s.cvd.length;
-  const vals = s.cvd.filter((v) => v != null);
-  if (!vals.length) return;
-  const lo = Math.min(...vals);
-  const hi = Math.max(...vals);
-  const span = hi - lo || Math.abs(hi) || 1;
-  const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const y = (v) => padT + plotH - ((v - lo) / span) * plotH;
-
-  for (const v of [lo, lo + span / 2, hi]) {
-    svg.appendChild(mk('line', {
-      x1: padL, y1: y(v), x2: W - padR, y2: y(v), class: 'grid-line',
-    }));
-    svg.appendChild(mk('text', { x: W - padR + 4, y: y(v) + 3 }, fmtNum(v)));
-  }
-
-  const pts = [];
-  for (let i = 0; i < n; i++) if (s.cvd[i] != null) pts.push(`${x(i)},${y(s.cvd[i])}`);
-  if (pts.length > 1) {
-    svg.appendChild(mk('polyline', {
-      points: pts.join(' '), fill: 'none', stroke: cssVar('--series-1'),
-      'stroke-width': 2, 'stroke-linejoin': 'round',
-    }));
-  }
-  const lastCvd = [...s.cvd].reverse().find((v) => v != null);
-  if (lastCvd != null) {
-    svg.appendChild(mk('circle', {
-      cx: x(n - 1), cy: y(lastCvd), r: 4.5,
-      fill: cssVar('--series-1'), stroke: cssVar('--surface-1'), 'stroke-width': 2,
-    }));
-  }
-
-  const slope = snap.indicators.cvdSlope;
-  svg.appendChild(mk('text', {
-    x: padL, y: 10, class: 'series-label', fill: cssVar('--text-secondary'),
-  }, `CVD luỹ tiến · ${snap.indicatorParams?.cvdSlope ?? 20} nến: `
-    + `${slope == null ? '—' : fmtSigned(slope * 100)}% khối lượng`));
-
-  attachCrosshair(svg, tip, {
-    plotX: padL, plotW, count: n, top: padT, bottom: padT + plotH,
-    onIndex: (i) => (s.cvd[i] == null ? null
-      : `<div class="tt-time">${fmtTime(s.time[i], snap.interval)}</div>`
-        + ttRow('CVD', fmtNum(s.cvd[i]))
-        + ttRow('Độ dốc', s.cvdSlope[i] == null ? '—' : `${fmtSigned(s.cvdSlope[i] * 100)}% KL`)),
+function renderHero(snap) {
+  const drift = ((snap.price.live - snap.price.lastClose) / snap.price.lastClose) * 100;
+  const note = `Nến đã đóng gần nhất lúc ${fmtTime(Date.parse(snap.lastClosedCandleTime), snap.interval)}`
+    + ` tại ${fmt(snap.price.lastClose)}`
+    + (Math.abs(drift) >= 0.15 ? ` · giá đã chạy ${num(drift, 2, { signed: true })}% từ lúc đó` : '');
+  $('verdict').innerHTML = verdictHTML(snap, {
+    thresholds: state.strategy.thresholds,
+    price: snap.price.live,
+    change24h: snap.price.change24hPercent,
+    note,
   });
 }
 
-// ---------- Delta từng nến ----------
+function renderLevels(snap) {
+  $('ladder').innerHTML = ladderHTML(snap, snap.price.live);
+}
 
-function drawFlow(snap) {
-  const svg = $('flow-chart');
-  const tip = $('flow-tip');
-  clear(svg);
-  const s = snap.series;
-  const W = 420, H = 120, padL = 4, padR = 44, padT = 14, padB = 14;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const n = s.cvdDelta.length;
-  // Chuẩn hoá delta theo volume từng nến -> so được giữa các nến to nhỏ khác nhau.
-  const share = s.cvdDelta.map((d, i) => (d != null && s.volume[i] ? d / s.volume[i] : null));
-  const extent = Math.max(...share.filter((v) => v != null).map(Math.abs), 0.05);
-  const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const y = (v) => padT + plotH / 2 - (v / extent) * (plotH / 2);
-  const barW = Math.max(1, Math.min(6, (plotW / Math.max(1, n - 1)) * 0.6));
+function renderBreakdown(snap) {
+  $('breakdown').innerHTML = breakdownHTML(snap);
+}
 
-  svg.appendChild(mk('line', { x1: padL, y1: y(0), x2: W - padR, y2: y(0), class: 'axis-line' }));
-  for (let i = 0; i < n; i++) {
-    const v = share[i];
-    if (v == null) continue;
-    svg.appendChild(mk('rect', {
-      x: x(i) - barW / 2, y: v >= 0 ? y(v) : y(0), width: barW,
-      height: Math.max(0.8, Math.abs(y(v) - y(0))),
-      fill: v >= 0 ? cssVar('--up') : cssVar('--down'), opacity: 0.75, rx: Math.min(1.5, barW / 3),
-    }));
+function renderFlowRead(snap) {
+  const slope = snap.indicators.cvdSlope;
+  const n = snap.indicatorParams?.cvdSlope ?? 20;
+  let reading = 'Chưa đủ dữ liệu để kết luận.';
+  if (slope != null) {
+    reading = slope > 0
+      ? `Trong ${n} nến gần nhất, người mua chủ động đang nhiều hơn người bán (${num(slope * 100, 1, { signed: true })}% khối lượng).`
+      : slope < 0
+        ? `Trong ${n} nến gần nhất, người bán chủ động đang nhiều hơn người mua (${num(slope * 100, 1, { signed: true })}% khối lượng).`
+        : `Trong ${n} nến gần nhất, mua và bán chủ động đang cân bằng.`;
   }
-  svg.appendChild(mk('text', {
-    x: padL, y: 10, class: 'series-label', fill: cssVar('--text-secondary'),
-  }, 'Mua chủ động ròng mỗi nến (% khối lượng)'));
-  svg.appendChild(mk('text', { x: W - padR + 4, y: y(0) + 3 }, '0'));
-  svg.appendChild(mk('text', { x: W - padR + 4, y: y(extent) + 3 }, `+${(extent * 100).toFixed(0)}%`));
-  svg.appendChild(mk('text', { x: W - padR + 4, y: y(-extent) + 3 }, `−${(extent * 100).toFixed(0)}%`));
-
-  attachCrosshair(svg, tip, {
-    plotX: padL, plotW, count: n, top: padT, bottom: padT + plotH,
-    onIndex: (i) => (share[i] == null ? null
-      : `<div class="tt-time">${fmtTime(s.time[i], snap.interval)}</div>`
-        + ttRow('Mua chủ động', `${fmtSigned(share[i] * 100)}% KL`)
-        + ttRow('Delta', fmtNum(s.cvdDelta[i]))
-        + ttRow('Khối lượng', fmtNum(s.volume[i]))),
-  });
+  $('cvd-read').innerHTML = `${term('cvd', 'CVD')} đi lên = người mua đang chủ động hơn; đi xuống = người bán chủ động hơn. `
+    + `<b>${esc(reading)}</b>`;
 
   const lg = $('osc-legend');
   clear(lg);
   lg.append(
-    legendItem('CVD luỹ tiến', cssVar('--series-1')),
-    legendItem('Mua chủ động', cssVar('--up')),
-    legendItem('Bán chủ động', cssVar('--down')),
+    legendItem('CVD luỹ tiến', 'var(--accent)'),
+    legendItem('Mua chủ động nhiều hơn', 'var(--up)'),
+    legendItem('Bán chủ động nhiều hơn', 'var(--down)'),
   );
 }
 
-// ---------- Đóng góp từng nhóm ----------
-
-const GROUP_LABELS = {
-  cvd: 'CVD', volume: 'Khối lượng', derivatives: 'Phái sinh (OI + funding)', positioning: 'Định vị đám đông',
-  structure: 'Hỗ trợ/kháng cự', orderBook: 'Sổ lệnh', historicalPattern: 'Mẫu hình lịch sử',
-};
-
-function drawBreakdown(snap) {
-  const svg = $('breakdown-chart');
-  const tip = $('breakdown-tip');
-  clear(svg);
-  const entries = Object.entries(snap.rules.breakdown)
-    .filter(([, v]) => v.weight > 0)
-    .sort((a, b) => Math.abs(b[1].contributionPct) - Math.abs(a[1].contributionPct));
-  if (!entries.length) return;
-
-  const rowH = 30, W = 560, padL = 106, padR = 54, padT = 22;
-  const H = padT + entries.length * rowH + 14;
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  const plotW = W - padL - padR;
-  const maxAbs = Math.max(...entries.map(([, v]) => Math.abs(v.contributionPct)), 8);
-  const cx = padL + plotW / 2;
-  const x = (v) => cx + (v / maxAbs) * (plotW / 2);
-
-  svg.appendChild(mk('text', { x: padL, y: 12 }, '← nghiêng giảm'));
-  svg.appendChild(mk('text', { x: W - padR, y: 12, 'text-anchor': 'end' }, 'nghiêng tăng →'));
-  svg.appendChild(mk('line', { x1: cx, y1: padT - 6, x2: cx, y2: H - 10, class: 'axis-line' }));
-
-  entries.forEach(([key, v], idx) => {
-    const yTop = padT + idx * rowH + 5;
-    const barH = 15;
-    const val = v.contributionPct;
-    const color = val >= 0 ? cssVar('--div-pos') : cssVar('--div-neg');
-    const from = Math.min(0, val), to = Math.max(0, val);
-
-    svg.appendChild(mk('rect', {
-      x: x(from), y: yTop, width: Math.max(2, x(to) - x(from)), height: barH, rx: 4,
-      fill: color, stroke: cssVar('--surface-1'), 'stroke-width': 1,
-    }));
-    svg.appendChild(mk('text', {
-      x: padL - 8, y: yTop + barH - 3, 'text-anchor': 'end', fill: cssVar('--text-secondary'),
-    }, GROUP_LABELS[key] || key));
-    svg.appendChild(mk('text', {
-      x: val >= 0 ? x(to) + 5 : x(from) - 5, y: yTop + barH - 3,
-      'text-anchor': val >= 0 ? 'start' : 'end',
-      fill: cssVar('--text-primary'), class: 'series-label',
-    }, fmtSigned(val, 1)));
-
-    const hit = mk('rect', { x: padL, y: yTop - 6, width: plotW, height: rowH, fill: 'transparent' });
-    hit.addEventListener('pointerenter', (e) => {
-      tip.innerHTML = `<div class="tt-time">${GROUP_LABELS[key] || key}</div>`
-        + ttRow('Đóng góp', fmtSigned(val, 2))
-        + ttRow('Điểm nhóm', fmtSigned(v.score * 100, 0))
-        + ttRow('Trọng số', v.weight);
-      tip.classList.add('on');
-      const wrap = svg.parentElement.getBoundingClientRect();
-      tip.style.left = `${Math.min(wrap.width - 180, e.clientX - wrap.left + 12)}px`;
-      tip.style.top = `${e.clientY - wrap.top + 10}px`;
-    });
-    hit.addEventListener('pointerleave', () => tip.classList.remove('on'));
-    svg.appendChild(hit);
-  });
-
-  const host = $('breakdown-reasons');
-  clear(host);
-  for (const [key, v] of entries) {
-    const det = document.createElement('details');
-    const sum = document.createElement('summary');
-    sum.className = 'small';
-    sum.style.cssText = 'cursor:pointer; padding:3px 0';
-    sum.textContent = `${GROUP_LABELS[key] || key} — ${fmtSigned(v.contributionPct, 1)} (trọng số ${v.weight})`;
-    const ul = document.createElement('ul');
-    ul.className = 'notes';
-    for (const r of v.reasons) {
-      const li = document.createElement('li');
-      li.textContent = r;
-      ul.appendChild(li);
-    }
-    det.append(sum, ul);
-    host.appendChild(det);
-  }
-}
-
-// ---------- Thẻ số liệu ----------
-
-function renderHero(snap) {
-  const signalColors = {
-    'MUA MẠNH': cssVar('--good'), MUA: cssVar('--good'),
-    'TRUNG LẬP': cssVar('--text-muted'),
-    BÁN: cssVar('--critical'), 'BÁN MẠNH': cssVar('--critical'),
-  };
-  const label = $('signal-label');
-  clear(label);
-  const dot = document.createElement('span');
-  dot.className = 'signal-dot';
-  dot.style.background = signalColors[snap.combined.signal] || cssVar('--text-muted');
-  label.append(dot, document.createTextNode(snap.combined.signal));
-
-  const chg = snap.price.change24hPercent;
-  const priceLine = $('price-line');
-  clear(priceLine);
-  priceLine.appendChild(document.createTextNode(fmtNum(snap.price.live)));
-  if (chg != null) {
-    const sp = document.createElement('span');
-    sp.className = `small ${chg >= 0 ? 'delta-up' : 'delta-down'}`;
-    sp.style.marginLeft = '8px';
-    sp.textContent = `${fmtSigned(chg)}% / 24h`;
-    priceLine.appendChild(sp);
-  }
-
-  const drift = ((snap.price.live - snap.price.lastClose) / snap.price.lastClose) * 100;
-  $('price-sub').textContent = `${snap.symbol} · ${snap.interval} · nến đã đóng gần nhất `
-    + `${fmtTime(new Date(snap.lastClosedCandleTime).getTime(), snap.interval)} `
-    + `tại ${fmtNum(snap.price.lastClose)}`
-    + (Math.abs(drift) >= 0.15 ? ` (giá đã chạy ${fmtSigned(drift)}% từ lúc đó)` : '');
-
-  $('score-value').textContent = fmtSigned(snap.combined.score, 1);
-  drawScoreBar(snap.combined.score, state.strategy.thresholds);
-
-  const parts = $('score-parts');
-  clear(parts);
-  parts.appendChild(chip(`Quy tắc ${fmtSigned(snap.rules.score, 1)}`));
-  if (snap.ml.available) {
-    const used = snap.combined.mlWeightUsed > 0;
-    parts.appendChild(chip(
-      `ML ${snap.ml.probUpPercent}% tăng${used ? ` · trọng số ${snap.combined.mlWeightUsed}` : ' · KHÔNG tính vào điểm'}`,
-      { kind: used ? 'ok' : 'warn' },
-    ));
-  } else {
-    parts.appendChild(chip('Chưa có model ML', { kind: 'warn' }));
-  }
-  if (snap.higherTimeframe && typeof snap.higherTimeframe.ruleScore === 'number') {
-    parts.appendChild(chip(`Khung ${snap.higherTimeframe.interval}: ${snap.higherTimeframe.signal} `
-      + `(${fmtSigned(snap.higherTimeframe.ruleScore, 0)})`));
-  }
-
-  const list = $('conflicts');
-  clear(list);
-  for (const c of snap.conflicts) {
-    const li = document.createElement('li');
-    li.className = 'alert';
-    li.textContent = c;
-    list.appendChild(li);
-  }
+function kvHTML(rows) {
+  return `<dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
 }
 
 function renderMl(snap) {
   const host = $('ml-body');
-  clear(host);
   const ml = snap.ml;
   if (!ml.available) {
     $('ml-sub').textContent = 'Chưa có model cho cặp này';
-    host.textContent = ml.reason;
-    const btn = document.createElement('button');
-    btn.textContent = 'Train ngay trong trình duyệt';
-    btn.style.marginTop = '10px';
-    btn.addEventListener('click', () => { switchTab('tab-train'); runTrain(); });
-    host.appendChild(btn);
+    host.innerHTML = `<p style="margin:0 0 10px">${esc(ml.reason)}</p>
+      <button type="button" id="btn-ml-train">Train ngay trong trình duyệt</button>`;
+    $('btn-ml-train').addEventListener('click', () => { switchTab('tab-train'); runTrain(); });
     return;
   }
+
   const relLabel = { high: 'cao', medium: 'trung bình', low: 'thấp' }[ml.reliability] || ml.reliability;
-  const relKind = { high: 'ok', medium: 'warn', low: 'bad' }[ml.reliability];
-  $('ml-sub').textContent = `Dự đoán ${ml.horizonCandles} nến tới · nhãn ${ml.labelMode}`;
+  const relKind = { high: 'ok', medium: 'warn', low: 'bad' }[ml.reliability] || '';
+  const used = snap.combined.mlWeightUsed > 0;
+  $('ml-sub').innerHTML = `${term('ml')} dự đoán xác suất giá tăng trong ${esc(ml.horizonCandles)} nến tới`;
 
-  const head = document.createElement('div');
-  head.style.cssText = 'display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:10px';
-  const big = document.createElement('span');
-  big.style.cssText = 'font-size:26px; font-weight:680; font-variant-numeric:tabular-nums';
-  big.textContent = `${ml.probUpPercent}%`;
-  const cap = document.createElement('span');
-  cap.className = 'small muted';
-  cap.textContent = 'khả năng tăng';
-  head.append(big, cap, chip(`độ tin cậy ${relLabel}`, { kind: relKind }));
-  host.appendChild(head);
-
-  const dl = document.createElement('dl');
-  dl.className = 'kv';
   const rows = [
-    ['AUC holdout', ml.testAuc ?? '—'],
-    ['AUC walk-forward', ml.walkForwardAuc ?? '—'],
-    ['Ngưỡng tăng mạnh', ml.thresholds ? `> ${ml.thresholds.bullishAbove}` : '—'],
-    ['Ngưỡng giảm mạnh', ml.thresholds ? `< ${ml.thresholds.bearishBelow}` : '—'],
-    ['Vị trí hiện tại', ml.percentileVsHistory ?? '—'],
+    [term('auc', 'AUC holdout'), esc(ml.testAuc ?? '—')],
+    [term('auc', 'AUC walk-forward'), esc(ml.walkForwardAuc ?? '—')],
+    ['Ngưỡng tăng mạnh', ml.thresholds ? `&gt; ${esc(ml.thresholds.bullishAbove)}` : '—'],
+    ['Ngưỡng giảm mạnh', ml.thresholds ? `&lt; ${esc(ml.thresholds.bearishBelow)}` : '—'],
+    ['Vị trí hiện tại so với lịch sử', esc(ml.percentileVsHistory ?? '—')],
   ];
   if (ml.tailAccuracy?.combinedAccuracy != null) {
     rows.push(['Đúng khi tự tin nhất', fmtPct(ml.tailAccuracy.combinedAccuracy)]);
   }
-  rows.push(['Train lúc', new Date(ml.trainedAt).toLocaleString('vi-VN')]);
-  for (const [k, v] of rows) {
-    const dt = document.createElement('dt'); dt.textContent = k;
-    const dd = document.createElement('dd'); dd.textContent = String(v);
-    dl.append(dt, dd);
-  }
-  host.appendChild(dl);
+  rows.push(['Cách gán nhãn', esc(ml.labelMode ?? '—')]);
+  rows.push(['Train lúc', esc(new Date(ml.trainedAt).toLocaleString('vi-VN'))]);
 
-  if (ml.reliability === 'low') {
-    const warn = document.createElement('p');
-    warn.className = 'small';
-    warn.style.cssText = 'margin:10px 0 0; color:var(--critical)';
-    warn.textContent = 'Model chưa đạt ngưỡng tin cậy nên KHÔNG được tính vào điểm tổng hợp. '
-      + 'Xác suất trên chỉ để tham khảo.';
-    host.appendChild(warn);
-  }
+  const features = ml.topFeatures?.length
+    ? `<details class="fold" style="margin-top:10px"><summary><span>Chỉ báo model dùng nhiều nhất</span></summary>
+        <ul class="notes">${ml.topFeatures.map((f) => `<li>${esc(f.feature)} — ${num(f.pct, 1)}%</li>`).join('')}</ul></details>`
+    : '';
 
-  if (ml.topFeatures?.length) {
-    const det = document.createElement('details');
-    det.style.marginTop = '10px';
-    const sum = document.createElement('summary');
-    sum.className = 'small muted';
-    sum.style.cursor = 'pointer';
-    sum.textContent = 'Chỉ báo model dùng nhiều nhất';
-    const ul = document.createElement('ul');
-    ul.className = 'notes';
-    for (const f of ml.topFeatures) {
-      const li = document.createElement('li');
-      li.textContent = `${f.feature} — ${f.pct.toFixed(1)}%`;
-      ul.appendChild(li);
-    }
-    det.append(sum, ul);
-    host.appendChild(det);
-  }
-}
-
-function renderLevels(snap) {
-  const host = $('levels-body');
-  clear(host);
-  const lv = snap.levels;
-  $('levels-sub').textContent = lv.side === 'none'
-    ? 'Không có setup rõ ràng'
-    : `Setup ${lv.side === 'long' ? 'LONG' : 'SHORT'} — mức tham chiếu tính từ giá đóng nến`;
-
-  const table = document.createElement('table');
-  const body = document.createElement('tbody');
-  const row = (label, value, extra, cls) => {
-    const tr = document.createElement('tr');
-    const th = document.createElement('th'); th.textContent = label;
-    const td = document.createElement('td'); td.className = `num ${cls || ''}`; td.textContent = value;
-    const td2 = document.createElement('td'); td2.className = 'num muted small'; td2.textContent = extra || '';
-    tr.append(th, td, td2);
-    body.appendChild(tr);
-  };
-  if (lv.side !== 'none') {
-    row('Entry', fmtNum(lv.entry), '');
-    row('Stop loss', fmtNum(lv.stopLoss), `rủi ro ${lv.riskPercent}%`, 'delta-down');
-    for (const t of lv.targets) {
-      const pct = ((t.price - lv.entry) / lv.entry) * 100;
-      row(`${t.label} (${t.r}R)`, fmtNum(t.price), `${fmtSigned(pct)}%`, 'delta-up');
-    }
-  }
-  table.appendChild(body);
-  host.appendChild(table);
-
-  for (const [title, arr, color] of [
-    ['Kháng cự', snap.structure.resistance, cssVar('--critical')],
-    ['Hỗ trợ', snap.structure.support, cssVar('--good')],
-  ]) {
-    if (!arr.length) continue;
-    const h = document.createElement('div');
-    h.className = 'small';
-    h.style.cssText = 'margin:12px 0 4px; font-weight:600';
-    h.append(chip(title, { color }));
-    host.appendChild(h);
-    const t2 = document.createElement('table');
-    const b2 = document.createElement('tbody');
-    for (const l of arr.slice(0, 4)) {
-      const tr = document.createElement('tr');
-      for (const [txt, cls] of [
-        [fmtNum(l.price), 'num'],
-        [`${fmtSigned(l.distancePct)}%`, 'num'],
-        [`${l.touches} lần chạm`, 'num muted small'],
-      ]) {
-        const td = document.createElement('td');
-        td.className = cls;
-        td.textContent = txt;
-        tr.appendChild(td);
-      }
-      b2.appendChild(tr);
-    }
-    t2.appendChild(b2);
-    host.appendChild(t2);
-  }
+  host.innerHTML = `
+    <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:8px">
+      <span style="font-size:30px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em">${esc(ml.probUpPercent)}%</span>
+      <span class="muted">khả năng tăng</span>
+      <span class="chip ${relKind}">độ tin cậy ${esc(relLabel)}</span>
+    </div>
+    <p style="margin:0 0 10px; color:var(--text-2)">${used
+      ? 'Con số này đã được tính vào điểm tổng hợp.'
+      : 'Con số này chỉ để tham khảo, <b>chưa được tính vào điểm tổng hợp</b>'
+        + (ml.reliability === 'low' ? ' vì model chưa đạt ngưỡng tin cậy.' : '.')}</p>
+    <details class="fold"><summary><span>Chi tiết kỹ thuật</span></summary>
+      <div class="fold-body">${kvHTML(rows)}</div></details>
+    ${features}`;
 }
 
 function renderIndicators(snap) {
-  const host = $('indicators-body');
-  clear(host);
   const i = snap.indicators;
-  const dl = document.createElement('dl');
-  dl.className = 'kv';
+  const n = snap.indicatorParams?.cvdSlope ?? 20;
   const rows = [
-    ['Khối lượng', `${fmtNum(i.volume)} (${i.volumeRatio}x trung bình)`],
-    ['CVD luỹ tiến', fmtNum(i.cvd)],
-    ['Mua chủ động nến này',
-      i.cvdDeltaShare == null ? '—' : `${fmtSigned(i.cvdDeltaShare * 100)}% khối lượng`],
-    [`CVD ${snap.indicatorParams?.cvdSlope ?? 20} nến`,
-      i.cvdSlope == null ? '—' : `${fmtSigned(i.cvdSlope * 100)}% khối lượng cùng kỳ`],
+    [term('volume'), `${compact(i.volume)} (${num(i.volumeRatio, 2)}× trung bình)`],
+    [term('cvd', 'CVD luỹ tiến'), compact(i.cvd)],
+    [term('taker', 'Mua chủ động nến này'),
+      i.cvdDeltaShare == null ? '—' : `${num(i.cvdDeltaShare * 100, 1, { signed: true })}% khối lượng`],
+    [`CVD ${n} nến`, i.cvdSlope == null ? '—' : `${num(i.cvdSlope * 100, 1, { signed: true })}% khối lượng cùng kỳ`],
   ];
   if (snap.derivatives?.fundingRate != null) {
-    rows.push(['Funding rate', `${snap.derivatives.fundingRatePercent}%`]);
+    rows.push([term('funding'), `${num(snap.derivatives.fundingRatePercent, 4)}%`]);
     if (snap.derivatives.openInterestChangePct != null) {
-      rows.push(['Open interest', `${fmtSigned(snap.derivatives.openInterestChangePct)}%`]);
+      rows.push([term('oi', 'Open Interest'), `${num(snap.derivatives.openInterestChangePct, 2, { signed: true })}%`]);
     }
   }
   if (snap.orderBook) {
-    rows.push(['Lệch sổ lệnh', `${fmtSigned(snap.orderBook.imbalance * 100)}%`]);
+    rows.push([term('orderbook'), `${num(snap.orderBook.imbalance * 100, 1, { signed: true })}%`]);
     if (snap.orderBook.depthSpanPct != null) {
-      rows.push(['Độ trải sổ lệnh', `±${snap.orderBook.depthSpanPct.toFixed(2)}%`]);
+      rows.push(['Độ trải sổ lệnh', `±${num(snap.orderBook.depthSpanPct, 2)}%`]);
     }
     for (const w of snap.orderBook.walls ?? []) {
-      rows.push([`Tường ${w.side === 'bid' ? 'mua' : 'bán'}`,
-        `${fmtNum(w.price)} (${fmtSigned(w.distancePct)}%, ${w.ratioToAvg.toFixed(1)}x TB)`]);
+      rows.push([term('wall', `Tường ${w.side === 'bid' ? 'mua' : 'bán'}`),
+        `${fmt(w.price)} (${num(w.distancePct, 2, { signed: true })}%, ${num(w.ratioToAvg, 1)}× TB)`]);
     }
   }
   if (snap.historicalPattern?.available) {
     const hp = snap.historicalPattern;
-    rows.push(['Mẫu hình lịch sử', `${hp.matched} mẫu, giống TB ${hp.avgSimilarity}%`]);
-    rows.push(['Sai số chart tương đối', `TB ${hp.avgRelativePathError}% · P95 ${hp.avgP95RelativePathError}% · ${hp.avgBarsWithinRelativeTolerancePercent}% nến trong tolerance`]);
-    rows.push(['Diễn biến sau mẫu', `${hp.side === 'long' ? 'Tăng' : 'Giảm'} TB ${fmtSigned(hp.avgForwardReturnPct)}% sau ${hp.futureBars} nến`]);
+    rows.push([term('pattern'), `${esc(hp.matched)} mẫu, giống TB ${esc(hp.avgSimilarity)}%`]);
+    rows.push(['Sai số chart tương đối',
+      `TB ${esc(hp.avgRelativePathError)}% · P95 ${esc(hp.avgP95RelativePathError)}% · ${esc(hp.avgBarsWithinRelativeTolerancePercent)}% nến trong tolerance`]);
+    rows.push(['Diễn biến sau mẫu',
+      `${hp.side === 'long' ? 'Tăng' : 'Giảm'} TB ${num(hp.avgForwardReturnPct, 2, { signed: true })}% sau ${esc(hp.futureBars)} nến`]);
   }
-  for (const [k, v] of rows) {
-    const dt = document.createElement('dt'); dt.textContent = k;
-    const dd = document.createElement('dd'); dd.textContent = String(v);
-    dl.append(dt, dd);
+  $('indicators-body').innerHTML = kvHTML(rows);
+}
+
+// ---------- Biểu đồ: lớp hiển thị, vẽ lại khi đổi cỡ / đổi giao diện ----------
+
+const LAYERS_KEY = 'ta.layers';
+
+function initLayers() {
+  try {
+    Object.assign(state.layers, JSON.parse(localStorage.getItem(LAYERS_KEY) || '{}'));
+  } catch { /* chế độ riêng tư hoặc dữ liệu hỏng: dùng mặc định */ }
+  for (const btn of document.querySelectorAll('#layers [data-layer]')) {
+    const key = btn.dataset.layer;
+    btn.setAttribute('aria-pressed', String(Boolean(state.layers[key])));
+    btn.addEventListener('click', () => {
+      state.layers[key] = !state.layers[key];
+      btn.setAttribute('aria-pressed', String(state.layers[key]));
+      try { localStorage.setItem(LAYERS_KEY, JSON.stringify(state.layers)); } catch { /* bỏ qua */ }
+      if (state.snapshot) drawPriceArea(state.snapshot);
+    });
   }
-  host.appendChild(dl);
+}
+
+function drawPriceArea(snap) {
+  const hasPlan = snap.levels && snap.levels.side !== 'none' && snap.levels.entry != null;
+  drawPriceChart($('price-chart'), $('price-tip'), snap, state.layers);
+  $('price-legend').innerHTML = priceLegendHTML(state.layers, hasPlan);
+  $('price-chart-sub').textContent = `${snap.series.close.length} nến khung ${snap.interval} gần nhất · `
+    + 'rê chuột hoặc chạm vào biểu đồ để xem từng nến';
+}
+
+function drawCharts(snap) {
+  drawPriceArea(snap);
+  drawCvd($('cvd-chart'), $('cvd-tip'), snap);
+  drawFlow($('flow-chart'), $('flow-tip'), snap);
+}
+
+/** Biểu đồ phải vẽ lại theo bề rộng mới (xoay điện thoại, kéo cửa sổ). */
+function watchChartWidth() {
+  const widths = new Map();
+  let queued = false;
+  const ro = new ResizeObserver((entries) => {
+    let changed = false;
+    for (const e of entries) {
+      const w = Math.round(e.contentRect.width);
+      if (widths.has(e.target) && Math.abs(widths.get(e.target) - w) > 2) changed = true;
+      widths.set(e.target, w);
+    }
+    if (!changed || queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; if (state.snapshot) drawCharts(state.snapshot); });
+  });
+  for (const id of ['price-wrap', 'cvd-wrap', 'flow-wrap']) ro.observe($(id));
 }
 
 // ---------- Điều phối ----------
 
 function renderAll(snap) {
   state.snapshot = snap;
+  $('analysis').classList.remove('hidden');   // phải hiện trước khi vẽ để đo được bề rộng biểu đồ
   renderHero(snap);
-  drawPriceChart(snap);
-  drawCvd(snap);
-  drawFlow(snap);
-  drawBreakdown(snap);
-  renderMl(snap);
+  drawCharts(snap);
+  renderCandleTable(snap);
+  renderBreakdown(snap);
+  renderFlowRead(snap);
   renderLevels(snap);
+  renderMl(snap);
   renderIndicators(snap);
   updateTargetLabel();
 }
@@ -879,6 +398,10 @@ async function runAnalyze() {
   } catch (err) {
     showBanner(err.message);
     setStatus('lỗi');
+    if (!state.snapshot) {
+      $('verdict').innerHTML = '<section class="card verdict" data-tone="flat"><div class="muted">'
+        + 'Chưa có dữ liệu để hiển thị. Kiểm tra mã token rồi bấm “Phân tích”.</div></section>';
+    }
   } finally {
     state.busy = false;
     $('btn-analyze').disabled = false;
@@ -1501,15 +1024,11 @@ function switchTab(id) {
   if (id === 'tab-train') loadModelsList();
 }
 
-function applyTheme(mode) {
-  if (mode) document.documentElement.setAttribute('data-theme', mode);
-  else document.documentElement.removeAttribute('data-theme');
-  try { localStorage.setItem('ta.theme', mode || ''); } catch { /* riêng tư */ }
-  if (state.snapshot) renderAll(state.snapshot);
-}
-
 async function init() {
-  try { applyTheme(localStorage.getItem('ta.theme') || ''); } catch { /* bỏ qua */ }
+  initTheme($('btn-theme'), () => { if (state.snapshot) drawCharts(state.snapshot); });
+  initTerms();
+  initLayers();
+  watchChartWidth();
 
   const sel = $('interval');
   for (const iv of Object.keys(INTERVAL_MS)) {
@@ -1547,15 +1066,6 @@ async function init() {
   for (const btn of document.querySelectorAll('[role="tab"]')) {
     btn.addEventListener('click', () => switchTab(btn.id));
   }
-  $('btn-theme').addEventListener('click', () => {
-    const cur = document.documentElement.getAttribute('data-theme');
-    applyTheme(cur === 'dark' ? 'light' : 'dark');
-  });
-  let resizeTimer;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => { if (state.snapshot) drawPriceChart(state.snapshot); }, 150);
-  });
 
   initSettingsPanel();
   await runAnalyze();

@@ -36,6 +36,12 @@ app.use('/realtime', express.static(path.join(rootDir, 'public')));
 
 app.get('/api/intervals', (req, res) => res.json(INTERVALS));
 
+// Ngưỡng MUA/BÁN để trang realtime vẽ thang điểm có vùng (snapshot không kèm ngưỡng).
+app.get('/api/thresholds', async (req, res) => {
+  const { thresholds } = await loadStrategy();
+  res.json(thresholds);
+});
+
 app.get('/api/analyze', async (req, res) => {
   const { symbol, interval = '4h', bars } = req.query;
   try {

@@ -10,116 +10,110 @@
 </head>
 <body>
 
-<header>
-  <h1>AI phân tích kỹ thuật</h1>
-  <div class="controls">
-    <input type="text" id="symbol" value="BTC" placeholder="BTC" aria-label="Mã token" autocomplete="off">
-    <select id="interval" aria-label="Khung thời gian"></select>
-    <button class="primary" id="btn-analyze">Phân tích</button>
-    <button id="btn-ai">Phân tích bằng AI</button>
-  </div>
-  <div class="spacer"></div>
-  <div class="controls">
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand">📈 <span class="brand-name">Phân tích kỹ thuật <span>crypto</span></span></div>
+    <nav class="nav" aria-label="Chuyển trang">
+      <a href="./" aria-current="page">Tổng quan</a>
+      <a href="./realtime/">Realtime</a>
+    </nav>
+    <div class="spacer"></div>
     <span id="status" class="small muted" role="status" aria-live="polite"></span>
-    <button id="btn-theme" aria-label="Đổi sáng/tối" title="Đổi sáng/tối">◐</button>
+    <button class="icon" id="btn-theme" type="button" aria-label="Đổi giao diện sáng/tối"></button>
   </div>
 </header>
 
 <main>
+  <div class="toolbar">
+    <label class="field grow"><span>Mã token</span>
+      <input type="text" id="symbol" value="BTC" placeholder="BTC, ETH, SOL…" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    </label>
+    <label class="field grow"><span>Khung nến</span>
+      <select id="interval"></select>
+    </label>
+    <button class="primary" id="btn-analyze" type="button">Phân tích</button>
+    <button id="btn-ai" type="button">Phân tích bằng AI</button>
+  </div>
+
   <div id="banner" class="banner hidden"></div>
 
-  <section class="card">
-    <div class="hero">
-      <div>
-        <div class="signal-label" id="signal-label">
-          <span class="signal-dot" id="signal-dot" style="background: var(--text-muted)"></span>
-          <span>Đang tải…</span>
+  <div id="verdict"><section class="card verdict" data-tone="flat"><div class="muted">Đang lấy dữ liệu từ Binance…</div></section></div>
+
+  <!-- Cụm phân tích: ẩn tới khi có dữ liệu thật, để lỗi không để lại các thẻ rỗng -->
+  <div id="analysis" class="stack hidden">
+    <div class="chart-row">
+      <section class="card">
+        <h2>Biểu đồ giá</h2>
+        <p class="sub" id="price-chart-sub">—</p>
+        <div class="layers" id="layers" role="group" aria-label="Chọn thông tin hiển thị trên biểu đồ">
+          <button type="button" class="toggle" data-layer="levels" aria-pressed="true" title="Vùng giá mà giá hay bật lại (hỗ trợ) hoặc bị chặn (kháng cự)">Hỗ trợ / kháng cự</button>
+          <button type="button" class="toggle" data-layer="plan" aria-pressed="true" title="Mức vào lệnh, cắt lỗ và chốt lời gợi ý (chỉ hiện khi có kịch bản)">Kịch bản vào lệnh</button>
+          <button type="button" class="toggle" data-layer="walls" aria-pressed="false" title="Các mức có lượng lệnh chờ mua/bán lớn bất thường trong sổ lệnh. Lưu ý: lệnh lớn có thể bị đặt rồi huỷ để đánh lừa, nên đối chiếu với dòng tiền chủ động.">Tường lệnh</button>
+          <button type="button" class="toggle" data-layer="volume" aria-pressed="true" title="Khối lượng giao dịch của từng nến">Khối lượng</button>
         </div>
-        <div class="price-line" id="price-line">—</div>
-        <div class="price-sub" id="price-sub">Đang lấy dữ liệu từ Binance</div>
-      </div>
-      <div>
-        <div class="score-row">
-          <span class="score-value" id="score-value">—</span>
-          <span class="score-max">/ 100 điểm tổng hợp</span>
+        <div class="legend" id="price-legend"></div>
+        <div class="chart-wrap" id="price-wrap">
+          <svg class="chart" id="price-chart" viewBox="0 0 900 440" role="img"
+               aria-label="Biểu đồ nến kèm vùng hỗ trợ, kháng cự và kịch bản vào lệnh"></svg>
+          <div class="tooltip" id="price-tip" role="tooltip"></div>
         </div>
-        <div class="chart-wrap">
-          <svg class="chart" id="score-bar" viewBox="0 0 600 62" role="img"
-               aria-label="Thang điểm tổng hợp từ -100 (giảm mạnh) đến +100 (tăng mạnh)"></svg>
-        </div>
-        <div class="legend" id="score-parts"></div>
-      </div>
+        <details class="fold" style="margin-top:12px">
+          <summary><span>Xem dạng bảng <small>(10 nến gần nhất)</small></span></summary>
+          <div class="fold-body table-scroll" id="candle-table"></div>
+        </details>
+      </section>
+
+      <section class="card">
+        <h2>Vùng giá quan trọng</h2>
+        <p class="sub">Các mức gần giá hiện tại nhất mà giá hay bật lại hoặc bị chặn.</p>
+        <div id="ladder" class="muted">Đang tải…</div>
+      </section>
     </div>
-    <ul class="notes" id="conflicts"></ul>
-  </section>
 
-  <div class="chart-row">
-    <section class="card">
-      <h2>Giá &amp; vùng hỗ trợ/kháng cự</h2>
-      <p class="sub" id="price-chart-sub">—</p>
-      <div class="legend" id="price-legend"></div>
-      <div class="chart-wrap" id="price-wrap">
-        <svg class="chart" id="price-chart" viewBox="0 0 900 460" role="img"
-             aria-label="Biểu đồ nến, khối lượng, vùng hỗ trợ/kháng cự và tường lệnh"></svg>
-        <div class="tooltip" id="price-tip" role="tooltip"></div>
-      </div>
-      <details style="margin-top:10px">
-        <summary class="small muted" style="cursor:pointer">Xem dạng bảng (10 nến gần nhất)</summary>
-        <div id="candle-table" style="margin-top:8px"></div>
-      </details>
-    </section>
+    <div class="grid-2">
+      <section class="card">
+        <h2>Vì sao ra kết luận này?</h2>
+        <p class="sub">Mỗi dòng là một nhóm chỉ báo. Thanh xanh kéo điểm lên, thanh đỏ kéo điểm xuống. Bấm vào dòng để đọc lý do.</p>
+        <div id="breakdown" class="muted">Đang tải…</div>
+      </section>
 
-    <div style="display:grid; gap:14px; align-content:start; min-width:0">
       <section class="card">
         <h2>Dòng tiền chủ động</h2>
-        <p class="sub">CVD luỹ tiến và mua chủ động ròng mỗi nến</p>
+        <p class="sub" id="cvd-read">—</p>
         <div class="legend" id="osc-legend"></div>
         <div class="chart-wrap" id="cvd-wrap">
-          <svg class="chart" id="cvd-chart" viewBox="0 0 420 130" role="img"
+          <svg class="chart" id="cvd-chart" viewBox="0 0 420 150" role="img"
                aria-label="CVD luỹ tiến theo thời gian"></svg>
           <div class="tooltip" id="cvd-tip" role="tooltip"></div>
         </div>
-        <div class="chart-wrap" id="flow-wrap" style="margin-top:6px">
+        <div class="small muted" style="margin:10px 0 2px">Mỗi cột: người mua hay người bán chủ động nhiều hơn trong từng nến</div>
+        <div class="chart-wrap" id="flow-wrap">
           <svg class="chart" id="flow-chart" viewBox="0 0 420 120" role="img"
                aria-label="Mua chủ động ròng mỗi nến, tính theo phần trăm khối lượng"></svg>
           <div class="tooltip" id="flow-tip" role="tooltip"></div>
         </div>
       </section>
+    </div>
 
+    <div class="grid-2">
       <section class="card">
         <h2>Model học máy</h2>
         <p class="sub" id="ml-sub">—</p>
         <div id="ml-body" class="small muted">Đang tải…</div>
       </section>
-    </div>
-  </div>
 
-  <div class="grid-2">
-    <section class="card">
-      <h2>Đóng góp của từng nhóm tín hiệu</h2>
-      <p class="sub">Điểm âm nghiêng về giảm, điểm dương nghiêng về tăng. Trọng số sửa được ở tab Cấu hình.</p>
-      <div class="chart-wrap" id="breakdown-wrap">
-        <svg class="chart" id="breakdown-chart" viewBox="0 0 560 300" role="img"
-             aria-label="Biểu đồ cột ngang: đóng góp của từng nhóm tín hiệu vào điểm tổng hợp"></svg>
-        <div class="tooltip" id="breakdown-tip" role="tooltip"></div>
-      </div>
-      <div id="breakdown-reasons" style="margin-top:10px"></div>
-    </section>
-
-    <div style="display:grid; gap:14px; align-content:start; min-width:0">
       <section class="card">
-        <h2>Vùng giá quan trọng</h2>
-        <p class="sub" id="levels-sub">—</p>
-        <div id="levels-body" class="small muted">Đang tải…</div>
-      </section>
-      <section class="card">
-        <h2>Số liệu chỉ báo</h2>
-        <div id="indicators-body" class="small muted">Đang tải…</div>
+        <details class="fold">
+          <summary><span>Số liệu chi tiết <small>(cho người đã quen với chỉ báo)</small></span></summary>
+          <div class="fold-body" id="indicators-body">Đang tải…</div>
+        </details>
       </section>
     </div>
   </div>
 
-  <section class="card">
+  <section class="card" id="tools">
+    <h2>Công cụ nâng cao</h2>
+    <p class="sub">Báo cáo do AI viết, huấn luyện model, kiểm chứng chiến lược và chỉnh cấu hình.</p>
     <div class="tabs" role="tablist" style="margin-bottom:12px">
       <button role="tab" id="tab-ai" aria-selected="true" data-panel="panel-ai">Báo cáo AI</button>
       <button role="tab" id="tab-train" aria-selected="false" data-panel="panel-train">Huấn luyện ML</button>
