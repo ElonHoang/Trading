@@ -97,6 +97,23 @@ máy local tắt, vì không có tiến trình long-poll đang chạy. Workflow 
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_IDS`, `STATE_ENCRYPTION_KEY`, và
 `STATE_HMAC_KEY`; hai state key đều là 64 ký tự hexadecimal và phải được giữ riêng tư.
 
+### Điều khiển bot từ trang web
+
+Trang **Bot** (`bot.html`, mục "Bot" trên thanh đầu trang) cho bạn, không cần mở GitHub:
+
+- xem workflow quét đang bật hay tắt và các lần chạy gần đây (**không cần token**);
+- **Quét ngay**, **Tắt / Bật lại bot** (cần token);
+- chỉnh **cài đặt cảnh báo**: danh sách mã được quét, điểm tối thiểu để báo, độ trôi giá tối đa khi vào lệnh.
+  Cài đặt được ghi vào `Trading-state/data/bot-config.json`; runner đọc nó ở lượt quét kế tiếp. Không chỉnh gì
+  thì bot dùng đúng cấu hình trong `config/strategy.json`, và nút "Về mặc định của bot" xoá cài đặt đã lưu.
+
+Cần một token GitHub **fine-grained** của riêng bạn (trang có hướng dẫn từng bước): chọn đúng hai repo
+`Trading-state` và `Trading-runner`, quyền **Contents: Read and write** và **Actions: Read and write**, **không**
+cấp Workflows. Token chỉ lưu trong trình duyệt đang dùng và chỉ được gửi tới `api.github.com`.
+
+Chỉ ba tham số trên chỉnh được từ web; SL/TP, ngưỡng MUA/BÁN và các cổng lọc khác cố ý không mở ra. Giá trị sai
+(ví dụ điểm ngoài 20–90, mã không phải cặp USDT) bị bỏ qua và bot dùng mặc định, lỗi được in ra log của runner.
+
 ---
 
 ## Bot Telegram
@@ -336,14 +353,16 @@ code. Khi sửa các module dùng chung, hãy kiểm tra chúng không import `n
 
 ```
 index.html               Dashboard tĩnh (chạy cục bộ khi cần)
+bot.html                 Trang điều khiển bot: trạng thái, quét ngay, bật/tắt, cài đặt cảnh báo
 web/                     Lớp riêng của browser: app.js, store.js, model-store.js,
-                         claude.js, worker.js; giao diện dùng chung cho CẢ HAI trang:
+                         claude.js, worker.js, bot.js + bot-api.js (trang Bot, gọi GitHub API); giao diện dùng chung cho CẢ HAI trang:
                          style.css (màu, bố cục), ui.js (sáng/tối, chú thích thuật ngữ,
                          khối kết luận / vì sao / thang giá), charts.js (biểu đồ SVG giá, CVD)
 public/index.html        Giao diện realtime (WebSocket Binance), vẽ bằng cùng web/charts.js
 src/                     LÕI — dùng chung browser & Node
   data/binance.js        Nến, ticker, funding, OI, sổ lệnh + tường, định vị đám đông,
                          resolveSymbol (đối chiếu danh sách cặp thật)
+  data/bot-config.js     Kiểm tra cài đặt cảnh báo chỉnh từ web (thuần; web và bot dùng chung)
   indicators/index.js    sma, cvd, cvdSlope, pivots, supportResistance
   features.js            16 feature cho ML
   ml/gbdt.js             Gradient boosting + AUC/logloss + hiệu chuẩn xác suất
@@ -363,6 +382,7 @@ src/                     LÕI — dùng chung browser & Node
   data/announcements.js  Thông báo delist Binance
   data/news.js           RSS
   data/open-calls.js     Trạng thái kèo đang mở
+  data/bot-config-file.js Đọc data/bot-config.json (chỉ đọc) cho vòng quét của runner
   bot.js, server.js, cli.js, config.js, format.js, llm/claude.js, ml/model-store.js
 bin/                     CLI: train, backtest, build-model-index
 config/strategy.json     Toàn bộ tham số

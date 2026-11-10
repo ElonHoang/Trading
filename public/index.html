@@ -19,17 +19,6 @@
   @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
   @media (prefers-reduced-motion: reduce) { #conn .dot { animation: none !important; } }
 
-  .wl { display: flex; flex-wrap: wrap; gap: 6px; }
-  .wl-item {
-    display: inline-flex; align-items: center; background: var(--surface);
-    border: 1px solid var(--line-strong); border-radius: 999px; font-size: 14px; font-weight: 600;
-  }
-  .wl-item > span { cursor: pointer; padding: 6px 4px 6px 12px; min-height: 34px; display: inline-flex; align-items: center; }
-  .wl-item > span:hover { color: var(--accent); }
-  .wl-item > button { border: 0; background: none; padding: 0 10px 0 4px; min-height: 34px; color: var(--text-3); font-size: 16px; line-height: 1; }
-  .wl-item > button:hover { color: var(--down-text); background: none; }
-  .wl-empty { color: var(--text-3); font-size: 14px; }
-
   #msg { display: none; }
   #msg.err { display: block; }
   #msg.load { display: block; }
@@ -39,18 +28,12 @@
   @keyframes flashUp { from { background: color-mix(in srgb, var(--up) 35%, transparent); } to { background: transparent; } }
   @keyframes flashDown { from { background: color-mix(in srgb, var(--down) 35%, transparent); } to { background: transparent; } }
 
-  @media (max-width: 700px) {
-    .wl { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
-    .wl-item { flex: none; }
-  }
-
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 0; }
   .cell { background: var(--surface-2); border-radius: 10px; padding: 10px 14px; }
   .cell dt { color: var(--text-3); font-size: 13px; font-weight: 600; }
   .cell dd { margin: 3px 0 0; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .cell small { display: block; color: var(--text-3); font-size: 12.5px; font-weight: 400; margin-top: 2px; }
 
-  .foot { color: var(--text-3); font-size: 13px; text-align: center; margin: 4px 0 0; }
 </style>
 </head>
 <body>
@@ -61,6 +44,7 @@
     <nav class="nav" aria-label="Chuyển trang">
       <a href="/">Tổng quan</a>
       <a href="/realtime/" aria-current="page">Realtime</a>
+      <a href="/bot.html">Bot</a>
     </nav>
     <div class="spacer"></div>
     <div id="conn"><span class="dot"></span><span id="connText">chưa kết nối</span></div>

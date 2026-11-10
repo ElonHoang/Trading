@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot Telegram — cài đặt và điều khiển</title>
+<meta name="description" content="Xem trạng thái bot Telegram, quét ngay, bật/tắt và chỉnh cài đặt cảnh báo từ trang web.">
+<link rel="stylesheet" href="./web/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📈</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand">📈 <span class="brand-name">Phân tích kỹ thuật <span>crypto</span></span></div>
+    <nav class="nav" aria-label="Chuyển trang">
+      <a href="./">Tổng quan</a>
+      <a href="./realtime/">Realtime</a>
+      <a href="./bot.html" aria-current="page">Bot</a>
+    </nav>
+    <div class="spacer"></div>
+    <button class="icon" id="btn-theme" type="button" aria-label="Đổi giao diện sáng/tối"></button>
+  </div>
+</header>
+
+<!-- Ba thẻ do web/bot.js dựng. Thẻ kết nối nằm cuối, trừ khi chưa có token thì được đẩy lên đầu (xem .bot-page trong style.css). -->
+<main class="bot-page" id="page">
+  <section class="card" id="card-status"><div class="muted">Đang tải…</div></section>
+  <section class="card" id="card-settings"><div class="muted">Đang tải…</div></section>
+  <section class="card" id="card-connect"><div class="muted">Đang tải…</div></section>
+  <p class="foot">Đây là công cụ phân tích kỹ thuật tự động, không phải lời khuyên đầu tư.</p>
+</main>
+
+<script type="module" src="./web/bot.js"></script>
+</body>
+</html>

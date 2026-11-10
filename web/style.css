@@ -721,6 +721,72 @@ details.fold > .fold-body { margin-top: 10px; }
 .cfg-row input, .cfg-row select { width: 100%; text-transform: none; }
 .cfg-row.changed input, .cfg-row.changed select { border-color: var(--warning); }
 
+/* ---------- Danh sách mã (chip) và chân trang, dùng ở Realtime và Bot ---------- */
+
+.wl { display: flex; flex-wrap: wrap; gap: 6px; }
+.wl-item {
+  display: inline-flex; align-items: center; background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: 999px; font-size: 14px; font-weight: 600;
+}
+.wl-item > span { cursor: pointer; padding: 6px 4px 6px 12px; min-height: 34px; display: inline-flex; align-items: center; }
+.wl-item > span:hover { color: var(--accent); }
+.wl-item.static > span { cursor: default; }
+.wl-item.static > span:hover { color: inherit; }
+.wl-item > button { border: 0; background: none; padding: 0 10px 0 4px; min-height: 34px; color: var(--text-3); font-size: 16px; line-height: 1; }
+.wl-item > button:hover { color: var(--down-text); background: none; }
+.wl-empty { color: var(--text-3); font-size: 14px; }
+
+.foot { color: var(--text-3); font-size: 13px; text-align: center; margin: 4px 0 0; }
+
+/* ---------- Trang Bot Telegram ---------- */
+
+main.bot-page { max-width: 860px; }
+/* Chưa có token thì việc đầu tiên là kết nối: đẩy thẻ đó lên đầu. */
+.bot-page.no-token #card-connect { order: -1; }
+
+.bot-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; }
+.state-pill { font-size: 15px; padding: 5px 14px; }
+
+.runs { list-style: none; margin: 16px 0 0; padding: 0; }
+.runs li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14.5px;
+}
+.runs .run-kind { font-size: 13.5px; }
+
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+
+.field-block { margin-top: 20px; }
+.field-label { display: block; font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+.hint { font-size: 13.5px; color: var(--text-3); margin: 8px 0 0; }
+.field-error { font-size: 13.5px; color: var(--down-text); margin: 6px 0 0; min-height: 0; }
+.field-error:empty { display: none; }
+.inline-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.check { display: inline-flex; align-items: center; gap: 8px; font-size: 14.5px; cursor: pointer; }
+.check input { min-height: 0; width: 18px; height: 18px; padding: 0; }
+input[type="number"] { width: 120px; text-transform: none; }
+input[type="password"] { width: min(440px, 100%); text-transform: none; }
+#sym-input { width: 200px; }
+.steps { padding-left: 20px; margin: 8px 0 0; display: grid; gap: 8px; font-size: 14.5px; }
+code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.92em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+
+@media (max-width: 700px) {
+  .wl { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+  .wl-item { flex: none; }
+  .runs li { grid-template-columns: minmax(0, 1fr) auto; }
+  .runs .run-kind { grid-column: 1; grid-row: 2; }
+  .runs li > a { grid-column: 2; grid-row: 2; justify-self: end; }
+  .btn-row > button { flex: 1 1 140px; }
+  input[type="number"] { width: 100%; }
+  #sym-input { flex: 1 1 140px; width: auto; min-width: 0; }
+  .inline-row > #sym-add { flex: none; }
+}
+
 /* ---------- Điện thoại ---------- */
 
 @media (max-width: 520px) { .brand-name { display: none; } }

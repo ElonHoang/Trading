@@ -12,6 +12,8 @@ import { resolveSymbol, fetchFuturesSymbols } from '../data/binance.js';
 import { loadModel } from '../ml/model-store.js';
 import { assertAllowedTradeSymbol, automaticTradeTargets } from '../data/trading-universe.js';
 import { readMonitorState, saveMonitorState } from '../data/monitor-state.js';
+import { readBotConfig } from '../data/bot-config-file.js';
+import { applyBotConfig, describeBotConfig } from '../data/bot-config.js';
 import { setCallMessages } from '../data/open-calls.js';
 import { buildCaption, buildClosedNote, buildTpUpdate, splitCaption } from './caption.js';
 import { createMonitor } from './monitor.js';
@@ -65,7 +67,11 @@ async function configuredTradeTargets(strategy) {
  * người dùng chủ động chạy training local khi muốn đánh giá phương án sửa.
  */
 async function loadActionStrategy() {
-  const strategy = applyActiveTuning(await loadStrategy(), await readAutoRetuneState());
+  const tuned = applyActiveTuning(await loadStrategy(), await readAutoRetuneState());
+  // Cài đặt chỉnh từ trang web (bot-config.json) đè lên SAU CÙNG: đó là lựa chọn rõ ràng của chủ bot.
+  // File hỏng hay lỗi đọc đĩa không được làm hỏng lượt quét: khi đó dùng cấu hình của repo.
+  const { config } = await readBotConfig().catch(() => ({ config: {} }));
+  const strategy = applyBotConfig(tuned, config);
   return {
     ...strategy,
     autoRetune: { ...(strategy.autoRetune ?? {}), enabled: false, autoApply: false },
@@ -194,6 +200,13 @@ const monitor = createMonitor({
 });
 
 console.log(`Bắt đầu một lượt quét cảnh báo cho ${chatIds.length} chat.`);
+{
+  const botConfig = await readBotConfig().catch((error) => ({ found: false, config: {}, errors: [error.message] }));
+  if (botConfig.found && Object.keys(botConfig.config).length) {
+    console.log(`Dùng cài đặt từ trang web: ${describeBotConfig(botConfig.config)}.`);
+  }
+  for (const message of botConfig.errors) console.error(`[bot-config] bỏ qua: ${message}`);
+}
 await monitor.tick();
 
 // Alert runner là tiến trình sở hữu và ghi lại auto-retune.json. Mỗi ngày nó chỉ

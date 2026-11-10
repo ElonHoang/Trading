@@ -26,7 +26,7 @@ const PORT = Number(process.env.PORT) || 3000;
 // Dashboard tĩnh import trực tiếp module trong src/ qua HTTP, nên phải phục vụ
 // nguyên trạng các thư mục này.
 const ALLOWED_ROOTS = ['web', 'src', 'config', 'models'];
-const ALLOWED_FILES = ['/', '/index.html', '/favicon.ico', '/README.md'];
+const ALLOWED_FILES = ['/', '/index.html', '/bot.html', '/favicon.ico', '/README.md'];
 
 const app = express();
 app.use(express.json());

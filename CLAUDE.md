@@ -247,7 +247,7 @@ Kèo tự động **không** chạy từ repo này. Ba repo, chia theo quyền:
 |---|---|
 | `ElonHoang/Trading` (repo này, public) | mã nguồn. Runner checkout nhánh `production` |
 | `ElonHoang/Trading-runner` (public) | chạy cron 5 phút, gọi `npm run scan:github` |
-| `ElonHoang/Trading-state` (private) | `open-calls.json`, `monitor-state.json`, `auto-retune.json` dạng plaintext |
+| `ElonHoang/Trading-state` (private) | `open-calls.json`, `monitor-state.json`, `auto-retune.json` dạng plaintext, và `bot-config.json` (chỉ đọc, do trang web ghi) |
 
 `npm run scan:github` **trùng lệnh với `alerts:once`** — runner gọi tên đó, giữ hai tên cho khớp và đừng để lệch nhau.
 
@@ -260,6 +260,15 @@ Bản rà soát chạy thật là `Trading-runner/.github/workflows/daily-review
 Giờ chạy đó quyết định `dailyReview.dayOffsetDays` phải là **-1**: 08:07 sáng mà rà "ngày đang chạy" thì cửa sổ mới mở được 8 tiếng, khung 4h vừa đóng 2 nến, báo cáo gần như trống. Đổi cron về cuối ngày thì mới đặt lại 0. Sửa ở repo này là đủ — runner checkout `production` nên cấu hình đi theo, không cần sửa workflow bên kia.
 
 Nhịp cron thực tế của GitHub Actions là **~3 tiếng, không phải 5 phút** — scheduled workflow trên runner công khai bị throttle nặng. Đây là một lý do nữa khiến khung 15m không bao giờ hoạt động như thiết kế (96 nến/ngày mà quét 8 lần), còn 4h (6 nến/ngày) thì vừa. Muốn nhịp đáng tin thì chạy `Dockerfile` ở máy riêng, tăng tần suất cron không giúp gì.
+
+### Điều khiển bot từ web (`bot.html`)
+
+Trang `bot.html` (`web/bot.js` + `web/bot-api.js`) gọi thẳng `api.github.com` bằng token fine-grained của chủ bot (localStorage `ta.github.token`; Contents + Actions Read/Write trên `Trading-state` và `Trading-runner`, KHÔNG cấp Workflows): xem workflow/lần chạy (không cần token), `workflow_dispatch` ("Quét ngay"), enable/disable workflow, và ghi `data/bot-config.json` vào `Trading-state`.
+
+- `bot-config.json` chỉ có ba tham số: `tradeSymbols`, `minAbsScore`, `maxEntryDriftPercent` (`null` = tắt bộ lọc). `src/data/bot-config.js` là module thuần **dùng chung** cho web (báo lỗi khi nhập) và bot (kiểm lại): khoá lạ bị bỏ, tham số sai thì bỏ riêng tham số đó và bot dùng mặc định của repo — không bao giờ làm hỏng lượt quét. **Đừng thêm tham số rủi ro** (SL/TP, ngưỡng MUA/BÁN, cổng đồng thuận…) vào danh sách này.
+- `src/telegram/alerts-once.js` áp cấu hình SAU `applyActiveTuning` (lựa chọn rõ ràng của chủ bot thắng bản tự tinh chỉnh). Chỉ đường `scan:github`; bot long-polling (`npm run bot`) không đọc file này.
+- **File này CHỈ ĐỌC với runner**: `Trading-runner` khôi phục nó nhưng KHÔNG đưa vào danh sách lưu lại. Nếu lưu lại, một lần bấm Lưu trên web giữa lúc khôi phục và lúc lưu trạng thái sẽ bị lượt quét đang chạy ghi đè bằng bản cũ. Bước lưu trạng thái cũng có vòng `pull --rebase` thử lại, vì web có thể commit vào `Trading-state` bất cứ lúc nào và làm lần push của runner bị từ chối.
+- Test: `test/bot-config.test.js`, `test/bot-api.test.js` (GitHub giả bằng `fetch` truyền vào). `src/server.js` có danh sách tệp gốc được phục vụ (`ALLOWED_FILES`): thêm trang mới ở thư mục gốc thì phải thêm vào đó.
 
 ### Giao diện
 
