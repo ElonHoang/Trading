@@ -19,8 +19,6 @@
   @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
   @media (prefers-reduced-motion: reduce) { #conn .dot { animation: none !important; } }
 
-  .hint { margin: 0; color: var(--text-3); font-size: 13.5px; }
-
   .wl { display: flex; flex-wrap: wrap; gap: 6px; }
   .wl-item {
     display: inline-flex; align-items: center; background: var(--surface);
@@ -41,13 +39,10 @@
   @keyframes flashUp { from { background: color-mix(in srgb, var(--up) 35%, transparent); } to { background: transparent; } }
   @keyframes flashDown { from { background: color-mix(in srgb, var(--down) 35%, transparent); } to { background: transparent; } }
 
-  .chartbox { position: relative; }
-  .chartbox .range { margin-left: auto; font-size: 13px; color: var(--text-3); }
-  canvas { display: block; width: 100%; }
-  #chart { height: 420px; }
-  #cvd { height: 160px; margin-top: 4px; }
-  @media (max-width: 700px) { #chart { height: 340px; } #cvd { height: 140px; } }
-  #tip { position: absolute; z-index: 5; white-space: nowrap; }
+  @media (max-width: 700px) {
+    .wl { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+    .wl-item { flex: none; }
+  }
 
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 0; }
   .cell { background: var(--surface-2); border-radius: 10px; padding: 10px 14px; }
@@ -74,11 +69,6 @@
 </header>
 
 <main>
-  <p class="hint">
-    Giá và nến chạy trực tiếp từ Binance. Kết luận và điểm chỉ tính lại khi nến đóng
-    (chỉ báo phải tính trên nến đã đóng). Muốn xem đầy đủ hơn, mở trang <a href="/">Tổng quan</a>.
-  </p>
-
   <div class="toolbar">
     <label class="field grow"><span>Mã token</span>
       <input type="text" id="symbol" value="BTC" placeholder="BTC, ETH, SOL…" autocomplete="off" autocapitalize="characters" spellcheck="false">
@@ -95,65 +85,84 @@
 
   <div id="verdict"></div>
 
-  <section class="card chartbox">
-    <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px">
-      <h2 class="card-title" style="margin:0">Biểu đồ giá trực tiếp</h2>
-      <span class="range" id="range"></span>
-    </div>
-    <p class="sub" style="margin-bottom:10px">Rê chuột hoặc chạm vào biểu đồ để xem từng nến.</p>
-    <div class="layers" id="layers" role="group" aria-label="Chọn thông tin hiển thị trên biểu đồ">
-      <button type="button" class="toggle" data-layer="levels" aria-pressed="true" title="Vùng giá mà giá hay bật lại (hỗ trợ) hoặc bị chặn (kháng cự)">Hỗ trợ / kháng cự</button>
-      <button type="button" class="toggle" data-layer="plan" aria-pressed="true" title="Mức vào lệnh, cắt lỗ và chốt lời gợi ý (chỉ hiện khi có kịch bản)">Kịch bản vào lệnh</button>
-      <button type="button" class="toggle" data-layer="walls" aria-pressed="false" title="Các mức có lượng lệnh chờ mua/bán lớn bất thường trong sổ lệnh. Lưu ý: lệnh lớn có thể bị đặt rồi huỷ để đánh lừa, nên đối chiếu với dòng tiền chủ động.">Tường lệnh</button>
-    </div>
-    <div class="legend" id="legend"></div>
-    <canvas id="chart" role="img" aria-label="Biểu đồ nến trực tiếp kèm hỗ trợ, kháng cự và kịch bản"></canvas>
-    <canvas id="cvd" role="img" aria-label="Dòng tiền chủ động CVD"></canvas>
-    <div class="tooltip" id="tip" role="tooltip"></div>
-  </section>
+  <!-- Cùng bố cục và cùng bộ vẽ SVG với trang Tổng quan; ẩn tới khi có dữ liệu thật. -->
+  <div class="cols hidden" id="cols">
+    <div class="col">
+      <section class="card" id="card-chart">
+        <h2>Biểu đồ giá trực tiếp</h2>
+        <p class="sub" id="range">Rê chuột hoặc chạm vào biểu đồ để xem từng nến.</p>
+        <div class="layers" id="layers" role="group" aria-label="Chọn thông tin hiển thị trên biểu đồ">
+          <button type="button" class="toggle" data-layer="levels" aria-pressed="true" title="Vùng giá mà giá hay bật lại (hỗ trợ) hoặc bị chặn (kháng cự)">Hỗ trợ / kháng cự</button>
+          <button type="button" class="toggle" data-layer="plan" aria-pressed="true" title="Mức vào lệnh, cắt lỗ và chốt lời gợi ý (chỉ hiện khi có kịch bản)">Kịch bản vào lệnh</button>
+          <button type="button" class="toggle" data-layer="walls" aria-pressed="false" title="Các mức có lượng lệnh chờ mua/bán lớn bất thường trong sổ lệnh. Lưu ý: lệnh lớn có thể bị đặt rồi huỷ để đánh lừa, nên đối chiếu với dòng tiền chủ động.">Tường lệnh</button>
+          <button type="button" class="toggle" data-layer="volume" aria-pressed="true" title="Khối lượng giao dịch của từng nến">Khối lượng</button>
+        </div>
+        <div class="chart-wrap" id="price-wrap">
+          <svg class="chart" id="chart" viewBox="0 0 900 440" role="img"
+               aria-label="Biểu đồ nến trực tiếp kèm vùng hỗ trợ, kháng cự và kịch bản vào lệnh"></svg>
+          <div class="tooltip" id="tip" role="tooltip"></div>
+        </div>
+      </section>
 
-  <div class="grid-2">
-    <section class="card">
-      <h2>Vì sao ra kết luận này?</h2>
-      <p class="sub">Mỗi dòng là một nhóm chỉ báo. Thanh xanh kéo điểm lên, thanh đỏ kéo điểm xuống. Bấm vào dòng để đọc lý do.</p>
-      <div id="breakdown" class="muted">Đang tải…</div>
-    </section>
-    <section class="card">
-      <h2>Vùng giá quan trọng</h2>
-      <p class="sub">Các mức gần giá hiện tại nhất mà giá hay bật lại hoặc bị chặn.</p>
-      <div id="ladder" class="muted">Đang tải…</div>
-    </section>
+      <section class="card" id="card-why">
+        <h2>Vì sao ra kết luận này?</h2>
+        <p class="sub">Thanh xanh kéo điểm lên, thanh đỏ kéo điểm xuống. Bấm một dòng để đọc lý do.</p>
+        <div id="breakdown" class="muted">Đang tải…</div>
+      </section>
+
+      <section class="card" id="card-detail">
+        <details class="fold">
+          <summary><span>Số liệu chi tiết <small>(cho người đã quen với chỉ báo)</small></span></summary>
+          <div class="fold-body"><dl class="stats" id="stats"></dl></div>
+        </details>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card" id="card-ladder">
+        <h2>Vùng giá quan trọng</h2>
+        <p class="sub">Các mức gần giá nhất mà giá hay bật lại hoặc bị chặn.</p>
+        <div id="ladder" class="muted">Đang tải…</div>
+      </section>
+
+      <section class="card" id="card-flow">
+        <h2>Dòng tiền chủ động</h2>
+        <p class="sub" id="cvd-read">—</p>
+        <div class="legend" id="osc-legend"></div>
+        <div class="chart-wrap" id="cvd-wrap">
+          <svg class="chart" id="cvd-chart" viewBox="0 0 420 150" role="img" aria-label="CVD luỹ tiến theo thời gian"></svg>
+          <div class="tooltip" id="cvd-tip" role="tooltip"></div>
+        </div>
+        <div class="small muted" style="margin:12px 0 2px">Mỗi cột: người mua hay người bán chủ động nhiều hơn trong từng nến</div>
+        <div class="chart-wrap" id="flow-wrap">
+          <svg class="chart" id="flow-chart" viewBox="0 0 420 120" role="img" aria-label="Mua chủ động ròng mỗi nến, tính theo phần trăm khối lượng"></svg>
+          <div class="tooltip" id="flow-tip" role="tooltip"></div>
+        </div>
+      </section>
+    </div>
   </div>
-
-  <section class="card">
-    <details class="fold">
-      <summary><span>Số liệu chi tiết <small>(cho người đã quen với chỉ báo)</small></span></summary>
-      <div class="fold-body"><dl class="stats" id="stats"></dl></div>
-    </details>
-  </section>
 
   <p class="foot" id="foot"></p>
   <p class="foot">Đây là công cụ phân tích kỹ thuật tự động, không phải lời khuyên đầu tư.</p>
 </main>
 
 <script type="module">
-// Cùng bộ vẽ mà bot Telegram dùng để xuất PNG -> chart trên web và trên bot giống nhau.
+// Cùng bộ vẽ SVG và cùng khối giao diện với trang Tổng quan (web/charts.js, web/ui.js).
+import { decimalsFor, fmt, pct, compact, timeLabel } from '/src/chart/render.js';
 import {
-  renderPricePanel, renderCvdPanel, PAD, FORWARD_RATIO,
-  decimalsFor, fmt, pct, compact, timeLabel,
-} from '/src/chart/render.js';
-import {
-  initTheme, initTerms, chartColors, verdictHTML, breakdownHTML, ladderHTML, nearestLevels,
+  initTheme, initTerms, verdictHTML, breakdownHTML, ladderHTML, flowReadHTML, flowLegendHTML,
   term, esc, num, toneOf,
 } from '/web/ui.js';
+import { drawPriceChart, drawCvd, drawFlow } from '/web/charts.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
   symbol: $('symbol'), interval: $('interval'), go: $('go'), save: $('save'),
   watchlist: $('watchlist'), msg: $('msg'), verdict: $('verdict'), stats: $('stats'),
-  breakdown: $('breakdown'), ladder: $('ladder'), legend: $('legend'),
-  chart: $('chart'), cvd: $('cvd'), tip: $('tip'), range: $('range'), foot: $('foot'),
-  conn: $('conn'), connText: $('connText'),
+  breakdown: $('breakdown'), ladder: $('ladder'), cols: $('cols'),
+  chart: $('chart'), tip: $('tip'), cvdChart: $('cvd-chart'), cvdTip: $('cvd-tip'),
+  flowChart: $('flow-chart'), flowTip: $('flow-tip'),
+  range: $('range'), foot: $('foot'), conn: $('conn'), connText: $('connText'),
 };
 
 let snap = null;      // snapshot từ /api/analyze
@@ -162,89 +171,46 @@ let hover = null;
 let prevPrice = null;
 let thresholds = null;
 
-// Lớp hiển thị dùng chung khoá lưu với dashboard (trang kia còn thêm lớp "volume").
+// Lớp hiển thị dùng chung khoá lưu với trang Tổng quan, nên chọn ở trang nào cũng nhớ cho cả hai.
 const LAYERS_KEY = 'ta.layers';
-const layers = { levels: true, plan: true, walls: false };
+const layers = { levels: true, plan: true, walls: false, volume: true };
 try { Object.assign(layers, JSON.parse(localStorage.getItem(LAYERS_KEY) || '{}')); } catch { /* dùng mặc định */ }
 
 const clockLabel = (ms) => new Date(ms).toLocaleTimeString('vi-VN');
 
-/* ---------- vẽ ---------- */
+/* ---------- vẽ (SVG, cùng bộ vẽ với trang Tổng quan) ---------- */
 
-// Canvas cần scale theo devicePixelRatio, nếu không chữ và nét sẽ bị mờ.
-function prepare(canvas) {
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
-  canvas.width = Math.round(w * dpr);
-  canvas.height = Math.round(h * dpr);
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  return { ctx, w, h };
+/** Dữ liệu cho bộ vẽ: nến lấy từ `candles` (nến cuối do WebSocket cập nhật), phần còn lại từ snapshot. */
+function chartSnap() {
+  const col = (k) => candles.map((c) => c[k]);
+  return {
+    ...snap,
+    price: { ...snap.price, live: livePrice() },
+    series: {
+      ...snap.series,
+      open: col('open'), high: col('high'), low: col('low'), close: col('close'),
+      volume: col('volume'), time: col('openTime'),
+    },
+  };
 }
 
-const FONT = '12px ui-sans-serif, system-ui, sans-serif';
-
-/** Kịch bản dùng được để vẽ hộp lãi/lỗ (cùng hình dạng mà renderPricePanel nhận). */
-const activePlan = () => (layers.plan && snap?.levels && snap.levels.side !== 'none'
-  && snap.levels.entry != null && snap.levels.stopLoss != null ? snap.levels : null);
+// Đang rê chuột / chạm vào biểu đồ: tạm ngừng vẽ lại, nếu không đường chỉ và tooltip biến mất theo từng tick.
+let hovering = false;
 
 function draw() {
-  if (!snap || !candles.length) return;
-  const colors = chartColors();
-  const plan = activePlan();
-  const last = candles[candles.length - 1].close;
-  const levels = layers.levels
-    ? nearestLevels(snap.structure, last, { perSide: els.chart.clientWidth < 560 ? 1 : 2, minGapPct: 1.2 }) : null;
-  {
-    const { ctx, w, h } = prepare(els.chart);
-    // Khung hẹp (điện thoại): ít mốc thời gian hơn và nhãn kịch bản ngắn hơn.
-    const plotW = (w - PAD.left - PAD.right) * (plan ? 1 - FORWARD_RATIO : 1);
-    renderPricePanel(ctx, {
-      timeTicks: Math.max(1, Math.min(6, Math.floor(plotW / 120))),
-      compact: w < 560,
-      candles,
-      volumeAvg: snap.series.volumeAvg,
-      interval: snap.interval,
-      width: w,
-      height: h,
-      levels,
-      walls: layers.walls ? (snap.orderBook?.walls ?? []) : [],
-      setup: plan,
-      hover,
-      font: FONT,
-      colors,
-    });
-  }
-  {
-    const { ctx, w, h } = prepare(els.cvd);
-    renderCvdPanel(ctx, {
-      candles,
-      cvd: snap.series.cvd,
-      cvdDelta: snap.series.cvdDelta,
-      width: w,
-      height: h,
-      hover,
-      font: FONT,
-      forwardRatio: plan ? FORWARD_RATIO : 0,   // trục thời gian hai khung phải khớp nhau
-      compact: w < 560,
-      colors,
-    });
-  }
+  if (!snap || !candles.length || hovering) return;
+  drawPriceChart(els.chart, els.tip, chartSnap(), layers);
 }
 
-function renderLegend() {
-  const item = (swatch, label) => `<span class="legend-item">${swatch}${label}</span>`;
-  const sw = (bg, extra = '') => `<span class="legend-swatch" style="background:${bg};${extra}"></span>`;
-  const dash = (c) => `repeating-linear-gradient(90deg, ${c} 0 4px, transparent 4px 7px)`;
-  const out = [item(sw('var(--up)'), 'Nến tăng'), item(sw('var(--down)'), 'Nến giảm')];
-  if (layers.levels) out.push(item(sw(dash('var(--up)')), 'Hỗ trợ'), item(sw(dash('var(--down)')), 'Kháng cự'));
-  if (layers.walls) out.push(item(sw('var(--text-3)', 'height:6px;opacity:.45'), 'Tường lệnh'));
-  if (activePlan()) out.push(item(sw('var(--up)', 'height:8px;opacity:.35'), 'Vùng lãi'), item(sw('var(--down)', 'height:8px;opacity:.35'), 'Vùng lỗ'));
-  out.push(item(sw(dash('var(--text-3)')), 'Khối lượng TB'), item(sw('var(--accent)'), 'CVD'));
-  els.legend.innerHTML = out.join('');
+/** CVD và mua-chủ-động tính trên nến đã đóng, chỉ đổi khi có snapshot mới nên không vẽ theo từng tick. */
+function drawFlowCards() {
+  if (!snap || !candles.length) return;
+  const s = chartSnap();
+  drawCvd(els.cvdChart, els.cvdTip, s);
+  drawFlow(els.flowChart, els.flowTip, s);
 }
+
+function redrawAll() { draw(); drawFlowCards(); }
 
 // WebSocket đẩy tick liên tục, nên gộp mọi yêu cầu vẽ vào một frame.
 let frameQueued = false;
@@ -256,47 +222,6 @@ function scheduleRender() {
     draw();
     renderTick();
   });
-}
-
-/* ---------- tooltip ---------- */
-
-function onMove(e) {
-  if (!candles.length) return;
-  const rect = els.chart.getBoundingClientRect();
-  // Có hộp kịch bản thì nến chỉ chiếm phần trái của khung.
-  const plotW = (rect.width - PAD.left - PAD.right) * (activePlan() ? 1 - FORWARD_RATIO : 1);
-  const i = Math.floor(((e.clientX - rect.left - PAD.left) / plotW) * candles.length);
-  if (i < 0 || i >= candles.length) return hideTip();
-
-  hover = i;
-  draw();
-
-  const c = candles[i];
-  const d = decimalsFor(c.close);
-  const chg = ((c.close - c.open) / c.open) * 100;
-  const delta = snap.series.cvdDelta[i];
-  const share = delta != null && c.volume ? (delta / c.volume) * 100 : null;
-  const row = (k, v) => `<div class="tt-row"><span>${k}</span><span>${v}</span></div>`;
-  els.tip.innerHTML = `
-    <div class="tt-time">${timeLabel(c.openTime, snap.interval)}</div>
-    ${row('Mở', fmt(c.open, d))}${row('Cao', fmt(c.high, d))}${row('Thấp', fmt(c.low, d))}
-    ${row('Đóng', `<span class="${toneOf(chg)}">${fmt(c.close, d)} (${pct(chg)})</span>`)}
-    ${row('Khối lượng', compact(c.volume))}
-    ${row('Mua chủ động', share == null ? '—' : `<span class="${toneOf(share)}">${pct(share, 1)} KL</span>`)}
-    ${row('CVD luỹ tiến', compact(snap.series.cvd[i]))}`;
-  els.tip.classList.add('on');
-
-  // Lật tooltip sang trái khi sắp tràn mép phải.
-  const box = els.chart.parentElement.getBoundingClientRect();
-  const x = e.clientX - box.left;
-  const tw = els.tip.offsetWidth;
-  els.tip.style.left = `${x + tw + 24 > box.width ? x - tw - 14 : x + 14}px`;
-  els.tip.style.top = `${Math.max(4, Math.min(e.clientY - box.top + 12, box.height - els.tip.offsetHeight - 8))}px`;
-}
-
-function hideTip() {
-  els.tip.classList.remove('on');
-  if (hover !== null) { hover = null; draw(); }
 }
 
 /* ---------- render số ---------- */
@@ -569,7 +494,7 @@ async function run({ keepStream = false } = {}) {
     closeStream();
     els.msg.className = 'banner load';
     els.msg.textContent = `Đang tải ${symbol.toUpperCase()}…`;
-    hideTip();
+    hovering = false;
   }
   els.go.disabled = true;
 
@@ -594,7 +519,7 @@ async function run({ keepStream = false } = {}) {
 
     els.msg.className = '';
     els.symbol.value = body.symbol;
-    els.range.textContent = `${candles.length} nến · ${timeLabel(candles[0].openTime, body.interval)} → ${timeLabel(candles.at(-1).openTime, body.interval)}`;
+    els.range.textContent = `${candles.length} nến khung ${body.interval} · giá chạy trực tiếp, kết luận chỉ tính lại khi nến đóng`;
     els.foot.textContent = `Kết luận tính lúc ${clockLabel(Date.parse(body.generatedAt))} · `
       + `nến đóng gần nhất ${timeLabel(Date.parse(body.lastClosedCandleTime), body.interval)}`;
     history.replaceState(null, '', `?${new URLSearchParams({ symbol: body.symbol, interval: body.interval })}`);
@@ -604,8 +529,10 @@ async function run({ keepStream = false } = {}) {
     els.breakdown.innerHTML = breakdownHTML(snap);
     lastLadder = Date.now();
     renderLadder();
-    renderLegend();
-    draw();
+    $('cvd-read').innerHTML = flowReadHTML(snap);
+    $('osc-legend').innerHTML = flowLegendHTML();
+    els.cols.classList.remove('hidden');   // phải hiện trước khi vẽ để đo được bề rộng
+    redrawAll();
 
     if (!keepStream) openStream(body.symbol, body.interval);
   } catch (err) {
@@ -620,11 +547,9 @@ async function run({ keepStream = false } = {}) {
 els.go.addEventListener('click', () => run());
 els.symbol.addEventListener('keydown', (e) => e.key === 'Enter' && run());
 els.interval.addEventListener('change', () => snap && run());
-els.chart.addEventListener('mousemove', onMove);
-els.cvd.addEventListener('mousemove', onMove);
-els.chart.addEventListener('mouseleave', hideTip);
-els.cvd.addEventListener('mouseleave', hideTip);
-window.addEventListener('resize', draw);
+$('price-wrap').addEventListener('pointerenter', () => { hovering = true; });
+$('price-wrap').addEventListener('pointerleave', () => { hovering = false; draw(); });
+window.addEventListener('resize', redrawAll);
 // Tab ẩn lâu -> socket thường bị treo, mở lại khi quay về.
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && snap && (!ws || ws.readyState > 1)) {
@@ -643,12 +568,11 @@ for (const btn of document.querySelectorAll('#layers [data-layer]')) {
         ...JSON.parse(localStorage.getItem(LAYERS_KEY) || '{}'), ...layers,
       }));
     } catch { /* chế độ riêng tư */ }
-    renderLegend();
     draw();
   });
 }
 
-initTheme($('btn-theme'), draw);
+initTheme($('btn-theme'), redrawAll);
 initTerms();
 
 const intervals = await (await fetch('/api/intervals')).json();

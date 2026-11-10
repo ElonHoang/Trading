@@ -90,27 +90,6 @@ function attachCrosshair(svg, tip, { left, step, count, xOf, top, bottom, html }
 
 /* ---------- Biểu đồ giá ---------- */
 
-/** Chú thích khớp đúng những gì đang được vẽ. */
-export function priceLegendHTML(layers, hasPlan) {
-  const item = (swatch, label) => `<span class="legend-item">${swatch}${label}</span>`;
-  const bar = (color, dashed) => `<span class="legend-swatch" style="background:${dashed
-    ? `repeating-linear-gradient(90deg, ${color} 0 4px, transparent 4px 7px)` : color}"></span>`;
-  const out = [
-    item(`<span class="legend-swatch" style="background:var(--up)"></span>`, 'Nến tăng'),
-    item(`<span class="legend-swatch" style="background:var(--down)"></span>`, 'Nến giảm'),
-  ];
-  if (layers.levels) {
-    out.push(item(bar('var(--up)', true), 'Hỗ trợ'), item(bar('var(--down)', true), 'Kháng cự'));
-  }
-  if (layers.walls) out.push(item(`<span class="legend-swatch" style="background:var(--text-3);height:6px;opacity:.45"></span>`, 'Tường lệnh'));
-  if (layers.plan && hasPlan) {
-    out.push(item(`<span class="legend-swatch" style="background:var(--up);height:8px;opacity:.35"></span>`, 'Vùng lãi'),
-      item(`<span class="legend-swatch" style="background:var(--down);height:8px;opacity:.35"></span>`, 'Vùng lỗ'));
-  }
-  if (layers.volume) out.push(item(bar('var(--text-3)', true), 'Khối lượng TB'));
-  return out.join('');
-}
-
 export function drawPriceChart(svg, tip, snap, layers) {
   clear(svg);
   const s = snap.series;
@@ -122,9 +101,9 @@ export function drawPriceChart(svg, tip, snap, layers) {
   setup(svg, H);
 
   const padL = 8;
-  const padR = small ? 62 : 78;
+  const padR = small ? 68 : 84;
   const padT = 12;
-  const padB = 22;
+  const padB = 24;
   const volH = layers.volume ? (small ? 46 : 60) : 0;
   const volGap = layers.volume ? 12 : 0;
   const priceH = H - padT - padB - volH - volGap;
@@ -181,7 +160,7 @@ export function drawPriceChart(svg, tip, snap, layers) {
     const v = min + ((max - min) * k) / 4;
     const y = yOf(v);
     svg.appendChild(mk('line', { x1: padL, y1: y, x2: W - padR, y2: y, class: 'grid-line' }));
-    if (tagYs.every((ty) => Math.abs(ty - y) > 13)) {
+    if (tagYs.every((ty) => Math.abs(ty - y) > 21)) {
       svg.appendChild(mk('text', { x: W - padR + 6, y: y + 4 }, axisFmt(v)));
     }
   }
@@ -199,6 +178,27 @@ export function drawPriceChart(svg, tip, snap, layers) {
     });
   }
 
+  // Hỗ trợ / kháng cự gần giá: một DẢI màu (dày hơn khi được chạm nhiều lần) nằm sau nến,
+  // một vạch ở giữa dải, nhãn "Kháng cự · chạm N lần" ở bên trái (SKILL.md bắt buộc nêu số lần chạm).
+  // Thẻ giá ở trục phải gom vào `tags` rồi dàn lại ở cuối để không chồng lên thẻ giá hiện tại.
+  const tags = [];
+  for (const [kind, list] of [['support', near.support], ['resistance', near.resistance]]) {
+    const col = kind === 'support' ? up : down;
+    for (const lv of list) {
+      if (!inRange(lv.price)) continue;
+      const y = yOf(lv.price);
+      const half = Math.max(4, Math.min(11, 3 + (lv.touches ?? 1) * 1.1));
+      svg.appendChild(mk('rect', { x: padL, y: y - half, width: W - padR - padL, height: half * 2, fill: col, opacity: 0.12 }));
+      svg.appendChild(mk('line', { x1: padL, y1: y, x2: W - padR, y2: y, stroke: col, 'stroke-width': 1.5, opacity: 0.9 }));
+      tags.push({ y, fill: col, ink: '#fff', text: axisFmt(lv.price) });
+      // Nhãn kháng cự nằm trên dải, nhãn hỗ trợ nằm dưới dải.
+      leftLabels.push({
+        y: kind === 'support' ? y + half + 12 : y - half - 4, color: col,
+        text: `${kind === 'support' ? 'Hỗ trợ' : 'Kháng cự'} · chạm ${lv.touches} lần`,
+      });
+    }
+  }
+
   // Nến
   const bodyW = Math.max(1.2, Math.min(9, step * 0.66));
   for (let i = 0; i < n; i++) {
@@ -210,28 +210,6 @@ export function drawPriceChart(svg, tip, snap, layers) {
       x: xOf(i) - bodyW / 2, y: yOf(Math.max(o, c)), width: bodyW,
       height: Math.max(1, Math.abs(yOf(o) - yOf(c))), fill: col, rx: Math.min(1.5, bodyW / 3),
     }));
-  }
-
-  // Hỗ trợ / kháng cự gần giá: vạch đứt xuyên chart, nhãn giá ở trục phải,
-  // nhãn "Kháng cự · chạm N lần" ở bên trái (SKILL.md bắt buộc nêu số lần chạm).
-  for (const [kind, list] of [['support', near.support], ['resistance', near.resistance]]) {
-    const col = kind === 'support' ? up : down;
-    for (const lv of list) {
-      if (!inRange(lv.price)) continue;
-      const y = yOf(lv.price);
-      svg.appendChild(mk('line', {
-        x1: padL, y1: y, x2: W - padR, y2: y, stroke: col,
-        'stroke-width': Math.min(2.5, 1.2 + (lv.touches - 1) * 0.4), 'stroke-dasharray': '6 4', opacity: 0.85,
-      }));
-      const tag = mk('g');
-      tag.appendChild(mk('rect', { x: W - padR + 2, y: y - 9, width: padR - 4, height: 18, rx: 4, fill: col }));
-      tag.appendChild(mk('text', { x: W - padR + 6, y: y + 4, class: 'pill-text' }, axisFmt(lv.price)));
-      svg.appendChild(tag);
-      leftLabels.push({
-        y: y - 6, color: col,
-        text: `${kind === 'support' ? (small ? 'HT' : 'Hỗ trợ') : (small ? 'KC' : 'Kháng cự')} · chạm ${lv.touches} lần`,
-      });
-    }
   }
 
   // Kịch bản: hộp lãi/lỗ chiếu ra phía trước nến cuối.
@@ -290,13 +268,18 @@ export function drawPriceChart(svg, tip, snap, layers) {
     svg.appendChild(mk('text', { x: padL + 6, y: ly[i], class: 'series-label halo', fill: lb.color }, lb.text));
   });
 
-  // Đường giá hiện tại + thẻ giá
+  // Đường giá hiện tại; thẻ giá của nó đi cùng các thẻ hỗ trợ/kháng cự và được dàn
+  // để hai thẻ gần nhau (giá chỉ cách mức vài chục điểm) không đè lên nhau.
   const yLast = yOf(last);
   svg.appendChild(mk('line', {
-    x1: padL, y1: yLast, x2: W - padR, y2: yLast, stroke: accent, 'stroke-width': 1, 'stroke-dasharray': '1 3',
+    x1: padL, y1: yLast, x2: W - padR, y2: yLast, stroke: accent, 'stroke-width': 1.2, 'stroke-dasharray': '3 3',
   }));
-  svg.appendChild(mk('rect', { x: W - padR + 2, y: yLast - 9, width: padR - 4, height: 18, rx: 4, fill: accent }));
-  svg.appendChild(mk('text', { x: W - padR + 6, y: yLast + 4, fill: cssVar('--accent-ink'), class: 'series-label' }, axisFmt(last)));
+  tags.push({ y: yLast, fill: accent, ink: cssVar('--accent-ink'), text: axisFmt(last) });
+  const tagY = spread(tags, 21, padT + 10, padT + priceH - 10);
+  tags.forEach((tg, i) => {
+    svg.appendChild(mk('rect', { x: W - padR + 2, y: tagY[i] - 10, width: padR - 4, height: 20, rx: 5, fill: tg.fill }));
+    svg.appendChild(mk('text', { x: W - padR + 7, y: tagY[i] + 4, class: 'pill-text', fill: tg.ink }, tg.text));
+  });
 
   // Khối lượng
   const volTop = padT + priceH + volGap;
@@ -304,7 +287,7 @@ export function drawPriceChart(svg, tip, snap, layers) {
     const maxVol = Math.max(...s.volume.filter(Number.isFinite), 1);
     const vy = (v) => volTop + volH - (v / maxVol) * volH;
     svg.appendChild(mk('line', { x1: padL, y1: volTop + volH, x2: W - padR, y2: volTop + volH, class: 'axis-line' }));
-    svg.appendChild(mk('text', { x: padL, y: volTop + 9 }, 'Khối lượng'));
+    svg.appendChild(mk('text', { x: padL, y: volTop + 10 }, small ? 'Khối lượng' : 'Khối lượng (đường đứt = trung bình)'));
     for (let i = 0; i < n; i++) {
       const v = s.volume[i];
       if (!Number.isFinite(v)) continue;

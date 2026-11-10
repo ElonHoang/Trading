@@ -1,9 +1,9 @@
-// src/chart/render.js được DÙNG CHUNG: trang web vẽ lên canvas trình duyệt, bot Telegram
-// vẽ ảnh PNG bằng @napi-rs/canvas. Test này ghi lại mọi lệnh vẽ cho một bộ dữ liệu cố định
-// rồi băm, để chặn việc sửa giao diện web vô tình làm đổi ảnh bot gửi đi.
+// src/chart/render.js là bộ vẽ ảnh PNG mà bot Telegram gửi đi, và web import các hàm định dạng
+// của nó. Test này ghi lại mọi lệnh vẽ cho một bộ dữ liệu cố định rồi băm, để chặn việc sửa
+// vô tình làm đổi ảnh bot.
 //
-// Mặc định (không truyền `colors`, `compact`, `timeTicks`) PHẢI cho đúng các hash dưới đây.
-// Chỉ khi cố ý đổi cách bot vẽ chart thì mới cập nhật hash — và nói rõ điều đó trong commit.
+// Các hash dưới đây PHẢI giữ nguyên. Chỉ khi cố ý đổi cách bot vẽ chart thì mới cập nhật hash
+// — và nói rõ điều đó trong commit.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -80,16 +80,4 @@ test('bộ vẽ chung: hằng số và hàm định dạng không đổi', () =>
     timeLabel(1_700_000_000_000, '4h'), COLORS, PAD, FORWARD_RATIO,
   ])).digest('hex').slice(0, 16);
   assert.equal(h, 'ad24563ed998790d');
-});
-
-test('tuỳ chọn của giao diện web có tác dụng nhưng chỉ khi được truyền vào', () => {
-  const base = { candles, volumeAvg, interval: '4h', width: 600, height: 400, levels, walls, setup };
-  const plain = run(renderPricePanel, base);
-  assert.notEqual(run(renderPricePanel, { ...base, colors: { up: '#0e9f6e', down: '#e0443e', grid: '#e3e6eb' } }), plain);
-  assert.notEqual(run(renderPricePanel, { ...base, compact: true }), plain);
-  assert.notEqual(run(renderPricePanel, { ...base, timeTicks: 2 }), plain);
-  // truyền đúng giá trị mặc định thì phải ra y hệt không truyền
-  assert.equal(run(renderPricePanel, { ...base, timeTicks: 6, compact: false, colors: null }), plain);
-  const cvdBase = { candles, cvd, cvdDelta, width: 600, height: 160 };
-  assert.notEqual(run(renderCvdPanel, { ...cvdBase, compact: true }), run(renderCvdPanel, cvdBase));
 });

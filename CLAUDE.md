@@ -268,9 +268,9 @@ Nhịp cron thực tế của GitHub Actions là **~3 tiếng, không phải 5 p
 - `/` — dashboard tĩnh cục bộ (`index.html` + `web/`), mọi tính toán chạy trong browser.
 - `/realtime/` — `public/index.html`, nến cập nhật qua WebSocket Binance; **điểm và chỉ báo lấy từ `/api/analyze`**, không tính ở client, vì chỉ báo chỉ được tính trên nến đã đóng. Khi nến đóng, trang tự gọi lại snapshot.
 
-Hai trang dùng chung `web/style.css` và `web/ui.js` nên luôn cùng một phong cách. Quy ước giao diện: mỗi màu chỉ một nghĩa (xanh lá = tăng/mua/hỗ trợ, đỏ = giảm/bán/kháng cự/cắt lỗ, xám = trung lập, xanh dương chỉ cho thứ bấm được và giá hiện tại); màu không bao giờ là cách duy nhất truyền đạt (luôn kèm mũi tên hoặc chữ); thuật ngữ chuyên môn đi qua `term()` trong `web/ui.js` để có chú thích bằng lời thường (định nghĩa bám `.claude/skills/chi-bao/SKILL.md`). `/api/thresholds` cho trang realtime biết ngưỡng MUA/BÁN để vẽ thang điểm.
+Hai trang dùng chung `web/style.css`, `web/ui.js` (khối giao diện) và `web/charts.js` (biểu đồ SVG giá + CVD) nên luôn cùng một phong cách và cùng một bố cục hai cột (`.cols`/`.col`). Quy ước giao diện: mỗi màu chỉ một nghĩa (xanh lá = tăng/mua/hỗ trợ, đỏ = giảm/bán/kháng cự/cắt lỗ, xám = trung lập, xanh dương chỉ cho thứ bấm được và giá hiện tại); màu không bao giờ là cách duy nhất truyền đạt (luôn kèm mũi tên hoặc chữ); thuật ngữ chuyên môn đi qua `term()` trong `web/ui.js` để có chú thích bằng lời thường (định nghĩa bám `.claude/skills/chi-bao/SKILL.md`). `/api/thresholds` cho trang realtime biết ngưỡng MUA/BÁN để vẽ thang điểm.
 
-`src/chart/render.js` chỉ nhận một context 2D nên dùng được cả cho canvas trình duyệt và `@napi-rs/canvas` khi bot xuất PNG — cùng một bộ vẽ, không có bản sao lệch nhau. **Vì bot Telegram dùng chung, chỉ được THÊM tuỳ chọn có mặc định giữ nguyên hành vi cũ** (hiện có `colors`, `compact`, `timeTicks`); `test/chart-render-shared.test.js` băm mọi lệnh vẽ mặc định và sẽ đỏ nếu ảnh bot bị đổi.
+`src/chart/render.js` chỉ phục vụ ảnh PNG của bot Telegram (canvas `@napi-rs/canvas`). **Đừng sửa nó để phục vụ giao diện web** — web vẽ biểu đồ SVG riêng trong `web/charts.js` và chỉ import các hàm định dạng (`fmt`, `pct`, `compact`, `decimalsFor`, `timeLabel`). `test/chart-render-shared.test.js` băm mọi lệnh vẽ và sẽ đỏ nếu ảnh bot bị đổi.
 
 ## Skill
 

@@ -339,8 +339,8 @@ index.html               Dashboard tĩnh (chạy cục bộ khi cần)
 web/                     Lớp riêng của browser: app.js, store.js, model-store.js,
                          claude.js, worker.js; giao diện dùng chung cho CẢ HAI trang:
                          style.css (màu, bố cục), ui.js (sáng/tối, chú thích thuật ngữ,
-                         khối kết luận / vì sao / thang giá), charts.js (biểu đồ SVG của dashboard)
-public/index.html        Giao diện realtime (WebSocket Binance)
+                         khối kết luận / vì sao / thang giá), charts.js (biểu đồ SVG giá, CVD)
+public/index.html        Giao diện realtime (WebSocket Binance), vẽ bằng cùng web/charts.js
 src/                     LÕI — dùng chung browser & Node
   data/binance.js        Nến, ticker, funding, OI, sổ lệnh + tường, định vị đám đông,
                          resolveSymbol (đối chiếu danh sách cặp thật)
@@ -354,7 +354,7 @@ src/                     LÕI — dùng chung browser & Node
   analysis/context.js    Kĩ năng 2: gộp tokenomics + delist + tin tức, luật cứng
   analysis/auto-retune.js Tự kiểm chứng và tinh chỉnh an toàn sau chuỗi SL
   analysis/setup.js      Gộp kỹ thuật + bối cảnh → setup, lý do, phép chiếu hai chiều
-  chart/render.js        Bộ vẽ dùng chung (canvas browser + @napi-rs/canvas)
+  chart/render.js        Bộ vẽ ảnh PNG cho bot (@napi-rs/canvas) + hàm định dạng số/giờ dùng chung
   chart/png.js           Xuất PNG cho bot
   telegram/bot.js        Bot chart
   telegram/monitor.js    Vòng quét liên tục
@@ -372,8 +372,8 @@ models/                  Model đóng gói sẵn + index.json
 ```
 
 `src/analysis/engine.js` là trung tâm: `analyze()` trả về payload mà **mọi** giao diện đều
-dùng. `src/chart/render.js` chỉ nhận một context 2D nên dùng được cả cho canvas trình duyệt
-và `@napi-rs/canvas` — cùng một bộ vẽ, không có bản sao lệch nhau.
+dùng. `src/chart/render.js` chỉ phục vụ ảnh PNG của bot Telegram; web vẽ biểu đồ SVG riêng
+(`web/charts.js`) và chỉ mượn các hàm định dạng số/giờ của nó.
 
 ### Ràng buộc: lõi phải chạy được trong browser
 

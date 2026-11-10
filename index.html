@@ -39,10 +39,11 @@
 
   <div id="verdict"><section class="card verdict" data-tone="flat"><div class="muted">Đang lấy dữ liệu từ Binance…</div></section></div>
 
-  <!-- Cụm phân tích: ẩn tới khi có dữ liệu thật, để lỗi không để lại các thẻ rỗng -->
-  <div id="analysis" class="stack hidden">
-    <div class="chart-row">
-      <section class="card">
+  <!-- Cụm phân tích: ẩn tới khi có dữ liệu thật, để lỗi không để lại các thẻ rỗng.
+       Hai cột độc lập (xem .cols trong style.css); trên điện thoại thứ tự đọc theo id thẻ. -->
+  <div id="analysis" class="cols hidden">
+    <div class="col">
+      <section class="card" id="card-chart">
         <h2>Biểu đồ giá</h2>
         <p class="sub" id="price-chart-sub">—</p>
         <div class="layers" id="layers" role="group" aria-label="Chọn thông tin hiển thị trên biểu đồ">
@@ -51,7 +52,6 @@
           <button type="button" class="toggle" data-layer="walls" aria-pressed="false" title="Các mức có lượng lệnh chờ mua/bán lớn bất thường trong sổ lệnh. Lưu ý: lệnh lớn có thể bị đặt rồi huỷ để đánh lừa, nên đối chiếu với dòng tiền chủ động.">Tường lệnh</button>
           <button type="button" class="toggle" data-layer="volume" aria-pressed="true" title="Khối lượng giao dịch của từng nến">Khối lượng</button>
         </div>
-        <div class="legend" id="price-legend"></div>
         <div class="chart-wrap" id="price-wrap">
           <svg class="chart" id="price-chart" viewBox="0 0 900 440" role="img"
                aria-label="Biểu đồ nến kèm vùng hỗ trợ, kháng cự và kịch bản vào lệnh"></svg>
@@ -63,21 +63,27 @@
         </details>
       </section>
 
-      <section class="card">
-        <h2>Vùng giá quan trọng</h2>
-        <p class="sub">Các mức gần giá hiện tại nhất mà giá hay bật lại hoặc bị chặn.</p>
-        <div id="ladder" class="muted">Đang tải…</div>
+      <section class="card" id="card-why">
+        <h2>Vì sao ra kết luận này?</h2>
+        <p class="sub">Thanh xanh kéo điểm lên, thanh đỏ kéo điểm xuống. Bấm một dòng để đọc lý do.</p>
+        <div id="breakdown" class="muted">Đang tải…</div>
+      </section>
+      <section class="card" id="card-detail">
+        <details class="fold">
+          <summary><span>Số liệu chi tiết <small>(cho người đã quen với chỉ báo)</small></span></summary>
+          <div class="fold-body" id="indicators-body">Đang tải…</div>
+        </details>
       </section>
     </div>
 
-    <div class="grid-2">
-      <section class="card">
-        <h2>Vì sao ra kết luận này?</h2>
-        <p class="sub">Mỗi dòng là một nhóm chỉ báo. Thanh xanh kéo điểm lên, thanh đỏ kéo điểm xuống. Bấm vào dòng để đọc lý do.</p>
-        <div id="breakdown" class="muted">Đang tải…</div>
+    <div class="col">
+      <section class="card" id="card-ladder">
+        <h2>Vùng giá quan trọng</h2>
+        <p class="sub">Các mức gần giá nhất mà giá hay bật lại hoặc bị chặn.</p>
+        <div id="ladder" class="muted">Đang tải…</div>
       </section>
 
-      <section class="card">
+      <section class="card" id="card-flow">
         <h2>Dòng tiền chủ động</h2>
         <p class="sub" id="cvd-read">—</p>
         <div class="legend" id="osc-legend"></div>
@@ -86,27 +92,18 @@
                aria-label="CVD luỹ tiến theo thời gian"></svg>
           <div class="tooltip" id="cvd-tip" role="tooltip"></div>
         </div>
-        <div class="small muted" style="margin:10px 0 2px">Mỗi cột: người mua hay người bán chủ động nhiều hơn trong từng nến</div>
+        <div class="small muted" style="margin:12px 0 2px">Mỗi cột: người mua hay người bán chủ động nhiều hơn trong từng nến</div>
         <div class="chart-wrap" id="flow-wrap">
           <svg class="chart" id="flow-chart" viewBox="0 0 420 120" role="img"
                aria-label="Mua chủ động ròng mỗi nến, tính theo phần trăm khối lượng"></svg>
           <div class="tooltip" id="flow-tip" role="tooltip"></div>
         </div>
       </section>
-    </div>
 
-    <div class="grid-2">
-      <section class="card">
+      <section class="card" id="card-ml">
         <h2>Model học máy</h2>
         <p class="sub" id="ml-sub">—</p>
         <div id="ml-body" class="small muted">Đang tải…</div>
-      </section>
-
-      <section class="card">
-        <details class="fold">
-          <summary><span>Số liệu chi tiết <small>(cho người đã quen với chỉ báo)</small></span></summary>
-          <div class="fold-body" id="indicators-body">Đang tải…</div>
-        </details>
       </section>
     </div>
   </div>

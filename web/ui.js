@@ -205,27 +205,38 @@ const VERDICTS = {
 
 export const verdictFor = (signal) => VERDICTS[signal] ?? VERDICTS['TRUNG LẬP'];
 
-/** Thang điểm −100…+100 chia vùng theo ngưỡng của chiến lược, kim chỉ điểm hiện tại. */
-export function meterHTML(score, t) {
+/** Vùng (0 = giảm mạnh … 4 = tăng mạnh) ứng với tín hiệu của engine, để nhãn thang luôn khớp kết luận. */
+const ZONE_OF = { 'BÁN MẠNH': 0, BÁN: 1, 'TRUNG LẬP': 2, MUA: 3, 'MUA MẠNH': 4 };
+
+/**
+ * Thang điểm −100…+100 chia vùng theo ngưỡng của chiến lược. Kim chỉ vị trí hiện tại,
+ * có ô số ngay trên kim; nhãn của vùng đang đứng được tô đậm.
+ */
+export function meterHTML(score, t, signal) {
   const th = { strongBuy: 50, buy: 30, sell: -30, strongSell: -50, ...(t ?? {}) };
   const w = (a, b) => ((b - a) / 200) * 100;
-  const pos = Math.max(0, Math.min(100, ((score + 100) / 200) * 100));
   const at = (v) => ((v + 100) / 200) * 100;
+  const pos = Math.max(0, Math.min(100, at(score)));
+  const zone = ZONE_OF[signal] ?? 2;
+  const lab = (i, text, left, cls = '') => `<span class="${[cls, i === zone ? 'on' : ''].join(' ').trim()}" style="left:${left}%">${text}</span>`;
   return `
-    <div class="meter" role="img" aria-label="Điểm ${num(score, 1, { signed: true })} trên thang từ −100 đến +100">
-      <i class="z-down2" style="width:${w(-100, th.strongSell)}%"></i>
-      <i class="z-down1" style="width:${w(th.strongSell, th.sell)}%"></i>
-      <i class="z-flat" style="width:${w(th.sell, th.buy)}%"></i>
-      <i class="z-up1" style="width:${w(th.buy, th.strongBuy)}%"></i>
-      <i class="z-up2" style="width:${w(th.strongBuy, 100)}%"></i>
+    <div class="meter-box">
+      <span class="meter-bubble" style="left:clamp(34px, ${pos}%, calc(100% - 34px))">${num(score, 1, { signed: true })}</span>
       <span class="meter-pin" style="left:${pos}%"></span>
+      <div class="meter" role="img" aria-label="Điểm ${num(score, 1, { signed: true })} trên thang từ −100 đến +100">
+        <i class="z-down2" style="width:${w(-100, th.strongSell)}%"></i>
+        <i class="z-down1" style="width:${w(th.strongSell, th.sell)}%"></i>
+        <i class="z-flat" style="width:${w(th.sell, th.buy)}%"></i>
+        <i class="z-up1" style="width:${w(th.buy, th.strongBuy)}%"></i>
+        <i class="z-up2" style="width:${w(th.strongBuy, 100)}%"></i>
+      </div>
     </div>
     <div class="meter-scale" aria-hidden="true">
-      <span style="left:0">Giảm mạnh</span>
-      <span class="opt" style="left:${at((th.strongSell + th.sell) / 2)}%">Bán</span>
-      <span style="left:${at(0)}%">Trung lập</span>
-      <span class="opt" style="left:${at((th.buy + th.strongBuy) / 2)}%">Mua</span>
-      <span style="left:100%">Tăng mạnh</span>
+      ${lab(0, 'Giảm mạnh', 0)}
+      ${lab(1, 'Bán', at((th.strongSell + th.sell) / 2), 'opt')}
+      ${lab(2, 'Trung lập', at(0))}
+      ${lab(3, 'Mua', at((th.buy + th.strongBuy) / 2), 'opt')}
+      ${lab(4, 'Tăng mạnh', 100)}
     </div>`;
 }
 
@@ -270,20 +281,22 @@ function planHTML(levels, price) {
 export function verdictHTML(snap, { thresholds, price, change24h, note = '' }) {
   const v = verdictFor(snap.combined.signal);
   const d = decimalsFor(price);
-  const reasons = topReasons(snap, 3).map((r) => {
-    const tone = toneOf(r.value);
-    const arrow = tone === 'up' ? '▲' : tone === 'down' ? '▼' : '';
-    return `<span class="pill ${tone}">${arrow} ${esc(groupName(r.key))} ${num(r.value, 1, { signed: true })}</span>`;
-  }).join('');
+  const reasons = topReasons(snap, 3);
+  const pill = (r) => `<span class="pill ${toneOf(r.value)}">${esc(groupName(r.key))} ${num(r.value, 1, { signed: true })}</span>`;
+  const row = (head, chips) => `<div class="driver"><span class="driver-k">${head}</span><span class="driver-chips">${chips}</span></div>`;
+  const upR = reasons.filter((r) => r.value > 0);
+  const downR = reasons.filter((r) => r.value < 0);
+  const drivers = [
+    upR.length ? row('<span class="up" aria-hidden="true">▲</span> Kéo lên', upR.map(pill).join('')) : '',
+    downR.length ? row('<span class="down" aria-hidden="true">▼</span> Kéo xuống', downR.map(pill).join('')) : '',
+  ].join('');
+  const h = snap.higherTimeframe;
+  const htfRow = h && typeof h.ruleScore === 'number'
+    ? row(term('htf', 'Khung lớn hơn'), `<span class="pill ${{ up: 'up', down: 'down' }[verdictFor(h.signal).tone] ?? ''}">${esc(h.interval)}: ${esc(h.signal)}</span>`)
+    : '';
   const conflicts = (snap.conflicts ?? []).length
     ? `<div class="callout" role="note"><b aria-hidden="true">⚠</b><ul>${snap.conflicts.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></div>`
     : '';
-  const h = snap.higherTimeframe;
-  const htfTone = h ? { up: 'up', down: 'down' }[verdictFor(h.signal).tone] ?? '' : '';
-  const htf = h && typeof h.ruleScore === 'number'
-    ? `<span class="pill ${htfTone}">${term('htf')} ${esc(h.interval)}: ${esc(h.signal)}</span>` : '';
-  const mlNote = snap.ml?.available && !(snap.combined.mlWeightUsed > 0)
-    ? '<span class="pill">ML chỉ để tham khảo — chưa tính vào điểm</span>' : '';
 
   return `
     <section class="card verdict" data-tone="${v.tone}" aria-label="Kết luận phân tích">
@@ -298,9 +311,9 @@ export function verdictHTML(snap, { thresholds, price, change24h, note = '' }) {
         ${note ? `<div class="verdict-note">${esc(note)}</div>` : ''}
       </div>
       <div>
-        <div class="meter-head">${term('score')} <strong>${num(snap.combined.score, 1, { signed: true })}</strong><span>/ 100</span></div>
-        ${meterHTML(snap.combined.score, thresholds)}
-        <div class="why"><span class="why-title">Điểm chính đến từ:</span>${reasons || '<span class="muted">chưa có nhóm nào nổi bật</span>'}${htf}${mlNote}</div>
+        <div class="meter-label">${term('score')} <span class="muted">(từ −100 đến +100)</span></div>
+        ${meterHTML(snap.combined.score, thresholds, snap.combined.signal)}
+        <div class="drivers">${drivers || '<span class="muted">Chưa nhóm chỉ báo nào nổi bật.</span>'}${htfRow}</div>
       </div>
       ${planHTML(snap.levels, price)}
       ${conflicts}
@@ -337,6 +350,27 @@ export function breakdownHTML(snap) {
     <div class="why-scale" aria-hidden="true"><span>◀ nghiêng giảm</span><span>nghiêng tăng ▶</span></div>
     <ul class="why-list">${rows}</ul>`;
 }
+
+/* ---------- dòng tiền chủ động: câu đọc + chú giải (dùng chung hai trang) ---------- */
+
+export function flowReadHTML(snap) {
+  const slope = snap.indicators?.cvdSlope;
+  const n = snap.indicatorParams?.cvdSlope ?? 20;
+  let reading = 'Chưa đủ dữ liệu để kết luận.';
+  if (slope != null) {
+    const share = num(slope * 100, 1, { signed: true });
+    reading = slope > 0
+      ? `Trong ${n} nến gần nhất, người mua chủ động đang nhiều hơn người bán (${share}% khối lượng).`
+      : slope < 0
+        ? `Trong ${n} nến gần nhất, người bán chủ động đang nhiều hơn người mua (${share}% khối lượng).`
+        : `Trong ${n} nến gần nhất, mua và bán chủ động đang cân bằng.`;
+  }
+  return `${term('cvd', 'CVD')} lên = người mua chủ động nhiều hơn. <b>${esc(reading)}</b>`;
+}
+
+export const flowLegendHTML = () => [
+  ['CVD luỹ tiến', 'var(--accent)'], ['Mua nhiều hơn', 'var(--up)'], ['Bán nhiều hơn', 'var(--down)'],
+].map(([label, color]) => `<span class="legend-item"><span class="legend-swatch" style="background:${color}"></span>${esc(label)}</span>`).join('');
 
 /* ---------- thang giá: kháng cự / giá hiện tại / hỗ trợ ---------- */
 

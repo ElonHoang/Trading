@@ -17,8 +17,9 @@ import { generateReport, askAbout, testApiKey } from './claude.js';
 import { fmt, compact } from '../src/chart/render.js';
 import {
   initTheme, initTerms, cssVar, esc, num, term, verdictHTML, breakdownHTML, ladderHTML,
+  flowReadHTML, flowLegendHTML,
 } from './ui.js';
-import { drawPriceChart, drawCvd, drawFlow, priceLegendHTML } from './charts.js';
+import { drawPriceChart, drawCvd, drawFlow } from './charts.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -93,18 +94,6 @@ function chip(label, { color, kind } = {}) {
   return span;
 }
 
-function legendItem(label, color, dashed = false) {
-  const item = document.createElement('span');
-  item.className = 'legend-item';
-  const sw = document.createElement('span');
-  sw.className = 'legend-swatch';
-  sw.style.background = dashed
-    ? `repeating-linear-gradient(90deg, ${color} 0 4px, transparent 4px 7px)`
-    : color;
-  item.append(sw, document.createTextNode(label));
-  return item;
-}
-
 function renderCandleTable(snap) {
   const s = snap.series;
   const host = $('candle-table');
@@ -162,26 +151,8 @@ function renderBreakdown(snap) {
 }
 
 function renderFlowRead(snap) {
-  const slope = snap.indicators.cvdSlope;
-  const n = snap.indicatorParams?.cvdSlope ?? 20;
-  let reading = 'Chưa đủ dữ liệu để kết luận.';
-  if (slope != null) {
-    reading = slope > 0
-      ? `Trong ${n} nến gần nhất, người mua chủ động đang nhiều hơn người bán (${num(slope * 100, 1, { signed: true })}% khối lượng).`
-      : slope < 0
-        ? `Trong ${n} nến gần nhất, người bán chủ động đang nhiều hơn người mua (${num(slope * 100, 1, { signed: true })}% khối lượng).`
-        : `Trong ${n} nến gần nhất, mua và bán chủ động đang cân bằng.`;
-  }
-  $('cvd-read').innerHTML = `${term('cvd', 'CVD')} đi lên = người mua đang chủ động hơn; đi xuống = người bán chủ động hơn. `
-    + `<b>${esc(reading)}</b>`;
-
-  const lg = $('osc-legend');
-  clear(lg);
-  lg.append(
-    legendItem('CVD luỹ tiến', 'var(--accent)'),
-    legendItem('Mua chủ động nhiều hơn', 'var(--up)'),
-    legendItem('Bán chủ động nhiều hơn', 'var(--down)'),
-  );
+  $('cvd-read').innerHTML = flowReadHTML(snap);
+  $('osc-legend').innerHTML = flowLegendHTML();
 }
 
 function kvHTML(rows) {
@@ -295,11 +266,8 @@ function initLayers() {
 }
 
 function drawPriceArea(snap) {
-  const hasPlan = snap.levels && snap.levels.side !== 'none' && snap.levels.entry != null;
   drawPriceChart($('price-chart'), $('price-tip'), snap, state.layers);
-  $('price-legend').innerHTML = priceLegendHTML(state.layers, hasPlan);
-  $('price-chart-sub').textContent = `${snap.series.close.length} nến khung ${snap.interval} gần nhất · `
-    + 'rê chuột hoặc chạm vào biểu đồ để xem từng nến';
+  $('price-chart-sub').textContent = `${snap.series.close.length} nến khung ${snap.interval} · rê chuột hoặc chạm để xem từng nến`;
 }
 
 function drawCharts(snap) {
