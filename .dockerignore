@@ -1,7 +1,0 @@
-.git
-.github
-.env
-server-java/.env
-.tmp
-server-java/target
-*.log

@@ -4,10 +4,9 @@
 // dữ liệu lấy thẳng từ Binance, chỉ báo và model ML tính tại máy người dùng,
 // Claude gọi trực tiếp bằng API key của chính họ.
 
-// Analysis, models and backtests now run in the Java service.
-const INTERVALS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M'];
-const INTERVAL_MS = Object.fromEntries(INTERVALS.map((interval) => [interval, 1]));
-const normalizeSymbol = (input) => input.trim().toUpperCase().replace(/[\/_\-\s]/g, '');
+import { analyze } from '../src/analysis/engine.js';
+import { normalizeSymbol, resolveSymbol, INTERVAL_MS } from '../src/data/binance.js';
+import { assertAllowedTradeSymbol } from '../src/data/trading-universe.js';
 import {
   loadStrategy, setStrategyValue, flattenStrategy, resetStrategy, overrideCount, isOverridden,
   loadPrompt, savePrompt, resetPrompt, promptIsCustom,
@@ -15,7 +14,6 @@ import {
 } from './store.js';
 import { loadModel, saveModel, deleteModel, listModels } from './model-store.js';
 import { generateReport, askAbout, testApiKey } from './claude.js';
-import { canWrite, csrfFetch, getAuthSession } from './auth.js';
 
 const $ = (id) => document.getElementById(id);
 const NS = 'http://www.w3.org/2000/svg';
@@ -30,11 +28,6 @@ const state = {
   worker: null,
   jobId: 0,
   abort: null,
-  performanceRange: 'week',
-  performanceData: null,
-  auth: null,
-  canWrite: false,
-  profileAvatar: null,
 };
 
 // ---------- Tiện ích ----------
@@ -204,155 +197,6 @@ function attachCrosshair(svg, tip, { plotX, plotW, count, onIndex, top = 0, bott
 }
 
 const ttRow = (label, value) => `<div class="tt-row"><span>${label}</span><span>${value}</span></div>`;
-
-// ---------- Hiệu suất dòng tiền từ lệnh đã đóng ----------
-
-function fmtMoney(value, { signed = false } = {}) {
-  if (value == null || !Number.isFinite(Number(value))) return '—';
-  const number = Number(value);
-  const sign = signed && number > 0 ? '+' : '';
-  return `${sign}${number.toLocaleString('vi-VN', {
-    style: 'currency', currency: 'USD', maximumFractionDigits: 2,
-  })}`;
-}
-
-function renderPerformanceKpis(data) {
-  const summary = data.summary;
-  const values = [
-    ['P&L', `${fmtMoney(summary.pnlUsd, { signed: true })} (${fmtSigned(summary.pnlPercent)}%)`,
-      summary.pnlUsd > 0 ? 'delta-up' : summary.pnlUsd < 0 ? 'delta-down' : ''],
-    ['Tỷ lệ thắng', summary.winRatePercent == null ? '—' : `${summary.winRatePercent.toFixed(1)}%`, ''],
-    ['Thắng / thua', `${summary.wins} / ${summary.losses}`, ''],
-    ['TB mỗi lệnh', fmtMoney(summary.averagePnlUsd, { signed: true }),
-      summary.averagePnlUsd > 0 ? 'delta-up' : summary.averagePnlUsd < 0 ? 'delta-down' : ''],
-    ['Lệnh đã đóng', String(summary.totalTrades), ''],
-  ];
-  const host = $('performance-kpis');
-  clear(host);
-  for (const [label, value, cls] of values) {
-    const box = document.createElement('div');
-    box.className = 'performance-kpi';
-    const name = document.createElement('span'); name.textContent = label;
-    const result = document.createElement('strong'); result.textContent = value;
-    if (cls) result.className = cls;
-    box.append(name, result);
-    host.appendChild(box);
-  }
-}
-
-function drawPerformance(data) {
-  const svg = $('performance-chart');
-  const tip = $('performance-tip');
-  const empty = $('performance-empty');
-  clear(svg);
-  tip.classList.remove('on');
-  renderPerformanceKpis(data);
-
-  const mobile = window.innerWidth < 700;
-  const W = mobile ? 600 : 1200;
-  const H = mobile ? 300 : 260;
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-
-  const hasTrades = data.summary.totalTrades > 0;
-  empty.classList.toggle('hidden', hasTrades);
-  empty.textContent = data.message || 'Chưa có lệnh đóng trong khoảng thời gian này.';
-  $('performance-note').textContent = `PnL chưa nhân đòn bẩy · vốn giả định ${fmtMoney(data.summary.capitalPerTradeUsd)} mỗi lệnh · múi giờ Việt Nam`;
-  if (!hasTrades) return;
-
-  const padL = 58, padR = 22, padT = 16, padB = 35;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const points = data.points;
-  const values = points.flatMap((point) => [point.pnlUsd, point.cumulativePnlUsd, 0]);
-  let min = Math.min(...values), max = Math.max(...values);
-  const span = max - min || Math.max(1, Math.abs(max));
-  min -= span * 0.12;
-  max += span * 0.12;
-  const y = (value) => padT + ((max - value) / (max - min)) * plotH;
-  const step = plotW / points.length;
-  const x = (index) => padL + (index + 0.5) * step;
-  const zeroY = y(0);
-
-  for (let tick = 0; tick <= 4; tick++) {
-    const value = min + ((max - min) * tick) / 4;
-    const yy = y(value);
-    svg.appendChild(mk('line', {
-      x1: padL, y1: yy, x2: W - padR, y2: yy,
-      class: Math.abs(value) < 1e-9 ? 'axis-line' : 'grid-line',
-    }));
-    svg.appendChild(mk('text', { x: padL - 7, y: yy + 3, 'text-anchor': 'end' },
-      `${value > 0 ? '+' : ''}$${Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1)}`));
-  }
-  svg.appendChild(mk('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, class: 'axis-line' }));
-
-  const barWidth = Math.max(3, Math.min(30, step * 0.58));
-  points.forEach((point, index) => {
-    const yy = y(point.pnlUsd);
-    const height = Math.max(1, Math.abs(zeroY - yy));
-    svg.appendChild(mk('rect', {
-      x: x(index) - barWidth / 2,
-      y: point.pnlUsd >= 0 ? yy : zeroY,
-      width: barWidth,
-      height,
-      rx: 2,
-      fill: point.pnlUsd >= 0 ? cssVar('--good') : cssVar('--critical'),
-      opacity: point.trades ? 0.78 : 0.18,
-    }));
-  });
-
-  const linePoints = points.map((point, index) => `${x(index)},${y(point.cumulativePnlUsd)}`).join(' ');
-  svg.appendChild(mk('polyline', {
-    points: linePoints, fill: 'none', stroke: cssVar('--series-1'),
-    'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
-  }));
-  points.forEach((point, index) => {
-    svg.appendChild(mk('circle', {
-      cx: x(index), cy: y(point.cumulativePnlUsd), r: points.length > 20 ? 2 : 3,
-      fill: cssVar('--series-1'), stroke: cssVar('--surface-1'), 'stroke-width': 1,
-    }));
-  });
-
-  const labelEvery = Math.max(1, Math.ceil(points.length / 8));
-  points.forEach((point, index) => {
-    if (index % labelEvery !== 0 && index !== points.length - 1) return;
-    svg.appendChild(mk('text', { x: x(index), y: H - 12, 'text-anchor': 'middle' }, point.label));
-  });
-
-  attachCrosshair(svg, tip, {
-    plotX: x(0), plotW: Math.max(1, x(points.length - 1) - x(0)), count: points.length,
-    top: padT, bottom: H - padB,
-    onIndex: (index) => {
-      const point = points[index];
-      return `<div class="tt-time">${point.label}</div>`
-        + ttRow('P&L kỳ', `${fmtMoney(point.pnlUsd, { signed: true })} (${fmtSigned(point.pnlPercent)}%)`)
-        + ttRow('Tích lũy', fmtMoney(point.cumulativePnlUsd, { signed: true }))
-        + ttRow('Thắng / thua', `${point.wins} / ${point.losses}`)
-        + ttRow('Lệnh đóng', point.trades);
-    },
-  });
-}
-
-async function loadTradingPerformance(range = state.performanceRange) {
-  state.performanceRange = range;
-  for (const button of document.querySelectorAll('.performance-range')) {
-    button.classList.toggle('active', button.dataset.range === range);
-  }
-  $('performance-empty').classList.remove('hidden');
-  $('performance-empty').textContent = 'Đang tải dữ liệu lệnh…';
-  try {
-    const response = await fetch(`/api/trading-performance?range=${encodeURIComponent(range)}`, {
-      headers: { accept: 'application/json' }, cache: 'no-store',
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    state.performanceData = data;
-    drawPerformance(data);
-  } catch {
-    state.performanceData = null;
-    $('performance-empty').classList.remove('hidden');
-    $('performance-empty').textContent = 'Không tải được lịch sử lệnh. Hãy mở trang bằng Java server.';
-    $('performance-note').textContent = '';
-  }
-}
 
 // ---------- Biểu đồ giá ----------
 
@@ -783,6 +627,83 @@ function renderHero(snap) {
   }
 }
 
+function renderMl(snap) {
+  const host = $('ml-body');
+  clear(host);
+  const ml = snap.ml;
+  if (!ml.available) {
+    $('ml-sub').textContent = 'Chưa có model cho cặp này';
+    host.textContent = ml.reason;
+    const btn = document.createElement('button');
+    btn.textContent = 'Train ngay trong trình duyệt';
+    btn.style.marginTop = '10px';
+    btn.addEventListener('click', () => { switchTab('tab-train'); runTrain(); });
+    host.appendChild(btn);
+    return;
+  }
+  const relLabel = { high: 'cao', medium: 'trung bình', low: 'thấp' }[ml.reliability] || ml.reliability;
+  const relKind = { high: 'ok', medium: 'warn', low: 'bad' }[ml.reliability];
+  $('ml-sub').textContent = `Dự đoán ${ml.horizonCandles} nến tới · nhãn ${ml.labelMode}`;
+
+  const head = document.createElement('div');
+  head.style.cssText = 'display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:10px';
+  const big = document.createElement('span');
+  big.style.cssText = 'font-size:26px; font-weight:680; font-variant-numeric:tabular-nums';
+  big.textContent = `${ml.probUpPercent}%`;
+  const cap = document.createElement('span');
+  cap.className = 'small muted';
+  cap.textContent = 'khả năng tăng';
+  head.append(big, cap, chip(`độ tin cậy ${relLabel}`, { kind: relKind }));
+  host.appendChild(head);
+
+  const dl = document.createElement('dl');
+  dl.className = 'kv';
+  const rows = [
+    ['AUC holdout', ml.testAuc ?? '—'],
+    ['AUC walk-forward', ml.walkForwardAuc ?? '—'],
+    ['Ngưỡng tăng mạnh', ml.thresholds ? `> ${ml.thresholds.bullishAbove}` : '—'],
+    ['Ngưỡng giảm mạnh', ml.thresholds ? `< ${ml.thresholds.bearishBelow}` : '—'],
+    ['Vị trí hiện tại', ml.percentileVsHistory ?? '—'],
+  ];
+  if (ml.tailAccuracy?.combinedAccuracy != null) {
+    rows.push(['Đúng khi tự tin nhất', fmtPct(ml.tailAccuracy.combinedAccuracy)]);
+  }
+  rows.push(['Train lúc', new Date(ml.trainedAt).toLocaleString('vi-VN')]);
+  for (const [k, v] of rows) {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = String(v);
+    dl.append(dt, dd);
+  }
+  host.appendChild(dl);
+
+  if (ml.reliability === 'low') {
+    const warn = document.createElement('p');
+    warn.className = 'small';
+    warn.style.cssText = 'margin:10px 0 0; color:var(--critical)';
+    warn.textContent = 'Model chưa đạt ngưỡng tin cậy nên KHÔNG được tính vào điểm tổng hợp. '
+      + 'Xác suất trên chỉ để tham khảo.';
+    host.appendChild(warn);
+  }
+
+  if (ml.topFeatures?.length) {
+    const det = document.createElement('details');
+    det.style.marginTop = '10px';
+    const sum = document.createElement('summary');
+    sum.className = 'small muted';
+    sum.style.cursor = 'pointer';
+    sum.textContent = 'Chỉ báo model dùng nhiều nhất';
+    const ul = document.createElement('ul');
+    ul.className = 'notes';
+    for (const f of ml.topFeatures) {
+      const li = document.createElement('li');
+      li.textContent = `${f.feature} — ${f.pct.toFixed(1)}%`;
+      ul.appendChild(li);
+    }
+    det.append(sum, ul);
+    host.appendChild(det);
+  }
+}
+
 function renderLevels(snap) {
   const host = $('levels-body');
   clear(host);
@@ -896,6 +817,7 @@ function renderAll(snap) {
   drawCvd(snap);
   drawFlow(snap);
   drawBreakdown(snap);
+  renderMl(snap);
   renderLevels(snap);
   renderIndicators(snap);
   updateTargetLabel();
@@ -910,8 +832,10 @@ async function selectedSymbol() {
   if (!raw) throw new Error('Nhập mã token trước đã (ví dụ BTC, ETH, SOL).');
   // Đối chiếu danh sách cặp thật của Binance thay vì đoán, để "wbtc" ra WBTCUSDT
   // còn "ethbtc" ra ETHBTC.
-  // Java resolves the live Binance symbol and enforces its whitelist.
-  return raw;
+  const symbol = await resolveSymbol(raw);
+  const strategy = state.strategy ?? await loadStrategy();
+  assertAllowedTradeSymbol(symbol, strategy);
+  return symbol;
 }
 
 /** Cho người dùng thấy train/backtest sẽ chạy trên token nào. */
@@ -942,21 +866,12 @@ async function runAnalyze() {
     const symbol = await selectedSymbol();
     state.symbol = symbol;
     state.interval = interval;
-    let response;
-    if (state.canWrite) {
-      state.strategy = await loadStrategy();
-      response = await csrfFetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify({ symbol, interval, bars: 180, strategy: state.strategy }),
-      });
-    } else {
-      const params = new URLSearchParams({ symbol, interval, bars: '180' });
-      response = await fetch(`/api/analyze?${params}`, { cache: 'no-store' });
-    }
-    const snap = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(snap.error || `HTTP ${response.status}`);
+    state.strategy = await loadStrategy();
+    const snap = await analyze(symbol, interval, state.strategy, {
+      includeSeries: true,
+      seriesBars: 180,
+      storedModel: await loadModel(symbol, interval),
+    });
     renderAll(snap);
     setStatus(`cập nhật ${new Date().toLocaleTimeString('vi-VN')}`);
     const q = new URLSearchParams({ symbol, interval });
@@ -1198,7 +1113,7 @@ function renderTrainResult(p, verdict, saved) {
     host.appendChild(det);
   }
 
-  // Cho tải một bản model về để sao lưu thủ công.
+  // Cho tải model về để commit vào repo (dùng chung cho mọi người mở trang)
   const dlBtn = document.createElement('button');
   dlBtn.textContent = 'Tải file model (.json)';
   dlBtn.style.marginTop = '12px';
@@ -1214,7 +1129,8 @@ function renderTrainResult(p, verdict, saved) {
   const hint = document.createElement('div');
   hint.className = 'small muted';
   hint.style.marginTop = '4px';
-  hint.textContent = 'Đây chỉ là bản sao lưu. Model dùng chung được lệnh train của server lưu thẳng vào database.';
+  hint.textContent = 'Đặt file này vào thư mục models/ trong repo và thêm vào models/index.json '
+    + 'để mọi người mở trang đều dùng được model, không cần train lại.';
   host.appendChild(hint);
 }
 
@@ -1572,177 +1488,6 @@ function updateKeyStatus() {
   $('ai-key-chip').className = `chip ${has ? 'ok' : 'warn'}`;
 }
 
-function initials(name) {
-  const words = String(name || 'Tài khoản').trim().split(/\s+/).filter(Boolean);
-  return words.slice(0, 2).map((word) => word[0]).join('').toLocaleUpperCase('vi-VN') || '?';
-}
-
-function renderSideAvatar(avatar, name) {
-  const host = $('side-avatar');
-  clear(host);
-  if (!avatar) {
-    host.textContent = initials(name);
-    return;
-  }
-  const image = document.createElement('img');
-  image.alt = '';
-  image.src = avatar;
-  image.addEventListener('error', () => {
-    clear(host);
-    host.textContent = initials(name);
-  }, { once: true });
-  host.appendChild(image);
-}
-
-function renderProfileAvatar(avatar, name) {
-  const image = $('profile-avatar-image');
-  const fallback = $('profile-avatar-fallback');
-  if (!avatar) {
-    image.hidden = true;
-    image.removeAttribute('src');
-    fallback.hidden = false;
-    fallback.textContent = initials(name);
-    return;
-  }
-  fallback.hidden = true;
-  image.hidden = false;
-  image.src = avatar;
-  image.onerror = () => {
-    image.hidden = true;
-    image.removeAttribute('src');
-    fallback.hidden = false;
-    fallback.textContent = initials(name);
-  };
-}
-
-function syncProfileEditor(session) {
-  const user = session?.user;
-  if (!user) return;
-  state.profileAvatar = user.avatar || null;
-  $('profile-display-name').value = user.name || '';
-  $('profile-avatar-input').value = '';
-  renderProfileAvatar(state.profileAvatar, user.name);
-}
-
-async function updateAuthStatus(session = null) {
-  const link = $('auth-link');
-  try {
-    const { user } = session || await getAuthSession();
-    if (!user) return;
-    link.textContent = '';
-    if (user.avatar) {
-      const avatar = document.createElement('img');
-      avatar.src = user.avatar;
-      avatar.alt = '';
-      link.appendChild(avatar);
-    }
-    link.appendChild(document.createTextNode(user.name || 'Tài khoản'));
-    link.setAttribute('href', '#profile');
-    link.setAttribute('aria-label', `Tài khoản: ${user.name || user.email || ''}`);
-    $('side-user-name').textContent = user.name || 'Tài khoản';
-    renderSideAvatar(user.avatar, user.name);
-  } catch { /* Dashboard vẫn hoạt động nếu API xác thực chưa sẵn sàng. */ }
-}
-
-function setProfileStatus(message, kind = 'muted') {
-  const status = $('profile-status');
-  status.textContent = message;
-  status.className = `small ${kind}`;
-}
-
-function initSidebar() {
-  for (const button of document.querySelectorAll('[data-open-tab]')) {
-    button.addEventListener('click', () => {
-      switchTab(button.dataset.openTab);
-      $('workspace').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-  }
-
-  $('side-logout').addEventListener('click', async () => {
-    const button = $('side-logout');
-    button.disabled = true;
-    try {
-      const response = await csrfFetch('/auth/logout', { method: 'POST' });
-      if (!response.ok) throw new Error('Không thể đăng xuất. Vui lòng thử lại.');
-      location.assign('/login/');
-    } catch (error) {
-      button.disabled = false;
-      showBanner(error.message);
-    }
-  });
-}
-
-function initProfileEditor() {
-  const avatarInput = $('profile-avatar-input');
-  const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-
-  avatarInput.addEventListener('change', () => {
-    const file = avatarInput.files?.[0];
-    if (!file) return;
-    if (!allowedTypes.has(file.type) || file.size > 500 * 1024) {
-      avatarInput.value = '';
-      setProfileStatus('Ảnh phải là PNG, JPEG, WebP hoặc GIF và không quá 500 KB.', 'error');
-      return;
-    }
-    const reader = new FileReader();
-    reader.addEventListener('load', () => {
-      state.profileAvatar = String(reader.result || '');
-      renderProfileAvatar(state.profileAvatar, $('profile-display-name').value);
-      setProfileStatus('Ảnh mới đã sẵn sàng để lưu.');
-    });
-    reader.addEventListener('error', () => setProfileStatus('Không thể đọc ảnh đã chọn.', 'error'));
-    reader.readAsDataURL(file);
-  });
-
-  $('profile-remove-avatar').addEventListener('click', () => {
-    state.profileAvatar = null;
-    avatarInput.value = '';
-    renderProfileAvatar(null, $('profile-display-name').value);
-    setProfileStatus('Ảnh đại diện sẽ được gỡ khi bạn lưu.');
-  });
-
-  $('profile-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const displayName = $('profile-display-name').value.trim();
-    if (displayName.length < 2 || displayName.length > 80) {
-      setProfileStatus('Tên hiển thị cần có từ 2 đến 80 ký tự.', 'error');
-      return;
-    }
-
-    const button = $('profile-save');
-    button.disabled = true;
-    setProfileStatus('Đang lưu…');
-    try {
-      const response = await csrfFetch('/api/auth/profile', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ displayName, avatar: state.profileAvatar }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.user) {
-        throw new Error(payload?.error || 'Không thể lưu thông tin. Vui lòng thử lại.');
-      }
-      state.auth = { ...state.auth, user: payload.user };
-      syncProfileEditor(state.auth);
-      await updateAuthStatus(state.auth);
-      setProfileStatus('Đã lưu thay đổi.', 'ok');
-    } catch (error) {
-      setProfileStatus(error.message, 'error');
-    } finally {
-      button.disabled = false;
-    }
-  });
-}
-
-function applyAuthorization(session) {
-  state.auth = session;
-  state.canWrite = canWrite(session);
-  document.body.dataset.canWrite = String(state.canWrite);
-  for (const element of document.querySelectorAll('[data-admin-only]')) {
-    element.hidden = !state.canWrite;
-  }
-}
-
 // ---------- Tabs & khởi động ----------
 
 function switchTab(id) {
@@ -1761,27 +1506,10 @@ function applyTheme(mode) {
   else document.documentElement.removeAttribute('data-theme');
   try { localStorage.setItem('ta.theme', mode || ''); } catch { /* riêng tư */ }
   if (state.snapshot) renderAll(state.snapshot);
-  if (state.performanceData) drawPerformance(state.performanceData);
 }
 
 async function init() {
   try { applyTheme(localStorage.getItem('ta.theme') || ''); } catch { /* bỏ qua */ }
-  try {
-    const session = await getAuthSession();
-    if (!session.user) {
-      location.assign(`/login/?${new URLSearchParams({ returnTo: location.pathname + location.search })}`);
-      return;
-    }
-    applyAuthorization(session);
-    await updateAuthStatus(session);
-    syncProfileEditor(session);
-    initSidebar();
-    initProfileEditor();
-  } catch (err) {
-    showBanner(err.message);
-    return;
-  }
-  loadTradingPerformance();
 
   const sel = $('interval');
   for (const iv of Object.keys(INTERVAL_MS)) {
@@ -1815,9 +1543,6 @@ async function init() {
   // Nhãn "Sẽ train" phải theo ô nhập ngay khi gõ, để không train nhầm token.
   $('symbol').addEventListener('input', updateTargetLabel);
   $('interval').addEventListener('change', updateTargetLabel);
-  for (const button of document.querySelectorAll('.performance-range')) {
-    button.addEventListener('click', () => loadTradingPerformance(button.dataset.range));
-  }
   updateTargetLabel();
   for (const btn of document.querySelectorAll('[role="tab"]')) {
     btn.addEventListener('click', () => switchTab(btn.id));
@@ -1829,13 +1554,10 @@ async function init() {
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      if (state.snapshot) drawPriceChart(state.snapshot);
-      if (state.performanceData) drawPerformance(state.performanceData);
-    }, 150);
+    resizeTimer = setTimeout(() => { if (state.snapshot) drawPriceChart(state.snapshot); }, 150);
   });
 
-  if (state.canWrite) initSettingsPanel();
+  initSettingsPanel();
   await runAnalyze();
 }
 

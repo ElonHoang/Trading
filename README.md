@@ -1,283 +1,408 @@
-# Dong Tien AI
+# Phân tích dòng tiền crypto
 
-He thong phan tich crypto da chuyen runtime tu Node.js sang Java 17 + Spring Boot, voi TiDB Cloud
-(MySQL-compatible) la database ben ngoai.
-Khong co package.json, npm script, Express, grammy hay Node source trong runtime.
-JavaScript chi con trong `web/`, `login/` va `public/` de ve giao dien tren trinh duyet.
+Công cụ đọc dòng tiền và vị thế của một token trên Binance, cho ra điểm tổng hợp và
+setup vào lệnh (entry / stop loss / take profit) kèm lý do cụ thể.
 
-## Chay
+Có ba mặt sử dụng, tất cả dùng **cùng một engine** nên số liệu luôn khớp nhau:
 
-Yeu cau: Java 17+, Maven 3.6.3+, va mot TiDB Cloud cluster co the truy cap tu may chay app.
-
-Sao chep `.env.example` thanh `.env`, sau do dien URL JDBC TLS, user va password cua cluster truoc
-khi chay bat ky lenh nao. Docker Compose khong khoi dong database local; `migrate-db` ket noi truc tiep
-toi TiDB Cloud, sau do `web`, `bot` va `import-files` giu nguyen quan he phu thuoc vao migration.
-
-Luu y: Flyway tao schema TiDB moi. Neu ban dang co du lieu PostgreSQL cu, hay export/nhap du lieu
-truoc; TiDB Cloud khong the tu doc database PostgreSQL cu qua migration.
-
-```dotenv
-JDBC_DATABASE_URL=jdbc:mysql://<tidb-cloud-endpoint>:4000/<database>?sslMode=VERIFY_IDENTITY&enabledTLSProtocols=TLSv1.2,TLSv1.3&connectionTimeZone=UTC
-DATABASE_USER=<tidb-cloud-username>
-DATABASE_PASSWORD=<tidb-cloud-password>
-DATABASE_POOL_SIZE=5
-DATABASE_MAX_LIFETIME_MS=300000
-```
-
-`sslMode=VERIFY_IDENTITY` bat TLS va kiem tra dung danh tinh endpoint. Dung dung endpoint/port trong
-trang **Connect** cua TiDB Cloud (thong thuong port `4000`).
-Voi cluster yeu cau CA rieng, import CA vao Java truststore va them `trustCertificateKeyStoreUrl` va
-`trustCertificateKeyStorePassword` vao URL theo [huong dan TLS JDBC cua TiDB Cloud](https://docs.pingcap.com/tidbcloud/tidb-cloud-tls-connect-to-dedicated/).
-
-Docker Compose (khuyen dung khi deploy):
-
-```powershell
-Copy-Item .env.example .env
-# Dien TiDB Cloud credentials vao .env truoc khi chay.
-docker compose up --build web
-docker compose --profile bot up -d bot
-docker compose --profile tools run --rm import-files
-# Dang nhap Telegram bang tai khoan cua ban de liet ke nhom (OTP/2FA chi nhap trong terminal):
-docker compose --profile tools run --rm telegram-history
-# Sau khi chon id cua mot nhom, kiem tra ket qua ngay truoc roi moi them --apply de luu:
-docker compose --profile tools run --rm telegram-history telegram-import-history --chat-id=<id> --date=2026-08-24
-docker compose --profile tools run --rm telegram-history telegram-import-history --chat-id=<id> --date=2026-08-24 --apply
-```
-
-Khi chay JAR truc tiep, dat cung ba bien moi truong o tren trong shell/secret manager truoc:
-
-```powershell
-mvn -f server-java/pom.xml clean package
-java -jar server-java/target/dong-tien-ai.jar migrate
-java -jar server-java/target/dong-tien-ai.jar import-files --overwrite
-java -jar server-java/target/dong-tien-ai.jar
-```
-
-- Dashboard: `http://localhost:8080/`
-- Realtime UI: `http://localhost:8080/realtime/`
-- Login: `http://localhost:8080/login/`
-
-## Deploy mien phi: Render + GitHub Actions
-
-Kien truc nay chay $0/thang. Doi lai, khong co tien trinh song lien tuc:
-
-| Thanh phan | Chay o dau | Vai tro |
+| Mặt | Lệnh | Ghi chú |
 |---|---|---|
-| `dong-tien-ai-web` | Render Web Service (goi free) | Dashboard, REST API, chay Flyway migration |
-| `daily-learning.yml` | GitHub Actions, 08:07 gio VN | `learn-once` — loss log, review, learning log, train model |
-| `weekly-purge.yml` | GitHub Actions, 08:37 thu Hai | `purge-history` — xoa keo da dong qua 30 ngay |
-| `telegram-alerts.yml` | GitHub Actions, moi 2 gio | `alerts-once` — quet va ban alert |
+| Bot Telegram (chart) | `npm run bot` | Call kèo kèm ảnh chart, theo dõi liên tục |
+| Web local | `npm start` | Dashboard tĩnh tại `/` và giao diện realtime tại `/realtime/` |
+| CLI | `npm run analyze -- BTC 1h` | Phân tích trong terminal |
 
-Nhung gi **khong** co trong cau hinh nay:
+---
 
-- **Bot Telegram tuong tac.** Cac lenh `/set`, `/add`, `/del`, `/canhbao` can long polling lien tuc
-  nen khong chay duoc. Alert mot chieu van co qua workflow. Muon lenh tuong tac thi phai co mot
-  tien trinh chay nen (Render Background Worker tra phi, hoac VM tu quan).
-- **Phan hoi tuc thi.** Web ngu sau 15 phut khong co request; lan vao lai cho ~50s de khoi dong.
-- **Alert theo thoi gian thuc.** Cron GitHub la best-effort va co the tre vai phut khi he thong tai cao.
+## Bộ chỉ báo bị giới hạn cố ý
 
-### Cac buoc
+Repo dùng 7 nhóm dữ liệu, mô tả chi tiết trong
+[`.claude/skills/chi-bao/SKILL.md`](.claude/skills/chi-bao/SKILL.md):
 
-Repo nay da co san mot Web Service tren Render (runtime Docker, region Singapore) theo doi nhanh
-`production`. Blueprint cua Render **khong nhan** service tao tay: bam New > Blueprint se tao them
-mot service thu hai voi URL khac. Vi vay giu service dang co va chinh Settings cua no; giu
-[render.yaml](render.yaml) lam tai lieu ghi dung cau hinh can co.
+| Nhóm | Trọng số | Nguồn |
+|---|---|---|
+| CVD (mua/bán chủ động) | 28 | suy từ `takerBuyVolume` của mỗi nến |
+| Khối lượng | 22 | so với trung bình 20 nến |
+| Phái sinh (funding + OI) | 18 | Binance futures |
+| Định vị đám đông | 14 | tỉ lệ long/short tài khoản, vị thế top trader, taker ratio |
+| Hỗ trợ / kháng cự | 12 | pivot gom cụm, kèm số lần chạm |
+| Sổ lệnh | 6 | lệch mua/bán, tường lệnh, độ mỏng |
+| Mẫu hình lịch sử | 10 | quét mọi cửa sổ trong tối đa 6 tháng, so log OHLC tương đối bằng correlation, biên độ và sai số từng nến; chỉ cộng điểm nếu diễn biến sau đó đồng thuận |
 
-1. Merge code vao `production` va push. Render tu deploy lai (autoDeploy).
-2. Trong **Settings** cua service, dat:
-   - `Branch` = `production`
-   - `Instance Type` = Free
-   - `Health Check Path` = `/healthz` — **chi them sau khi ban deploy da co route nay**, neu khong
-     Render se danh dau service unhealthy va rollback.
-3. Trong **Environment**, dien cac bien co gia tri co dinh:
-   `PORT=10000`, `SESSION_COOKIE_SECURE=true`, `SESSION_TIMEOUT=8h`, `DATABASE_MIGRATE=true`,
-   `TRADING_LEARNING_SCHEDULER_ENABLED=false`, `DATABASE_POOL_SIZE=5`,
-   `DATABASE_MAX_LIFETIME_MS=300000`, `TRADING_TIMEZONE=Asia/Ho_Chi_Minh`.
-   Bat buoc them `JDBC_DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD`. Bien OAuth va
-   Anthropic de trong neu chua dung; cac provider dang nhap se fail-closed dung nhu thiet ke.
-   Tai khoan dang nhap noi bo KHONG khai o day — xem buoc 4.
-4. Tao tai khoan admin dau tien. Chay o may ban, voi `.env` tro toi cung TiDB Cloud ma web dung:
+**EMA, RSI, MACD, Bollinger, ATR, ADX, Stochastic, VWAP, OBV và phân kỳ RSI đã bị xoá
+khỏi codebase.** Đây là quyết định có chủ ý, không phải thiếu sót. Lấy lại từ commit
+`2155bd4` nếu cần.
 
-   ```powershell
-   java -jar server-java/target/dong-tien-ai.jar local-user set <username> --role=admin
-   ```
+Hai điều đi kèm với lựa chọn đó, đo được chứ không phỏng đoán:
 
-   Lenh se hoi mat khau (it nhat 10 ky tu) va ghi BCrypt hash vao bang `local_credential`.
-   Tai khoan co hieu luc ngay, khong can deploy lai.
-5. Cho web live, lay domain `https://<ten>.onrender.com` roi them redirect URI vao OAuth app:
-   `https://<ten>.onrender.com/login/oauth2/code/google` va `.../code/github`.
-   `OAuthClientConfig` sinh redirect tu `{baseUrl}`, con `forward-headers-strategy: framework` giup
-   Spring doc dung scheme HTTPS phia sau proxy cua Render.
-6. Vao **Settings > Secrets and variables > Actions** cua repo GitHub va them cac secret:
-   `JDBC_DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD` (bat buoc),
-   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_IDS` (cho alert),
-   `ANTHROPIC_API_KEY` (neu dung Anthropic trong daily review).
-7. Chay thu tay tung workflow bang nut **Run workflow** truoc khi tin vao lich cron.
+- Model ML yếu hơn hẳn. Bộ feature giảm từ 32 xuống 16; AUC holdout từ 0,554 xuống
+  **0,5116**, walk-forward từ 0,541 xuống **0,5076** — dưới ngưỡng `ml.minTestAuc` 0,52
+  nên **hệ thống tự động không dùng ML** để ra quyết định.
+- Trong 16 feature còn lại, `cvdSlope` là feature mạnh nhất (14,9%), rồi
+  `cvdSlopeChange` (10,4%). CVD thật sự có tín hiệu.
 
-### Ngan sach GitHub Actions
+### Cái không có
 
-Repo **public**: khong gioi han phut, khong can tinh toan gi.
+- **Không có liquidity map / heatmap thanh lý.** Binance đã bỏ endpoint lịch sử thanh lý
+  toàn thị trường (`/fapi/v1/allForceOrders` → 404); `forceOrders` cần API key và chỉ trả
+  lệnh của chính bạn. Heatmap kiểu Coinglass là mô hình tự dựng, không phải dữ liệu
+  Binance. Nhóm "định vị đám đông" thay thế phần đó bằng dữ liệu thật có lịch sử.
+- **Không có lịch unlock / vesting.** CoinGecko không có trường nào về unlock và không có
+  nguồn miễn phí nào khác. `circulatingPercent` thấp chỉ là chỉ dấu gián tiếp.
 
-Repo **private** goi Free: 2000 phut/thang. Ba workflow deu cache jar theo noi dung
-`server-java/**` va cac thu muc UI, nen chi lan chay dau tien sau moi thay doi code moi phai build
-(~4 phut); cac lan sau chi ~1-2 phut. Uoc tinh voi cron mac dinh: alert moi 2 gio (~360 lan) +
-learning hang ngay (30 lan) + purge hang tuan (4 lan) roi vao khoang 700-900 phut/thang. Neu day
-alert len moi 30 phut thi vuot han ngach — sua `cron` trong
-[.github/workflows/telegram-alerts.yml](.github/workflows/telegram-alerts.yml) va tinh lai.
+---
 
-> GitHub tu tat scheduled workflow sau **60 ngay** repo khong co commit moi. Neu repo im lang, phai
-> vao bat lai thu cong.
+## Chạy ở máy mình
 
-### Luu y van hanh
+Yêu cầu Node.js ≥ 20.
 
-- Ba workflow deu dat `DATABASE_MIGRATE=false`; chi Render web chay Flyway. Deploy web truoc khi bat
-  cron lan dau.
-- `daily-learning` va `weekly-purge` dung chung `concurrency: trading-learning` nen khong bao gio
-  chong len nhau. Chung thay the `TradingStateLock` — khoa nay chi chan trong mot tien trinh, khong
-  chan giua hai job.
-- **Khong bat `TRADING_LEARNING_SCHEDULER_ENABLED=true`** o Render trong cau hinh nay. Bat len se
-  chay trung job voi GitHub Actions va hai ben cung ghi vao state auto-retune.
-- Web goi free co 512MB RAM. Backtest hay train nang tren dashboard co the OOM; chay bang CLI o may
-  hoac them mot workflow rieng thay vi bam tren web.
-- Health check dung `GET /healthz` — route public duy nhat ngoai trang dang nhap, chi tra hang so.
-- Cac profile `tools` (`import-files`, `telegram-history`) van chay bang Docker Compose o may ban.
-
-## Lenh Java
-
-```powershell
-java -jar server-java/target/dong-tien-ai.jar analyze BTC 4h
-java -jar server-java/target/dong-tien-ai.jar train BTC 4h
-java -jar server-java/target/dong-tien-ai.jar backtest BTC 4h 3000
-java -jar server-java/target/dong-tien-ai.jar diagnose-sl BTC 4h 3000
-java -jar server-java/target/dong-tien-ai.jar validate-filters BTC 4h 3000
-java -jar server-java/target/dong-tien-ai.jar research-patterns --interval 4h
-java -jar server-java/target/dong-tien-ai.jar daily-review
-java -jar server-java/target/dong-tien-ai.jar daily-loss-log
-java -jar server-java/target/dong-tien-ai.jar auto-retune
-java -jar server-java/target/dong-tien-ai.jar learn-once
-java -jar server-java/target/dong-tien-ai.jar purge-history
-java -jar server-java/target/dong-tien-ai.jar local-user list
-java -jar server-java/target/dong-tien-ai.jar local-user set <username> --role=admin
-java -jar server-java/target/dong-tien-ai.jar local-user remove <username>
-java -jar server-java/target/dong-tien-ai.jar alerts-once
-java -jar server-java/target/dong-tien-ai.jar bot
+```bash
+git clone <repo-url>
+cd <repo>
+npm install
+cp .env.example .env     # điền TELEGRAM_BOT_TOKEN và TELEGRAM_OWNER_IDS
+npm run bot              # bot Telegram
+npm start                # web local, mặc định http://localhost:3000
 ```
 
-`bot` su dung long polling. Khong chay hai instance voi cung Telegram token.
+Các lệnh khác:
 
-`learn-once` va `purge-history` chay dung workflow ma `TradingLearningScheduler` chay theo
-cron trong bot worker. Dung chung khi khong co worker chay nen (vi du Render goi free) va
-de mot scheduler ben ngoai goi. Khong bat `TRADING_LEARNING_SCHEDULER_ENABLED` o service
-nao khac trong luc dung hai lenh nay, neu khong job se chay trung.
-
-`local-user` quan ly tai khoan dang nhap noi bo, luu trong bang `local_credential` cua TiDB.
-Mat khau duoc nhap qua stdin roi bam BCrypt cost 12 ngay tai cho; mat khau tho khong bao gio
-di vao log, vao database hay vao bien moi truong. `list` khong bao gio in hash.
-`remove` tu choi xoa admin cuoi cung de khong ai bi khoa ra ngoai.
-
-```powershell
-# Tao admin dau tien (se hoi mat khau, it nhat 10 ky tu)
-java -jar server-java/target/dong-tien-ai.jar local-user set hoangnv --role=admin
+```bash
+npm run analyze -- BTC 1h --no-ai   # phân tích trong terminal
+npm run train -- BTC 4h             # train model, lưu vào models/
+npm run backtest -- BTC 4h 3000     # backtest có SL/TP
+npm run research:patterns -- BTC 4h # báo cáo mẫu hình 6 tháng, chỉ đọc dữ liệu
+npm run diagnose:sl -- BTC 4h 3000  # tìm đặc điểm chung của lệnh bị SL
+npm run learn:losses                 # học kèo thua hôm qua, backtest và lưu log local
+npm run validate:filters -- BTC 4h 3000 # kiểm chứng bộ lọc theo thời gian
+npm run models:index                # BẮT BUỘC chạy sau khi thêm/xoá file trong models/
+npm run bot:ai                      # bot Telegram bản có Claude (xem phần chi phí)
 ```
 
-Render goi free khong co Shell, nen chay lenh nay o may ban voi `.env` tro toi cung TiDB
-Cloud ma web dang dung. Tai khoan co hieu luc ngay, khong can deploy lai.
+**Hai bot không chạy đồng thời được.** Telegram chỉ cho một tiến trình long-poll trên mỗi
+token; chạy cả `npm run bot` và `npm run bot:ai` sẽ làm cả hai lỗi 409.
 
-## Nhap lich su call tu Telegram
+`npm run learn:losses` đọc `data/auto-retune.json`, phát lại kèo thua của 7 ngày gần
+nhất, chạy candidate trên train/holdout và ghi `data/loss-learning/YYYY-MM-DD.json`
+cùng bản đọc nhanh `.txt`. Khi phân tích bản state tải từ production mà không muốn ghi
+ngược, dùng `npm run learn:losses -- --state <đường-dẫn-file-state>`.
 
-`telegram-history` la CLI tuong tac, khong phai bot chay nen. Lan dau tien no hoi so dien thoai, ma OTP va (neu co) mat khau 2FA ngay trong terminal; phien dang nhap duoc giu trong Docker volume rieng va khong nam trong Git. Lenh liet ke chat chi hien thi cac chat cua tai khoan da dang nhap. Sau do phai truyen dung `--chat-id` cua nhom muon doc; chuong trinh khong quet hay lay tu nhom khac.
+### Cảnh báo 5 phút qua GitHub Actions
 
-Importer chi nhan dang caption call/cap nhat do chinh bot nay tao ra, mac dinh `dry-run`, va bo qua tin nhan mo ho. Du lieu nhap duoc luu rieng de hien thi lich su/PnL tren dashboard, khong dua vao training hay auto-retune. Dieu nay la can thiet vi [dieu khoan Telegram API](https://core.telegram.org/api/terms) cam su dung du lieu lay tu Telegram de train hay fine-tune AI/ML. Job don lich su hang tuan cung xoa cac ban ghi import da dong qua han giu du lieu.
+Workflow `Telegram alerts every 5 minutes` trong chính repo này chạy `npm run alerts:once` một
+lần mỗi 5 phút rồi tự thoát. Trạng thái chống gửi trùng và kèo đang mở được lưu ở nhánh
+`bot-state` dưới dạng mã hoá AES-256 và xác thực HMAC; không commit trạng thái rõ vào source.
 
-## Hoc tu ket qua keo va don lich su
+Chế độ này **chỉ gửi cảnh báo**. Các lệnh Telegram như `/ta`, `/gia`, `/add` không phản hồi khi
+máy local tắt, vì không có tiến trình long-poll đang chạy. Workflow cần bốn repository secrets:
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_IDS`, `STATE_ENCRYPTION_KEY`, và
+`STATE_HMAC_KEY`; hai state key đều là 64 ký tự hexadecimal và phải được giữ riêng tư.
 
-Khi chay service `bot` qua Docker Compose, worker bot tu dong chay job luc 08:07 gio
-Viet Nam: luu log loss, tong hop W/L/PnL cua ngay truoc, ghi learning log vao TiDB,
-va chi ap dung tinh chinh/model moi neu vuot qua cac cong kiem chung hien co. Model
-thi truong duoc train lai toi da 3 cap co keo da dong trong ngay; model cu duoc giu
-neu candidate khong dat AUC holdout an toan.
+---
 
-Luc 08:37 thu Hai, worker chi xoa cac keo da dong qua 30 ngay trong lich su trading.
-Keo dang mo, cau hinh, model va learning log khong bi xoa. Co the doi lich, so ngay
-giu va bat/tat job bang cac bien `TRADING_*` ben duoi. Khong bat scheduler tren web
-hoac Vercel; chi mot worker bot persistent duoc phep chay job nay.
+## Bot Telegram
 
-Khi khong co worker chay nen (vi du Render goi free), hai job nay chay bang GitHub Actions
-cron goi `learn-once` va `purge-history` — cung workflow, chi khac nguon kich hoat. Luc do
-`TRADING_LEARNING_SCHEDULER_ENABLED` phai la `false` o moi service, neu khong job se chay
-trung. Xem muc Deploy mien phi ben tren.
+### Lệnh
 
-## Bien moi truong
+| Lệnh | Quyền | Việc |
+|---|---|---|
+| `/ta <mã>` | ai cũng dùng | Call kèo, bot **tự chọn khung 1h hoặc 15m** tuỳ khung nào đủ điều kiện |
+| `/ta <mã> <khung>` | ai cũng dùng | Xem khung cụ thể, vd `/ta btc 4h` |
+| `/gia <mã>` | ai cũng dùng | Giá nhanh, không kèm ảnh |
+| `/list` | ai cũng dùng | Danh sách theo dõi |
+| `/id` | ai cũng dùng | Xem user id và quyền của mình |
+| `/canhbao` `/tatcanhbao` | **chỉ chủ bot** | Bật/tắt theo dõi liên tục |
+| `/add` `/del` | **chỉ chủ bot** | Sửa danh sách theo dõi |
 
-| Bien | Mo ta |
+Quyền lấy từ `TELEGRAM_OWNER_IDS` trong `.env`. **Để trống = chặn hết lệnh ghi**
+(fail-closed) — cần thiết vì bot có thể ở trong group, nơi ai cũng sửa được watchlist
+dùng chung. Gửi `/id` cho bot để lấy user id của mình.
+
+### Theo dõi liên tục
+
+Bật bằng `/canhbao`. Mỗi `alerts.pollSeconds` (300s / 5 phút) bot quét lại, nhưng **chỉ đánh giá lại
+khi có nến mới đóng** — chỉ báo tính trên nến đã đóng nên poll dày hơn nến chỉ tốn request.
+
+Cách chọn mã để quét:
+
+1. Chỉ lấy các cặp trong `alerts.tradeSymbols` — đây là whitelist bắt buộc cho kèo mới.
+2. Quét toàn bộ các cặp trong whitelist, không lấy thêm token top-volume/top-mover hoặc từ watchlist.
+3. Khi `alerts.requireFutures=true`, chỉ dùng các cặp có perpetual futures nếu Binance trả được danh sách futures; lỗi mạng thì không tự loại mã.
+
+Với 13 mã hiện tại, một lượt tối đa phân tích hai khung cho mỗi mã, vẫn thấp hơn đáng kể giới hạn
+6.000 request-weight/phút. Phân tích đầy đủ một mã tốn 56 weight — riêng `depth limit=1000` đã 50.
+
+### Điều kiện call kèo
+
+Bốn cửa phải qua hết:
+
+1. `|điểm| ≥ thresholds.buy` (30) để có hướng long/short.
+2. **Cổng đồng thuận**: ≥ `thresholds.consensusPercent` (60%) số nhóm **có dữ liệu** phải
+   cùng hướng. Khác ngưỡng điểm — điểm 40 có thể chỉ đến từ 2 nhóm rất mạnh.
+3. **Chất lượng vào lệnh**: CVD phải cùng chiều đủ mạnh (mặc định độ dốc ≥3%) và volume
+   không thấp hơn trung bình 20 nến. Cổng nội bộ này không hiển thị riêng trên Telegram.
+4. Bối cảnh cơ bản không phủ quyết (xem Kĩ năng 2).
+
+Rồi mới tới ngưỡng báo `alerts.minAbsScore` (35). Bot **không** bắn tin "đứng ngoài" hay
+"chờ tín hiệu" — điểm cao mà bị chặn thì không phải một kèo.
+
+### Kèo đang mở
+
+Một mã đã được call thì **không call lại** cho tới khi kèo đó chốt. Trạng thái lưu ở
+`data/open-calls.json` (gitignored, phải ghi ra đĩa vì bot restart thường xuyên):
+
+| Xảy ra | Xử lý |
 |---|---|
-| `JDBC_DATABASE_URL` | TiDB Cloud JDBC URL MySQL co `sslMode=VERIFY_IDENTITY` |
-| `DATABASE_USER`, `DATABASE_PASSWORD` | Tai khoan TiDB Cloud; khong dat secret trong JDBC URL |
-| `DATABASE_POOL_SIZE`, `DATABASE_MAX_LIFETIME_MS` | Pool JDBC; mac dinh 5 ket noi va tai tao sau 5 phut |
-| `DATABASE_MIGRATE` | Chay Flyway luc khoi dong, mac dinh `true`. Khi deploy nhieu service, chi de mot service (web) dat `true` |
-| `JAVA_SERVER_PORT` | Port Java, mac dinh `8080` |
-| `SESSION_COOKIE_SECURE`, `SESSION_TIMEOUT` | Dat `true` khi deploy HTTPS; session mac dinh het han sau 8 gio |
-| `LOCAL_AUTH_ADMIN_*`, `LOCAL_AUTH_VIEWER_*` | Cach cu, van duoc ho tro. Uu tien dung lenh `local-user` de luu tai khoan trong database; neu dung bien thi phai du ca bon va hash BCrypt cost 12 |
-| `TELEGRAM_BOT_TOKEN` | Token bot Telegram |
-| `TELEGRAM_ALLOWED_IDS` | Chat ID duoc phep doc/dung bot |
-| `TELEGRAM_OWNER_IDS` | Chat ID duoc phep dung lenh ghi; de trong se fail-closed |
-| `TELEGRAM_ALERT_CHAT_IDS` | Chat nhan alert da cau hinh |
-| `ANTHROPIC_API_KEY` | API key cho Anthropic service phia Java |
-| `TRADING_TIMEZONE` | Mui gio job, mac dinh `Asia/Ho_Chi_Minh` |
-| `TRADING_LEARNING_SCHEDULER_ENABLED` | Bat cron job hoc/don lich su trong tien trinh. Compose chi bat o service `bot`. Khi dung GitHub Actions cron thi phai `false` o moi noi |
-| `TRADING_HISTORY_RETENTION_DAYS` | So ngay giu keo da dong, mac dinh `30` |
-| `TRADING_DAILY_MODEL_MAX_PAIRS` | Toi da cap symbol/interval duoc train moi ngay, mac dinh `3` |
-| `TRADING_DAILY_MODEL_TRAINING_ENABLED` | Bat/tat train lai market model sau daily review |
+| Chạm TP1 / TP2 | Báo cập nhật theo template bên dưới, kèo **vẫn mở** |
+| Chạm TP cuối | Chốt kèo, mã được call lại từ nến sau |
+| Chạm SL | Chốt kèo |
+| Quá `alerts.maxHoldBars` (96 nến) | Hết hạn — không có mốc này thì kèo lửng lơ chặn mã đó mãi mãi |
 
-Đăng nhập nội bộ dùng Spring Security với BCrypt, CSRF và đổi session ID sau khi xác thực. Tài khoản nằm trong bảng `local_credential` của TiDB và được tạo bằng lệnh `local-user`; chỉ lưu BCrypt hash cost 12, không lưu mật khẩu thô. Cách cũ khai bằng bốn biến `LOCAL_AUTH_*` vẫn chạy được: khi trùng username, bản trong database được ưu tiên. Vì BCrypt có ký tự `$`, nếu dùng `.env` hãy đặt mỗi hash giữa nháy đơn. Admin có quyền gọi API ghi/xóa; viewer chỉ được dùng các route GET. Google/GitHub (nếu được cấu hình) mặc định nhận `ROLE_VIEWER`, tức chỉ xem. Khi deploy Internet, bắt buộc dùng HTTPS và đặt `SESSION_COOKIE_SECURE=true`; Docker Compose mặc định giá trị này là `true` nếu biến chưa được khai báo.
-Khi chạy Docker ở localhost bằng HTTP, đặt riêng `SESSION_COOKIE_SECURE=false` trong `.env`.
+Quy ước bảo thủ giống backtest: một nến chạm **cả** SL và TP thì tính là SL, vì không biết
+cái nào xảy ra trước trong nến.
 
-## API
+---
 
-| Method | Path | Chuc nang |
-|---|---|---|
-| `GET` | `/api/intervals` | Khung thoi gian Binance |
-| `GET` / `POST` | `/api/analyze` | Phan tich thi truong |
-| `POST` | `/api/train` | Train va luu model TiDB Cloud |
-| `POST` | `/api/backtest` | Backtest trong Java runtime |
-| `POST` | `/api/ai/report`, `/api/ai/ask` | Claude qua Java service |
-| `GET` / `POST` / `DELETE` | `/api/watchlist` | Watchlist |
-| `GET` | `/api/content/strategy`, `/api/content/models` | Cau hinh va model |
+## Ba kĩ năng
 
-## Kien truc
+Mọi phân tích đều phải đi qua chúng, không ước lượng bằng mắt, không bịa số.
 
-```text
-server-java/src/main/java/vn/dongtien/
-  trading/analysis/    scoring, setup, context, lifecycle, review, research
-  trading/market/      Binance Spot/Futures
-  trading/ml/          dataset, GBDT, training
-  trading/backtest/    simulator
-  trading/chart/       PNG renderer Java2D
-  trading/telegram/    Telegram transport, captions, monitor
-  trading/runtime/     CLI command dispatcher
-  auth/                persistence, OAuth, dashboard APIs
-web/, login/, public/  browser UI only
-db/migrations/         Flyway migrations cho TiDB/MySQL
+| # | Kĩ năng | Việc | Tài liệu |
+|---|---|---|---|
+| 1 | Chỉ báo | 7 nhóm ở trên → điểm và setup | [`chi-bao`](.claude/skills/chi-bao/SKILL.md) |
+| 2 | Tin tức & tokenomics | Tokenomics, rủi ro delist, tin tức → **xác nhận hoặc phủ quyết** setup | [`tin-tuc-tokenomics`](.claude/skills/tin-tuc-tokenomics/SKILL.md) |
+| 3 | Trading in the Zone | Kỷ luật thực thi: xác suất, SL/R:R, tránh FOMO/revenge trade và tự kiểm chứng sau chuỗi SL | [`trading-in-the-zone`](.claude/skills/trading-in-the-zone/SKILL.md) |
+
+**Kĩ năng 2 không cộng điểm.** Dòng tiền tính bằng giây đến giờ, tokenomics tính bằng ngày
+đến tuần; trộn vào cùng thang `-100..100` sẽ làm méo điểm và mất khả năng backtest
+(tokenomics không có lịch sử theo nến). Nó chỉ chặn: cặp không TRADING → chặn cả hai chiều;
+có thông báo delist nhắc token → chặn long.
+
+**Kĩ năng 3 không tạo tín hiệu hay sửa điểm.** Nó buộc call phải được diễn giải như một giả thuyết có
+invalidation và không được đuổi giá, gồng lỗ hay thay đổi chiến lược vì vài kết quả ngắn hạn. Sau 3 SL
+liên tiếp, bot chỉ đổi tham số khi cơ chế kiểm chứng theo thời gian có đủ mẫu và giảm rủi ro.
+
+Nguồn dữ liệu của Kĩ năng 2, kèm mức độ tin được:
+
+| Dữ liệu | Nguồn | Chính thức? | Cần key |
+|---|---|---|---|
+| Tokenomics | CoinGecko `/coins/{id}` | có | không |
+| Trạng thái cặp | Binance `exchangeInfo` | **có — tin nhất** | không |
+| Thông báo delist | Binance CMS `catalogId=161` | **KHÔNG chính thức** | không |
+| Tin tức | RSS CoinDesk + Cointelegraph, lọc theo token | có | không |
+
+Endpoint delist không có trong tài liệu API của Binance, có thể bị đổi hoặc chặn bất cứ
+lúc nào, và giới hạn `pageSize ≤ 20` (lớn hơn trả HTTP 400). Vì vậy luôn kèm trạng thái cặp
+làm chỗ dựa chính thức.
+
+Tin tức là RSS **tin chung** được lọc theo tên/ticker: token lớn thường có tin, token nhỏ
+hầu như không. "Không có tin" nghĩa là "không tìm thấy trong các nguồn này", không phải
+"không có gì xảy ra".
+
+---
+
+## Cấu trúc tin nhắn
+
+Mẫu tin call kèo nằm ở mục "Cấu trúc khi call lệnh" trong [`CLAUDE.md`](CLAUDE.md).
+Mẫu tin cập nhật khi chạm TP nằm ở cuối file này.
+
+---
+
+## Tinh chỉnh
+
+Mọi tham số ở `config/strategy.json`, không hardcode trong code. `setStrategyValue()` cố ý
+**chỉ cho ghi vào khoá đã tồn tại** để gõ sai không tạo khoá rác.
+
+| Nhóm | Việc |
+|---|---|
+| `weights.*` | Coi trọng nhóm nào. Đặt `0` để tắt hẳn. |
+| `thresholds.*` | Ngưỡng tín hiệu, cổng đồng thuận, mức đám đông lệch, ngưỡng volume đột biến |
+| `indicators.*` | Chu kỳ `volumeAvg` và `cvdSlope` (đều 20) |
+| `risk.*` | `slPercent` 4% (thay cho bội số ATR trước đây), mốc TP theo R, `displayLeverage` chỉ để quy đổi hiển thị |
+| `alerts.*` | Chu kỳ quét, ngưỡng báo, phạm vi sàng lọc, hạn giữ kèo |
+| `historicalPattern.*` | Số nến so mẫu, tối đa 6 tháng lịch sử, cổng correlation/biên độ/sai số OHLC tương đối và mức đồng thuận của diễn biến sau mẫu |
+| `entryQuality.*` | Cổng bỏ qua lệnh khi CVD không đủ mạnh/cùng chiều hoặc volume dưới mức xác nhận; không tạo thêm nội dung Telegram |
+| `autoRetune.*` | Sau chuỗi SL, kiểm chứng nhanh và ghi chẩn đoán; chưa tự áp dụng vì chưa đủ nến để biết bị quét hay sai hướng |
+| `dailyReview.*` | So sánh 7 ngày, chỉ tự sửa khi lỗi lặp lại ít nhất 2 ngày đủ mẫu và candidate vượt train/holdout cùng bộ canh gác |
+| `ml.*` | Horizon, cách gán nhãn (`triple-barrier` theo % giá), siêu tham số. Sửa xong **phải train lại**. |
+| `llm.*` | Chỉ ảnh hưởng bot AI |
+
+Bản web giữ bản ghi đè riêng trong localStorage; nút "Về mặc định" xoá mọi thay đổi.
+
+---
+
+### Tự kiểm chứng sau chuỗi SL
+
+Bot chart lưu bằng chứng kỹ thuật đúng tại lúc call kèo. Khi **3 kèo liên tiếp** chạm SL,
+bot sẽ tự làm các việc sau:
+
+1. Ghi nhóm tín hiệu nào đã ủng hộ hướng vào lệnh trong cả chuỗi; đây chỉ là dấu hiệu liên
+   quan, không kết luận một nhóm là nguyên nhân.
+2. Với tối đa 3 cặp vừa SL, chạy lại cấu hình hiện tại và các phương án chỉnh rủi ro trên 75% dữ
+   liệu cũ, rồi xác nhận trên 25% dữ liệu mới hơn.
+3. Ghi kết quả kiểm chứng vào nhật ký nhưng chưa áp dụng, vì tại thời điểm vừa chạm SL chưa
+   có đủ nến sau để phân biệt bị quét với sai hướng.
+
+Bot thử nới khoảng SL, bỏ bám SL vào S/R hoặc kéo TP1 gần lại.
+Các nhóm không có dữ liệu lịch sử theo nến như order book, phái sinh và định vị chỉ được nêu
+trong chẩn đoán live, không bị tự sửa trọng số bằng backtest. Cấu hình cũ được sao lưu ở
+`data/strategy-backups/`; nhật ký nằm ở `data/auto-retune.json`; cả hai chỉ ở máy chạy bot và
+không được commit. `autoRetune.cooldownHours` mặc định 168 giờ để bot không liên tục chỉnh theo
+một giai đoạn nhiễu.
+
+Vòng rà soát ngày phát lại tối đa 12 kèo thua trên nến thật. Nếu chủ yếu **bị quét**, nó
+backtest candidate SL/TP. Nếu chủ yếu **sai hướng**, nó không nới SL mà thử các điều kiện
+entry được bằng chứng hỗ trợ: cấu trúc cùng hướng, không đuổi nhịp quá xa, tránh mua gần
+đỉnh/bán gần đáy vùng 50 nến, hoặc tăng CVD/volume khi các lệnh sai tập trung sát ngưỡng.
+Chỉ candidate giảm SL trên cả train/holdout và giữ guard 4h dương mới được lưu vào state.
+
+---
+
+## Chi phí
+
+Toàn bộ phần đang chạy **miễn phí, không cần API key nào**: Binance REST + WebSocket,
+CoinGecko, Binance CMS, RSS, Telegram Bot API. Các thư viện (`express`, `grammy`,
+`@napi-rs/canvas`) đều mã nguồn mở.
+
+**Có một đường tính phí trong code:** `src/llm/claude.js` (dùng `@anthropic-ai/sdk`) và
+`web/claude.js`, tính tiền theo token. Chỉ hai chỗ import nó: `npm run bot:ai` và
+`npm run analyze`. Không có `ANTHROPIC_API_KEY` thì phần AI tự bị bỏ qua.
+
+Nhưng `config/strategy.json` đang đặt `llm.enabled: true`, `model: claude-opus-5`,
+`effort: high`, `maxTokens: 6000` — nghĩa là **ngay khi thêm key vào là nó gọi model đắt
+nhất với effort cao nhất**. Muốn chắc chắn không phát sinh phí thì đặt `llm.enabled: false`.
+
+Rủi ro tương lai: CoinGecko hiện gọi được không cần key nhưng đây là free tier của bên thứ
+ba, họ đang đẩy mạnh tier có key. Nếu bị chặn thì Kĩ năng 2 mất phần tokenomics — code đã
+viết null-safe nên xuống cấp êm, không sập.
+
+---
+
+## Kết quả kiểm chứng
+
+Backtest BTCUSDT 4h, 3000 nến (2025-03-20 → 2026-08-02), phí 0,06%/chiều, chốt 50% ở TP1 rồi
+kéo SL về entry. ML bị loại tự động do AUC chưa đạt ngưỡng; kết quả dưới đây chỉ dùng các quy tắc.
+
+| Cổng đồng thuận | Lệnh | Long/Short | Win rate | Profit factor | Lợi nhuận |
+|---|---|---|---|---|---|
+| **60% + cổng CVD/volume** (đang dùng) | 82 | 16/66 | 62,2% | 1,30 | **+23,49%** |
+
+Mua & giữ cùng kỳ: **−33,05%**.
+
+**Đọc thẳng:** khi tách 75% dữ liệu BTC để chọn cổng và giữ lại 25% cuối để xác nhận, cổng CVD cùng
+chiều ≥3% + volume ≥1x trung bình đã đi từ 44 lệnh, win rate 45,5%, profit factor 0,64 thành 18 lệnh,
+61,1%, profit factor 1,05. Đây là bằng chứng vừa phải, không phải bảo đảm lợi nhuận: cần tiếp tục theo
+dõi ngoài mẫu; không tăng trọng số `weights.historicalPattern` từ kết quả này.
+
+Trên 25% cuối của ETH và SOL cùng khung, **đúng cổng cố định này** lần lượt có 24 lệnh / win rate
+62,5% / profit factor 1,91 và 13 lệnh / 69,2% / 2,14 (so với baseline 1,23 và 1,05). Mẫu SOL còn
+nhỏ, nên đây chỉ là kiểm tra chéo tích cực chứ không phải cơ sở để tối ưu tiếp ngưỡng.
+
+**Lưu ý về cổng đồng thuận:** backtest có volume, CVD, cấu trúc và mẫu hình lịch sử khi tìm được đủ
+mẫu. `orderBook`,
+   `derivatives`, `positioning` không có dữ liệu theo từng nến nên bị loại. Chạy thật còn có
+   ba nhóm này, còn mẫu hình lịch sử có thể bị loại khi các lần giống nhau cho kết quả lẫn lộn;
+   vì vậy cùng một % đồng thuận không hoàn toàn tương đương. **Luật này không kiểm chứng đầy đủ
+   được bằng backtest.**
+
+Ngưỡng `buy`/`sell` ±30 cũng là mức kế thừa từ bộ chỉ báo cũ, **chưa tinh chỉnh lại** cho
+bộ dòng tiền.
+
+Kết luận: dùng tool để đọc thị trường có hệ thống, không phải để bấm theo tín hiệu.
+
+## Những cơ chế chống tự lừa mình
+
+- **Không shuffle** dữ liệu chuỗi thời gian; chia train/test theo thời gian.
+- **Walk-forward 4 fold** ngoài holdout. Holdout đẹp mà walk-forward kém thì tool báo thẳng
+  là ăn may và không dùng ML.
+- **Guard rail `ml.minTestAuc`.** Model dưới ngưỡng thì trọng số ML về 0 — đúng tình trạng
+  hiện tại.
+- **Không look-ahead.** Feature tại nến `i` chỉ dùng dữ liệu đến `i`. Nến đang chạy bị loại
+  khỏi mọi tính toán (`closedCandles`).
+- **Nhóm thiếu dữ liệu bị LOẠI khỏi chuẩn hoá trọng số**, không tính là 0 điểm. Tính là 0
+  làm điểm bị pha loãng — lỗi này từng khiến backtest chỉ ra 9 lệnh toàn short thay vì 60
+  lệnh có cả long.
+- **Backtest bảo thủ.** Cùng một nến chạm cả SL và TP thì tính là SL.
+- **Feature đều là tỉ lệ**, không dùng giá tuyệt đối.
+- **Cảnh báo xung đột** tự động: phân kỳ giá vs CVD, khối lượng thấp, khung lớn ngược hướng.
+- **Không im lặng bỏ qua.** Backtest báo số tín hiệu bị cổng đồng thuận loại; thông báo
+  delist không đọc được thì báo là *chưa kiểm tra được*, khác với *đã kiểm tra và không thấy*.
+
+---
+
+## Cấu trúc code
+
+Điểm quan trọng: **module lõi không phụ thuộc Node**, nên browser và Node dùng đúng một bộ
+code. Khi sửa các module dùng chung, hãy kiểm tra chúng không import `node:*` hoặc package npm.
+
+```
+index.html               Dashboard tĩnh (chạy cục bộ khi cần)
+web/                     Lớp riêng của browser: app.js, style.css, store.js,
+                         model-store.js, claude.js, worker.js
+public/index.html        Giao diện realtime (WebSocket Binance)
+src/                     LÕI — dùng chung browser & Node
+  data/binance.js        Nến, ticker, funding, OI, sổ lệnh + tường, định vị đám đông,
+                         resolveSymbol (đối chiếu danh sách cặp thật)
+  indicators/index.js    sma, cvd, cvdSlope, pivots, supportResistance
+  features.js            16 feature cho ML
+  ml/gbdt.js             Gradient boosting + AUC/logloss + hiệu chuẩn xác suất
+  ml/dataset.js          Gán nhãn (triple-barrier / fixed theo % giá) + chia theo thời gian
+  analysis/engine.js     7 nhóm chấm điểm, đồng thuận, kết hợp ML, sinh mức giá
+  backtest.js            Backtest có SL/TP, chốt lời từng phần
+  ---- chỉ chạy ở Node ----
+  analysis/context.js    Kĩ năng 2: gộp tokenomics + delist + tin tức, luật cứng
+  analysis/auto-retune.js Tự kiểm chứng và tinh chỉnh an toàn sau chuỗi SL
+  analysis/setup.js      Gộp kỹ thuật + bối cảnh → setup, lý do, phép chiếu hai chiều
+  chart/render.js        Bộ vẽ dùng chung (canvas browser + @napi-rs/canvas)
+  chart/png.js           Xuất PNG cho bot
+  telegram/bot.js        Bot chart
+  telegram/monitor.js    Vòng quét liên tục
+  telegram/caption.js    Soạn tin theo template
+  data/fundamentals.js   CoinGecko
+  data/announcements.js  Thông báo delist Binance
+  data/news.js           RSS
+  data/open-calls.js     Trạng thái kèo đang mở
+  bot.js, server.js, cli.js, config.js, format.js, llm/claude.js, ml/model-store.js
+bin/                     CLI: train, backtest, build-model-index
+config/strategy.json     Toàn bộ tham số
+config/prompt.md         System prompt của Claude (chỉ bot AI dùng)
+models/                  Model đóng gói sẵn + index.json
+.claude/skills/          Ba kĩ năng
 ```
 
-### Han muc Binance
+`src/analysis/engine.js` là trung tâm: `analyze()` trả về payload mà **mọi** giao diện đều
+dùng. `src/chart/render.js` chỉ nhận một context 2D nên dùng được cả cho canvas trình duyệt
+và `@napi-rs/canvas` — cùng một bộ vẽ, không có bản sao lệch nhau.
 
-Binance tinh weight theo **IP**, cua so mot phut, va tra ve so weight da dung trong header
-`X-MBX-USED-WEIGHT-1M`. `BinanceRateLimiter` doc chinh header do thay vi tu doan bang weight,
-giu rieng ngan sach cho spot (6000/phut) va futures (2400/phut).
+### Ràng buộc: lõi phải chạy được trong browser
 
-- Cham 80% han muc: request bi giu lai toi dau phut sau, tuc lam cham lai thay vi bi cam.
-- Gap `429`: doc `Retry-After`. Gap `418`/`-1003`: doc moc `banned until` ngay trong body.
-- Trong luc bi cam, client **khong goi Binance nua** ma bao loi ngay. Goi tiep khi dang bi
-  cam se keo dai lenh cam.
-- `api`, `api1`, `api2`, `data-api` dung CHUNG mot ngan sach IP. Vi vay khi gap 429/418,
-  `getJson` **khong** chuyen sang host khac — lam vay chi tieu them phan han muc da het.
+Bản web là trang tĩnh **không có bước build** — browser `import` trực tiếp file trong `src/`
+qua HTTP. Vì vậy 10 file này không được `import` từ `node:*` hay package npm:
 
-Han muc nay theo tung tien trinh. Web tren Render va runner GitHub Actions dung IP datacenter
-dung chung, nen van co the bi cam vi luu luong cua nguoi khac tren cung IP.
-
-## Kiem thu
-
-```powershell
-mvn -f server-java/pom.xml test
 ```
+src/indicators/index.js   src/features.js         src/ml/gbdt.js   src/ml/dataset.js
+src/data/binance.js       src/analysis/engine.js  src/analysis/historical-pattern.js
+src/analysis/entry-quality.js  src/ml/train.js     src/backtest.js
+```
+
+Đây là lý do `web/claude.js` gọi Claude bằng `fetch` thay vì SDK.
+
+---
+
+## Giới hạn cần biết
+
+- Dữ liệu từ **Binance spot**. `resolveSymbol` đối chiếu danh sách cặp thật nên `wbtc` →
+  `WBTCUSDT` còn `ethbtc` → `ETHBTC`; mã không tồn tại thì báo lỗi rõ ràng.
+- Nếu một mã whitelist không có Spot nhưng có perpetual futures (hiện là `HYPEUSDT`), nến, giá 24h
+  và sổ lệnh tự chuyển sang **Binance Futures**; giao diện ghi rõ nguồn và không trộn hai thị trường
+  trong một cửa sổ mẫu lịch sử.
+- Funding rate, OI và định vị đám đông **chỉ có với token có hợp đồng futures**. Cổ phiếu
+  token hoá (bStocks) không có → chỉ còn 4 nhóm, nên cổng đồng thuận tính trên mẫu nhỏ hơn
+  và dễ đạt hơn một cách giả tạo.
+- Cần **≥ 30 nến đã đóng** để chấm điểm, **≥ 60** cho ML feature, **≥ 600** để train.
+- Sổ lệnh là **ảnh chụp**, bị spoofing được, không có lịch sử nên không backtest được.
+- CVD ở đây là **xấp xỉ theo nến** (từ `takerBuyVolume`), không phải tick-by-tick.
+- `openInterestChangePct` luôn tính trên `period=4h&limit=14` (~2,3 ngày) bất kể khung đang
+  phân tích.
+- Phân tích kỹ thuật không dự đoán được tin tức, hack, hay quyết định của Fed.
+
+**Đây là công cụ phân tích kỹ thuật tự động, không phải lời khuyên đầu tư.**

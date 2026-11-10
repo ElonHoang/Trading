@@ -1,10 +1,13 @@
 // Kho model phía browser.
 //
 // Hai nguồn:
-//  1. Model dùng chung trong TiDB Cloud — dùng ngay khi mở trang, không cần train.
-//  2. Model người dùng tự train — lưu localStorage, ưu tiên hơn bản database.
+//  1. Model đóng gói sẵn trong repo (models/*.json, liệt kê trong models/index.json)
+//     — dùng ngay khi mở trang, không cần train.
+//  2. Model người dùng tự train — lưu localStorage, ưu tiên hơn bản đóng gói.
 
 const LS_PREFIX = 'ta.model.';
+const url = (rel) => new URL(rel, import.meta.url).href;
+
 const key = (symbol, interval) => `${String(symbol).toUpperCase()}_${interval}`;
 
 let manifest = null;
@@ -12,7 +15,7 @@ let manifest = null;
 async function getManifest() {
   if (manifest) return manifest;
   try {
-    const res = await fetch('/api/content/models', { cache: 'no-store' });
+    const res = await fetch(url('../models/index.json'), { cache: 'no-cache' });
     manifest = res.ok ? await res.json() : [];
   } catch {
     manifest = [];
@@ -42,11 +45,7 @@ export async function loadModel(symbol, interval) {
   const list = await getManifest();
   if (!list.some((m) => key(m.symbol, m.interval) === k)) return null;
   try {
-    const [symbolPart, ...intervalParts] = k.split('_');
-    const intervalPart = intervalParts.join('_');
-    const res = await fetch(`/api/content/models/${encodeURIComponent(symbolPart)}/${encodeURIComponent(intervalPart)}`, {
-      cache: 'no-store',
-    });
+    const res = await fetch(url(`../models/${k}.json`), { cache: 'no-cache' });
     return res.ok ? await res.json() : null;
   } catch {
     return null;
@@ -97,7 +96,7 @@ export function deleteModel(symbol, interval) {
 export async function listModels() {
   const out = new Map();
   for (const m of await getManifest()) {
-    out.set(key(m.symbol, m.interval), { ...m, source: 'database' });
+    out.set(key(m.symbol, m.interval), { ...m, source: 'repo' });
   }
   for (const k of localKeys()) {
     try {
